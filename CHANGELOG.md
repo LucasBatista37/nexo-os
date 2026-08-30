@@ -78,6 +78,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Adicionado (Fase 3, bloco 11 — nexo.console e nexo.input tipados)
 - `nexo.console` v1.0 (`idl/console.idl`: `read`/`write`) e `nexo.input` v1.0 (`idl/input.idl`: `poll`) migrados para a IDL; `consoledev`, `shell`, `inputdev` e o cliente de teste falam NXIP. Dos protocolos crus restam `nexo.fs`, `nexo.esp` e os do bring-up (`svcmgr`/`echo`).
 
+### Adicionado (Fase 3, bloco 12 — nexo.fs e nexo.esp tipados: pilha IPC 100% NXIP)
+- `nexo.fs` v1.0 (`idl/fs.idl`, 10 métodos) e `nexo.esp` v1.0 (`idl/esp.idl`, 3 métodos) migrados: `fs`, `espfs` e o `vfs` (nas duas faces — cliente e servidores de backend) falam NXIP; `utest` e `shell` idem. Todos os protocolos de serviço agora saem da IDL; crus restam só os canais do bring-up (`svcmgr`/`echo`) e as mensagens de entrega do `devmgr`.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

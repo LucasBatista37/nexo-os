@@ -1,13 +1,12 @@
 //! `espfs` — leitor somente leitura da partição de sistema EFI (GPT → FAT12/16/32) sobre o
 //! canal de um `blockdev`. Handle 0 = canal do bloco, handle 1 = cliente.
-//! Protocolo cru `nexo.esp` v0 (`docs/spec/ipc-compat.md` §5): pedido
-//! `[op u8][pad 3][offset u64][len u32][caminho]`; ops 0 list, 1 stat, 2 read;
-//! resposta `[status u8][pad 3][valor u64][dados]`.
+//! Protocolo **tipado** `nexo.esp` v1.0 (gerado de `idl/esp.idl`): `list`, `stat`, `read`.
 #![no_std]
 #![no_main]
 
 use nexo_fat::{Fat, FatError, IoError, SECTOR, SectorDevice};
 use nexo_proto::block::{self, CapacityRequest, ReadRequest};
+use nexo_proto::esp as pesp;
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
@@ -96,15 +95,6 @@ fn fail(code: i64, what: &str) -> ! {
     nexo_sys::exit(code)
 }
 
-fn reply(status: u8, value: u64, data: &[u8], out: &mut [u8; 4096]) -> usize {
-    out[0] = status;
-    out[1..4].fill(0);
-    out[4..12].copy_from_slice(&value.to_le_bytes());
-    let n = data.len().min(4096 - 12);
-    out[12..12 + n].copy_from_slice(&data[..n]);
-    12 + n
-}
-
 fn code(e: FatError) -> u8 {
     match e {
         FatError::Io => 1,
@@ -148,7 +138,6 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     );
     let mut req = [0u8; 4096];
     let mut out = [0u8; 4096];
-    let mut data = [0u8; 4096];
     let mut hs = [0u32; 1];
     loop {
         let (n, _) = match nexo_sys::channel_recv(CLIENT, &mut req, &mut hs) {
@@ -156,57 +145,79 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             Err(Status::PeerClosed) => nexo_sys::exit(0),
             Err(_) => fail(43, "recv"),
         };
-        if n < 16 {
-            let len = reply(0xff, 0, &[], &mut out);
-            let _ = nexo_sys::channel_send(CLIENT, &out[..len], &[]);
-            continue;
-        }
-        let op = req[0];
-        let offset = u64::from_le_bytes(req[4..12].try_into().unwrap());
-        let len = u32::from_le_bytes(req[12..16].try_into().unwrap()) as usize;
-        let path = &req[16..n];
-        let result: Result<(u64, usize), FatError> = match op {
-            0 => fs.lookup(path).and_then(|dir| {
-                if !dir.is_dir() {
-                    return Err(FatError::NotDir);
-                }
-                let mut pos = 0usize;
-                let mut count = 0u64;
-                fs.for_each_entry(dir.cluster, |e| {
-                    let name = e.name();
-                    if pos + 6 + name.len() <= data.len() - 12 {
-                        data[pos] = e.attr;
-                        data[pos + 1..pos + 5].copy_from_slice(&e.size.to_le_bytes());
-                        data[pos + 5] = name.len() as u8;
-                        data[pos + 6..pos + 6 + name.len()].copy_from_slice(name);
-                        pos += 6 + name.len();
-                        count += 1;
-                        true
-                    } else {
-                        false
-                    }
-                })?;
-                Ok((count, pos))
-            }),
-            1 => fs.lookup(path).map(|e| {
-                data[0] = e.attr;
-                data[1..5].copy_from_slice(&e.size.to_le_bytes());
-                (e.size as u64, 5)
-            }),
-            2 => {
-                let want = len.min(4096 - 12);
-                fs.lookup(path).and_then(|e| {
-                    fs.read(&e, offset, &mut data[..want])
-                        .map(|r| (r as u64, r))
-                })
+        let request = match pesp::decode_request(&req[..n]) {
+            Ok(r) => r,
+            Err(_) => {
+                let m = pesp::encode_error(0, 255, &mut out).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                continue;
             }
-            _ => Err(FatError::Io),
         };
-        let n = match result {
-            Ok((value, dlen)) => reply(0, value, &data[..dlen], &mut out),
-            Err(e) => reply(code(e), 0, &[], &mut out),
+        fn err(method: u32, e: FatError, out: &mut [u8; 4096]) -> usize {
+            pesp::encode_error(method, code(e) as u32, out).unwrap_or(0)
+        }
+        let m = match request {
+            pesp::Request::List(rq) => {
+                let r = fs.lookup(rq.path()).and_then(|dir| {
+                    if !dir.is_dir() {
+                        return Err(FatError::NotDir);
+                    }
+                    let mut resp = pesp::ListResponse {
+                        count: 0,
+                        entries: [0; 3900],
+                        entries_len: 0,
+                    };
+                    let mut pos = 0usize;
+                    fs.for_each_entry(dir.cluster, |e| {
+                        let name = e.name();
+                        if pos + 6 + name.len() <= resp.entries.len() {
+                            resp.entries[pos] = e.attr;
+                            resp.entries[pos + 1..pos + 5].copy_from_slice(&e.size.to_le_bytes());
+                            resp.entries[pos + 5] = name.len() as u8;
+                            resp.entries[pos + 6..pos + 6 + name.len()].copy_from_slice(name);
+                            pos += 6 + name.len();
+                            resp.count += 1;
+                            true
+                        } else {
+                            false
+                        }
+                    })?;
+                    resp.entries_len = pos as u32;
+                    Ok(resp)
+                });
+                match r {
+                    Ok(resp) => resp.encode_msg(&mut out).unwrap_or(0),
+                    Err(e) => err(pesp::ListRequest::METHOD_ID, e, &mut out),
+                }
+            }
+            pesp::Request::Stat(rq) => match fs.lookup(rq.path()) {
+                Ok(e) => pesp::StatResponse {
+                    attr: e.attr,
+                    size: e.size,
+                }
+                .encode_msg(&mut out)
+                .unwrap_or(0),
+                Err(e) => err(pesp::StatRequest::METHOD_ID, e, &mut out),
+            },
+            pesp::Request::Read(rq) => {
+                let want = (rq.len as usize).min(3500);
+                let mut resp = pesp::ReadResponse {
+                    data: [0; 3500],
+                    data_len: 0,
+                };
+                let r = fs
+                    .lookup(rq.path())
+                    .and_then(|e| fs.read(&e, rq.offset, &mut resp.data[..want]));
+                match r {
+                    Ok(got) => {
+                        resp.data_len = got as u32;
+                        resp.encode_msg(&mut out).unwrap_or(0)
+                    }
+                    Err(e) => err(pesp::ReadRequest::METHOD_ID, e, &mut out),
+                }
+            }
         };
-        if nexo_sys::channel_send(CLIENT, &out[..n], &[]) != Status::Ok {
+        if nexo_sys::channel_send(CLIENT, &out[..m], &[]) != Status::Ok {
             fail(44, "send");
         }
     }

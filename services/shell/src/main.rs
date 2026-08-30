@@ -56,7 +56,9 @@ fn con_poll(out: &mut [u8; 4096]) -> usize {
     }
 }
 
-/// Pedido `nexo.fs` ao vfs; devolve (status, valor, tamanho de dados em `reply[12..]`).
+/// Pedido `nexo.fs` (tipado) ao vfs; devolve (status, valor, dados em `reply[12..]`)
+/// no formato legado (0 stat, 1 create, 2 mkdir, 3 unlink, 4 read, 5 write, 6 list,
+/// 7 sync, 8 info, 9 truncate).
 fn vfs_call(
     op: u8,
     ino: u32,
@@ -65,24 +67,129 @@ fn vfs_call(
     payload: &[u8],
     reply: &mut [u8; 4096],
 ) -> (u8, u64, usize) {
-    let mut req = [0u8; 4096];
-    req[0] = op;
-    req[4..8].copy_from_slice(&ino.to_le_bytes());
-    req[8..16].copy_from_slice(&offset.to_le_bytes());
-    req[16..20].copy_from_slice(&len.to_le_bytes());
-    let n = 20 + payload.len().min(4076);
-    req[20..n].copy_from_slice(&payload[..n - 20]);
-    if nexo_sys::channel_send(VFS, &req[..n], &[]) != Status::Ok {
+    use nexo_proto::ProtoError;
+    use nexo_proto::fs as pfs;
+    let mut pbuf = [0u8; 256];
+    let pn = payload.len().min(256);
+    pbuf[..pn].copy_from_slice(&payload[..pn]);
+    let mut msg = [0u8; 4096];
+    let m = match op {
+        0 => pfs::StatRequest {
+            path: pbuf,
+            path_len: pn as u32,
+        }
+        .encode_msg(&mut msg),
+        1 => pfs::CreateRequest {
+            path: pbuf,
+            path_len: pn as u32,
+        }
+        .encode_msg(&mut msg),
+        2 => pfs::MkdirRequest {
+            path: pbuf,
+            path_len: pn as u32,
+        }
+        .encode_msg(&mut msg),
+        3 => pfs::UnlinkRequest {
+            path: pbuf,
+            path_len: pn as u32,
+        }
+        .encode_msg(&mut msg),
+        4 => pfs::ReadRequest { ino, offset, len }.encode_msg(&mut msg),
+        5 => {
+            let mut rq = pfs::WriteRequest {
+                ino,
+                offset,
+                data: [0; 3900],
+                data_len: payload.len().min(3900) as u32,
+            };
+            rq.data[..payload.len().min(3900)].copy_from_slice(&payload[..payload.len().min(3900)]);
+            rq.encode_msg(&mut msg)
+        }
+        6 => pfs::ListRequest {
+            path: pbuf,
+            path_len: pn as u32,
+        }
+        .encode_msg(&mut msg),
+        7 => pfs::SyncRequest {}.encode_msg(&mut msg),
+        8 => pfs::InfoRequest {}.encode_msg(&mut msg),
+        _ => pfs::TruncateRequest { ino, size: offset }.encode_msg(&mut msg),
+    }
+    .unwrap_or(0);
+    if nexo_sys::channel_send(VFS, &msg[..m], &[]) != Status::Ok {
         nexo_sys::exit(72);
     }
     let mut hs = [0u32; 1];
-    match nexo_sys::channel_recv(VFS, reply, &mut hs) {
-        Ok((n, _)) if n >= 12 => (
-            reply[0],
-            u64::from_le_bytes(reply[4..12].try_into().unwrap()),
-            n - 12,
-        ),
+    let n = match nexo_sys::channel_recv(VFS, reply, &mut hs) {
+        Ok((n, _)) => n,
         _ => nexo_sys::exit(73),
+    };
+    fn remote(e: ProtoError) -> (u8, u64, usize) {
+        match e {
+            ProtoError::Remote(c) => (c as u8, 0, 0),
+            _ => (0xfd, 0, 0),
+        }
+    }
+    let copy: [u8; 4096] = *reply;
+    let msg = &copy[..n];
+    match op {
+        0 => match pfs::decode_stat_response(msg) {
+            Ok(r) => {
+                reply[12] = r.kind;
+                reply[13..21].copy_from_slice(&r.size.to_le_bytes());
+                (0, r.ino as u64, 9)
+            }
+            Err(e) => remote(e),
+        },
+        1 => match pfs::decode_create_response(msg) {
+            Ok(r) => (0, r.ino as u64, 0),
+            Err(e) => remote(e),
+        },
+        2 => match pfs::decode_mkdir_response(msg) {
+            Ok(r) => (0, r.ino as u64, 0),
+            Err(e) => remote(e),
+        },
+        3 => match pfs::decode_unlink_response(msg) {
+            Ok(_) => (0, 0, 0),
+            Err(e) => remote(e),
+        },
+        4 => match pfs::decode_read_response(msg) {
+            Ok(r) => {
+                let dl = r.data().len();
+                reply[12..12 + dl].copy_from_slice(r.data());
+                (0, dl as u64, dl)
+            }
+            Err(e) => remote(e),
+        },
+        5 => match pfs::decode_write_response(msg) {
+            Ok(r) => (0, r.written as u64, 0),
+            Err(e) => remote(e),
+        },
+        6 => match pfs::decode_list_response(msg) {
+            Ok(r) => {
+                let dl = r.entries().len();
+                reply[12..12 + dl].copy_from_slice(r.entries());
+                (0, r.count as u64, dl)
+            }
+            Err(e) => remote(e),
+        },
+        7 => match pfs::decode_sync_response(msg) {
+            Ok(_) => (0, 0, 0),
+            Err(e) => remote(e),
+        },
+        8 => match pfs::decode_info_response(msg) {
+            Ok(r) => {
+                reply[12..20].copy_from_slice(&r.total_blocks.to_le_bytes());
+                reply[20..28].copy_from_slice(&r.free_blocks.to_le_bytes());
+                reply[28..36].copy_from_slice(&r.repairs.to_le_bytes());
+                reply[36..44].copy_from_slice(&r.generation.to_le_bytes());
+                (0, 0, 32)
+            }
+            Err(e) => remote(e),
+        },
+        _ => match pfs::decode_truncate_response(msg) {
+            Ok(_) => (0, 0, 0),
+            Err(e) => remote(e),
+        },
     }
 }
 

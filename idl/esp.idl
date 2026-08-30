@@ -1,0 +1,37 @@
+# nexo.esp — particao EFI somente leitura (services/espfs)
+# Erros remotos: 1 E/S, 2 corrompido, 3 nao encontrado, 5 nao e diretorio, 6 e diretorio, 12 sem ESP.
+protocol esp 1.0
+
+# Lista um diretorio; entradas concatenadas [attr u8][size u32][len u8][nome].
+method 1 list {
+    request {
+        path: bytes<256>,
+    }
+    response {
+        count: u32,
+        entries: bytes<3900>,
+    }
+}
+
+# Metadados de um caminho.
+method 2 stat {
+    request {
+        path: bytes<256>,
+    }
+    response {
+        attr: u8,
+        size: u32,
+    }
+}
+
+# Le `len` bytes do arquivo em `path` a partir de `offset`.
+method 3 read {
+    request {
+        path: bytes<256>,
+        offset: u64,
+        len: u32,
+    }
+    response {
+        data: bytes<3500>,
+    }
+}

@@ -1,5 +1,5 @@
-//! `fs` — servidor NexoFS v0. Handle 0 = canal para o `blockdev` (`nexo.block`),
-//! handle 1 = canal do cliente (`nexo.fs` v0, `docs/spec/ipc-compat.md` §5).
+//! `fs` — servidor NexoFS v0. Handle 0 = canal para o `blockdev` (`nexo.block` tipado),
+//! handle 1 = canal do cliente (protocolo **tipado** `nexo.fs` v1.0, gerado de `idl/fs.idl`).
 //! Argumento: 0 = montar (formata se não houver assinatura **ou se o volume estiver
 //! inutilizável** — comportamento de volume de teste, registrado no log), 1 = formatar sempre,
 //! 2 = montagem estrita (termina com 32 se o volume não montar).
@@ -7,6 +7,7 @@
 #![no_main]
 
 use nexo_proto::block::{self, CapacityRequest, ReadRequest, WriteRequest};
+use nexo_proto::fs as pfs;
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
@@ -132,19 +133,6 @@ fn fail(code: i64, what: &str) -> ! {
     nexo_sys::exit(code)
 }
 
-fn reply(status: u8, value: u64, data: &[u8], out: &mut [u8; 4096]) -> usize {
-    out[0] = status;
-    out[1..4].fill(0);
-    out[4..12].copy_from_slice(&value.to_le_bytes());
-    let n = data.len().min(4096 - 12);
-    out[12..12 + n].copy_from_slice(&data[..n]);
-    12 + n
-}
-
-fn err_code(e: FsError) -> u8 {
-    e.code()
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(arg: u64) -> ! {
     let disk = ChanDisk::open().unwrap_or_else(|e| fail(30, e));
@@ -182,7 +170,6 @@ pub extern "C" fn _start(arg: u64) -> ! {
     );
     let mut req = [0u8; 4096];
     let mut out = [0u8; 4096];
-    let mut data = [0u8; 4096];
     let mut hs = [0u32; 1];
     let mut served = 0u64;
     loop {
@@ -207,63 +194,110 @@ pub extern "C" fn _start(arg: u64) -> ! {
             Err(_) => fail(33, "recv"),
         };
         served += 1;
-        if n < 20 {
-            let len = reply(0xff, 0, &[], &mut out);
-            let _ = nexo_sys::channel_send(CLIENT, &out[..len], &[]);
-            continue;
+        let request = match pfs::decode_request(&req[..n]) {
+            Ok(r) => r,
+            Err(_) => {
+                let m = pfs::encode_error(0, 255, &mut out).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                continue;
+            }
+        };
+        fn err(method: u32, e: FsError, out: &mut [u8; 4096]) -> usize {
+            pfs::encode_error(method, e.code() as u32, out).unwrap_or(0)
         }
-        let op = req[0];
-        let ino = u32::from_le_bytes(req[4..8].try_into().unwrap());
-        let offset = u64::from_le_bytes(req[8..16].try_into().unwrap());
-        let len = u32::from_le_bytes(req[16..20].try_into().unwrap()) as usize;
-        let payload = &req[20..n];
-        let result: Result<(u64, usize), FsError> = match op {
-            0 => fs.stat(payload).map(|st| {
-                data[0] = st.kind as u8;
-                data[1..9].copy_from_slice(&st.size.to_le_bytes());
-                (st.ino as u64, 9)
-            }),
-            1 => fs.create(payload, Kind::File).map(|i| (i as u64, 0)),
-            2 => fs.create(payload, Kind::Dir).map(|i| (i as u64, 0)),
-            3 => fs.unlink(payload).map(|_| (0, 0)),
-            4 => {
-                let want = len.min(4096 - 12);
-                fs.read(ino, offset, &mut data[..want])
-                    .map(|r| (r as u64, r))
-            }
-            5 => fs.write(ino, offset, payload).map(|w| (w as u64, 0)),
-            6 => {
-                let mut pos = 0usize;
-                let mut count = 0u64;
-                fs.list(payload, |name, st| {
-                    if pos + 6 + name.len() <= data.len() - 12 {
-                        data[pos..pos + 4].copy_from_slice(&st.ino.to_le_bytes());
-                        data[pos + 4] = st.kind as u8;
-                        data[pos + 5] = name.len() as u8;
-                        data[pos + 6..pos + 6 + name.len()].copy_from_slice(name);
-                        pos += 6 + name.len();
-                        count += 1;
+        let m = match request {
+            pfs::Request::Stat(rq) => match fs.stat(rq.path()) {
+                Ok(st) => pfs::StatResponse {
+                    ino: st.ino,
+                    kind: st.kind as u8,
+                    size: st.size,
+                }
+                .encode_msg(&mut out)
+                .unwrap_or(0),
+                Err(e) => err(pfs::StatRequest::METHOD_ID, e, &mut out),
+            },
+            pfs::Request::Create(rq) => match fs.create(rq.path(), Kind::File) {
+                Ok(i) => pfs::CreateResponse { ino: i }
+                    .encode_msg(&mut out)
+                    .unwrap_or(0),
+                Err(e) => err(pfs::CreateRequest::METHOD_ID, e, &mut out),
+            },
+            pfs::Request::Mkdir(rq) => match fs.create(rq.path(), Kind::Dir) {
+                Ok(i) => pfs::MkdirResponse { ino: i }
+                    .encode_msg(&mut out)
+                    .unwrap_or(0),
+                Err(e) => err(pfs::MkdirRequest::METHOD_ID, e, &mut out),
+            },
+            pfs::Request::Unlink(rq) => match fs.unlink(rq.path()) {
+                Ok(()) => pfs::UnlinkResponse {}.encode_msg(&mut out).unwrap_or(0),
+                Err(e) => err(pfs::UnlinkRequest::METHOD_ID, e, &mut out),
+            },
+            pfs::Request::Read(rq) => {
+                let want = (rq.len as usize).min(4000);
+                let mut resp = pfs::ReadResponse {
+                    data: [0; 4000],
+                    data_len: 0,
+                };
+                match fs.read(rq.ino, rq.offset, &mut resp.data[..want]) {
+                    Ok(r) => {
+                        resp.data_len = r as u32;
+                        resp.encode_msg(&mut out).unwrap_or(0)
                     }
-                })
-                .map(|_| (count, pos))
+                    Err(e) => err(pfs::ReadRequest::METHOD_ID, e, &mut out),
+                }
             }
-            7 => fs.sync().map(|_| (0, 0)),
-            8 => {
+            pfs::Request::Write(rq) => match fs.write(rq.ino, rq.offset, rq.data()) {
+                Ok(w) => pfs::WriteResponse { written: w as u32 }
+                    .encode_msg(&mut out)
+                    .unwrap_or(0),
+                Err(e) => err(pfs::WriteRequest::METHOD_ID, e, &mut out),
+            },
+            pfs::Request::List(rq) => {
+                let mut resp = pfs::ListResponse {
+                    count: 0,
+                    entries: [0; 3900],
+                    entries_len: 0,
+                };
+                let mut pos = 0usize;
+                let r = fs.list(rq.path(), |name, st| {
+                    if pos + 6 + name.len() <= resp.entries.len() {
+                        resp.entries[pos..pos + 4].copy_from_slice(&st.ino.to_le_bytes());
+                        resp.entries[pos + 4] = st.kind as u8;
+                        resp.entries[pos + 5] = name.len() as u8;
+                        resp.entries[pos + 6..pos + 6 + name.len()].copy_from_slice(name);
+                        pos += 6 + name.len();
+                        resp.count += 1;
+                    }
+                });
+                match r {
+                    Ok(_) => {
+                        resp.entries_len = pos as u32;
+                        resp.encode_msg(&mut out).unwrap_or(0)
+                    }
+                    Err(e) => err(pfs::ListRequest::METHOD_ID, e, &mut out),
+                }
+            }
+            pfs::Request::Sync(_) => match fs.sync() {
+                Ok(()) => pfs::SyncResponse {}.encode_msg(&mut out).unwrap_or(0),
+                Err(e) => err(pfs::SyncRequest::METHOD_ID, e, &mut out),
+            },
+            pfs::Request::Info(_) => {
                 let i = fs.info();
-                data[0..8].copy_from_slice(&i.total_blocks.to_le_bytes());
-                data[8..16].copy_from_slice(&i.free_blocks.to_le_bytes());
-                data[16..24].copy_from_slice(&(i.repairs as u64).to_le_bytes());
-                data[24..32].copy_from_slice(&i.generation.to_le_bytes());
-                Ok((0, 32))
+                pfs::InfoResponse {
+                    total_blocks: i.total_blocks,
+                    free_blocks: i.free_blocks,
+                    repairs: i.repairs as u64,
+                    generation: i.generation,
+                }
+                .encode_msg(&mut out)
+                .unwrap_or(0)
             }
-            9 => fs.truncate(ino, offset).map(|_| (0, 0)),
-            _ => Err(FsError::InvalidArgs),
+            pfs::Request::Truncate(rq) => match fs.truncate(rq.ino, rq.size) {
+                Ok(()) => pfs::TruncateResponse {}.encode_msg(&mut out).unwrap_or(0),
+                Err(e) => err(pfs::TruncateRequest::METHOD_ID, e, &mut out),
+            },
         };
-        let n = match result {
-            Ok((value, dlen)) => reply(0, value, &data[..dlen], &mut out),
-            Err(e) => reply(err_code(e), 0, &[], &mut out),
-        };
-        if nexo_sys::channel_send(CLIENT, &out[..n], &[]) != Status::Ok {
+        if nexo_sys::channel_send(CLIENT, &out[..m], &[]) != Status::Ok {
             fail(34, "send");
         }
     }

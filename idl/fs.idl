@@ -1,0 +1,109 @@
+# nexo.fs — sistema de arquivos (services/fs e services/vfs)
+# Erros remotos: 1..=11 = nexofs::FsError::code(); 13 = montagem somente leitura (vfs /boot).
+protocol fs 1.0
+
+# Metadados de um caminho.
+method 1 stat {
+    request {
+        path: bytes<256>,
+    }
+    response {
+        ino: u32,
+        kind: u8,
+        size: u64,
+    }
+}
+
+# Cria um arquivo.
+method 2 create {
+    request {
+        path: bytes<256>,
+    }
+    response {
+        ino: u32,
+    }
+}
+
+# Cria um diretorio.
+method 3 mkdir {
+    request {
+        path: bytes<256>,
+    }
+    response {
+        ino: u32,
+    }
+}
+
+# Remove um arquivo ou diretorio vazio.
+method 4 unlink {
+    request {
+        path: bytes<256>,
+    }
+    response {
+    }
+}
+
+# Le `len` bytes de `ino` a partir de `offset`.
+method 5 read {
+    request {
+        ino: u32,
+        offset: u64,
+        len: u32,
+    }
+    response {
+        data: bytes<4000>,
+    }
+}
+
+# Escreve em `ino` a partir de `offset`.
+method 6 write {
+    request {
+        ino: u32,
+        offset: u64,
+        data: bytes<3900>,
+    }
+    response {
+        written: u32,
+    }
+}
+
+# Lista um diretorio; entradas concatenadas [ino u32][kind u8][len u8][nome].
+method 7 list {
+    request {
+        path: bytes<256>,
+    }
+    response {
+        count: u32,
+        entries: bytes<3900>,
+    }
+}
+
+# Forca a durabilidade.
+method 8 sync {
+    request {
+    }
+    response {
+    }
+}
+
+# Estatisticas do volume.
+method 9 info {
+    request {
+    }
+    response {
+        total_blocks: u64,
+        free_blocks: u64,
+        repairs: u64,
+        generation: u64,
+    }
+}
+
+# Trunca `ino` para `size` bytes (so encolhe).
+method 10 truncate {
+    request {
+        ino: u32,
+        size: u64,
+    }
+    response {
+    }
+}

@@ -152,6 +152,7 @@ dependencies = [
 name = "nexo-vfs"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
 ]
