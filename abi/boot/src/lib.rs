@@ -485,8 +485,49 @@ pub type KernelEntry = unsafe extern "sysv64" fn(*const BootInfo) -> !;
 
 #[cfg(test)]
 mod tests {
+    /// PRNG determinístico para os testes "fuzz-lite" (sem dependências).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n.max(1) as u64) as usize
+        }
+    }
+
+    #[test]
+    fn fuzz_lite_cmdline_and_validate() {
+        let mut rng = Rng(0x2468_1357_9bdf_0246);
+        for _ in 0..20_000 {
+            let n = rng.below(300);
+            let bytes: Vec<u8> = (0..n).map(|_| rng.next() as u8).collect();
+            let s = String::from_utf8_lossy(&bytes).into_owned();
+            let _ = cmdline_value(&s, "test");
+            let _ = cmdline_flag(&s, "exit");
+            let mut bi = BootInfo::empty();
+            bi.set_cmdline(&s);
+            assert!(core::str::from_utf8(&bi.cmdline[..bi.cmdline_len as usize]).is_ok());
+            bi.memory_map_len = rng.next() as u32;
+            bi.memory_map_capacity = rng.next() as u32;
+            bi.memory_map_addr = rng.next();
+            bi.phys_map_size = rng.next();
+            bi.version = if rng.below(4) == 0 {
+                rng.next() as u32
+            } else {
+                BOOT_ABI_VERSION
+            };
+            let _ = bi.validate();
+        }
+    }
+
     extern crate std;
     use super::*;
+    use std::string::String;
+    use std::vec::Vec;
 
     #[test]
     fn layout_is_stable() {

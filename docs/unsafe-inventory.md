@@ -1,4 +1,4 @@
-# Inventário de `unsafe` — `main` (Fase 1)
+# Inventário de `unsafe` — `main` (Fases 1–2)
 
 Regra (ADR-0001): todo bloco tem `// SAFETY:`; crates puros são `deny(unsafe_code)`. Este inventário lista as **classes** de uso por crate para revisão a cada release.
 
@@ -7,13 +7,15 @@ Contagem em 2026-08-30 (`grep -rhoE 'unsafe( \{| fn| impl| extern)' --include='*
 | Crate | ocorrências `unsafe` | comentários `SAFETY:` |
 |---|---|---|
 | `nexo-boot-abi` | 1 (tipo `unsafe extern "sysv64" fn`) | — |
-| `nexo-mm`, `nexo-symbols`, `nexo-font`, `nexo-acpi` | 0 | — |
+| `nexo-mm`, `nexo-symbols`, `nexo-font`, `nexo-acpi`, `nexo-elf`, `nexo-initrd`, `nexo-syscall-abi` | 0 | — |
 | `nexo-sync` | 9 | 8 |
 | `nexo-heap` | 30 | 27 |
-| `nexo-arch-x86_64` | 107 | 71 |
+| `nexo-arch-x86_64` | 112 | 73 |
 | `nexo-loader` | 15 | 14 |
-| `nexo-kernel` | 96 | 87 |
-| **total** | **258** | **207** |
+| `nexo-kernel` | 114 | 105 |
+| `nexo-sys + nexo-rt` | 23 | 19 |
+| `services/*` | 7 | 7 |
+| **total** | **311** | **253** |
 
 Atualize junto com o código.
 
@@ -28,6 +30,10 @@ Atualize junto com o código.
 | `nexo-arch-x86_64` | `asm!` (CRs, MSRs, GS, portas, hlt/cli/sti, lgdt/lidt/ltr, invlpg, rdtsc); `global_asm!` (stubs de trap, troca de contexto, trampolim de AP); MMIO volátil do LAPIC/I-O APIC; leituras/escritas voláteis em tabelas de página via `PhysToVirt`; `transmute` do handler registrado | tabelas válidas por construção do `Mapper`; MMIO mapeado sem cache pelo kernel; trampolim copiado para página reservada; handler armazenado a partir de `fn` tipada; layout do `TrapFrame` casado com o assembly |
 | `nexo-loader` | cópia para páginas alocadas, escrita de `BootInfo`/regiões, `write_volatile` no framebuffer, `open_protocol` GetProtocol, `exit_boot_services`, salto em `asm!` | páginas alocadas com tamanho verificado; identidade UEFI antes de `ExitBootServices`; nenhum serviço de boot após a saída |
 | `nexo-kernel` | `StaticCell` (IDT/regiões) e `PerCpu` vazado em init; slices sobre memória do `BootInfo`/ACPI pelo physmap; `GlobalAlloc`; `prepare_stack`/`switch_context` com lock do escalonador atravessando a troca (`forget` + `force_unlock`); ponteiros crus de `Arc<Thread>` em `gs`; `inner()` de thread só sob o lock; sondas em `asm!`; `force_unlock` em panic | inicialização por CPU antes de `sti` naquela CPU; regiões do loader nunca reutilizadas; locks do kernel sempre com IRQs off; thread moribunda só vira `Dead` depois de a CPU trocar de pilha (`finish_switch`); pilhas liberadas apenas por `reap` de threads `Dead`; handler de `#PF` só redireciona quando a página sondada casa com CR2 |
+
+| `nexo-sys`/`nexo-rt` (usuário) | `asm!` da instrução `syscall`; `raw`/`raw5` são `unsafe fn` | o kernel valida todos os ponteiros; o único risco é o próprio processo |
+| `services/*` (usuário) | acessos deliberadamente inválidos nos testes (`utest`, `echo`) e chamadas `raw` | isolados pelo kernel: só o processo morre |
+| `nexo-kernel` (adições) | `copy_to_user` após validação `USER|WRITABLE`; `park_with` (solta o lock após marcar bloqueada); coletor de pontas (só `Arc`/locks, sem `unsafe`) | ver `docs/spec/syscall-abi.md` §4 |
 
 ## Orçamento e ações
 

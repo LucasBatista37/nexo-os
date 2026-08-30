@@ -2,7 +2,7 @@
 
 Sistema operacional próprio, construído do zero em Rust estável — kernel, loader UEFI, bibliotecas e ferramentas — seguindo o [Plano Mestre](PLANO_MESTRE_SISTEMA_OPERACIONAL.md).
 
-**Release atual:** `0.0.1-boot` (Fase 0 + primeiros 90 dias concluídos); `main` já contém o grosso da Fase 1 (`0.1-kernel`): ACPI/APIC, SMP com 4 CPUs, escalonador preemptivo e modo de stress. Estado detalhado: [docs/CHECKLIST_STATUS.md](docs/CHECKLIST_STATUS.md). CI: ![ci](https://github.com/LucasBatista37/nexo-os/actions/workflows/ci.yml/badge.svg)
+**Release atual:** `0.0.1-boot` (Fase 0 + primeiros 90 dias concluídos); `main` já contém o grosso da Fase 1 (`0.1-kernel`): ACPI/APIC, SMP com 4 CPUs, escalonador preemptivo e modo de stress. Estado detalhado: [docs/CHECKLIST_STATUS.md](docs/CHECKLIST_STATUS.md); **checklist completa do projeto (feito / parcial / pendente até a 1.0, com estimativas): [docs/ROADMAP_STATUS.md](docs/ROADMAP_STATUS.md)** (gerada por `make roadmap`). CI: ![ci](https://github.com/LucasBatista37/nexo-os/actions/workflows/ci.yml/badge.svg)
 
 ## O que já funciona
 

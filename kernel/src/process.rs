@@ -308,6 +308,8 @@ pub fn exit_current(code: i64, reason: Option<&'static str>) -> ! {
         let table = core::mem::take(&mut *p.handles.lock());
         drop(table);
         TABLE.lock().retain(|q| q.pid != p.pid);
+        // Pontas de canal que só as mensagens pendentes referenciam (ciclos) são fechadas aqui.
+        crate::ipc::collect_unreachable();
         let waiters = core::mem::take(&mut *p.exit_waiters.lock());
         for w in waiters {
             sched::unpark(w);
@@ -360,6 +362,14 @@ pub fn wait_and_reap(p: &Arc<Process>) -> i64 {
 /// Processos vivos (ainda não terminados).
 pub fn count() -> usize {
     TABLE.lock().len()
+}
+
+/// Executa `f` para cada processo vivo (sobre um instantâneo da tabela).
+pub fn for_each_live(mut f: impl FnMut(&Arc<Process>)) {
+    let snapshot: Vec<Arc<Process>> = TABLE.lock().clone();
+    for p in &snapshot {
+        f(p);
+    }
 }
 
 /// Mensagens de `SYS_LOG` recebidas.

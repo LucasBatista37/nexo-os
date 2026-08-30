@@ -9,9 +9,9 @@
 //! - `recv` bloqueia a thread até haver mensagem ou o par fechar.
 
 use alloc::collections::VecDeque;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use nexo_syscall_abi::*;
 
 use crate::sched::{self, ThreadId};
@@ -79,6 +79,10 @@ impl HandleTable {
 
     /// Insere e devolve o índice.
     pub fn insert(&mut self, h: Handle) -> Result<u32, Status> {
+        if let Object::Channel(e) = &h.object {
+            // Ao entrar em uma tabela, a ponta deixa de ser "presa" pelo kernel.
+            e.pinned.store(false, Ordering::Relaxed);
+        }
         if let Some(i) = self.slots.iter().position(|s| s.is_none()) {
             self.slots[i] = Some(h);
             return Ok(i as u32);
@@ -132,18 +136,99 @@ struct ChannelInner {
     waiters: [Vec<ThreadId>; 2],
 }
 
-/// Extremidade de canal (`side` 0 ou 1). Ao ser destruída, fecha a extremidade.
+/// Extremidade de canal (`side` 0 ou 1). Ao ser destruída (ou coletada), fecha a extremidade.
 pub struct ChannelEnd {
     inner: Arc<IrqLock<ChannelInner>>,
     side: usize,
+    /// `true` enquanto só o kernel a segura (antes de entrar em uma tabela): raiz para o coletor.
+    pinned: AtomicBool,
+    closed_by_me: AtomicBool,
 }
 
 static LIVE_ENDS: AtomicU64 = AtomicU64::new(0);
 static MESSAGES_SENT: AtomicU64 = AtomicU64::new(0);
+static COLLECTED: AtomicU64 = AtomicU64::new(0);
+/// Registro de todas as pontas existentes (fracas), para o coletor de ciclos.
+static REGISTRY: IrqLock<Vec<Weak<ChannelEnd>>> = IrqLock::new(Vec::new());
 
-/// Extremidades de canal vivas (para testes de vazamento).
+/// Extremidades de canal **abertas** (para testes de vazamento).
 pub fn live_channel_ends() -> u64 {
     LIVE_ENDS.load(Ordering::Relaxed)
+}
+
+/// Pontas fechadas pelo coletor de ciclos desde o boot.
+pub fn collected_ends() -> u64 {
+    COLLECTED.load(Ordering::Relaxed)
+}
+
+/// Fecha pontas de canal que nenhum processo vivo (nem o kernel) consegue mais alcançar.
+///
+/// Uma mensagem enfileirada pode carregar a handle da própria ponta que a
+/// receberia (ou formar ciclos entre canais); nesse caso os `Arc` nunca
+/// chegariam a zero. Marca-se tudo que é alcançável a partir das tabelas de
+/// handles dos processos vivos e das pontas presas pelo kernel, atravessando
+/// as filas; o resto é fechado (o que descarta as mensagens e quebra o ciclo).
+pub fn collect_unreachable() -> u64 {
+    let ends: Vec<Arc<ChannelEnd>> = {
+        let mut reg = REGISTRY.lock();
+        reg.retain(|w| w.strong_count() > 0);
+        reg.iter().filter_map(|w| w.upgrade()).collect()
+    };
+    if ends.is_empty() {
+        return 0;
+    }
+    let mut marked: Vec<*const ChannelEnd> = Vec::new();
+    let mut work: Vec<Arc<ChannelEnd>> = Vec::new();
+    fn root(
+        e: &Arc<ChannelEnd>,
+        marked: &mut Vec<*const ChannelEnd>,
+        work: &mut Vec<Arc<ChannelEnd>>,
+    ) {
+        let p = Arc::as_ptr(e);
+        if !marked.contains(&p) {
+            marked.push(p);
+            work.push(e.clone());
+        }
+    }
+    for e in &ends {
+        if e.pinned.load(Ordering::Relaxed) {
+            root(e, &mut marked, &mut work);
+        }
+    }
+    crate::process::for_each_live(|p| {
+        let table = p.handles.lock();
+        for i in 0..table.slots.len() as u32 {
+            if let Ok(Handle {
+                object: Object::Channel(e),
+                ..
+            }) = table.get(i)
+            {
+                root(&e, &mut marked, &mut work);
+            }
+        }
+    });
+    while let Some(e) = work.pop() {
+        let g = e.inner.lock();
+        for m in g.queues[e.side].iter() {
+            for h in &m.handles {
+                if let Object::Channel(x) = &h.object {
+                    root(x, &mut marked, &mut work);
+                }
+            }
+        }
+    }
+    let mut closed = 0;
+    for e in &ends {
+        if !marked.contains(&Arc::as_ptr(e)) && e.close() {
+            closed += 1;
+        }
+    }
+    drop(ends);
+    if closed > 0 {
+        COLLECTED.fetch_add(closed, Ordering::Relaxed);
+        kdebug!("ipc: coletor fechou {closed} ponta(s) de canal inalcancavel(is)");
+    }
+    closed
 }
 
 /// Mensagens enviadas desde o boot.
@@ -160,13 +245,45 @@ impl ChannelEnd {
             waiters: [Vec::new(), Vec::new()],
         }));
         LIVE_ENDS.fetch_add(2, Ordering::Relaxed);
-        (
-            Arc::new(ChannelEnd {
-                inner: inner.clone(),
-                side: 0,
-            }),
-            Arc::new(ChannelEnd { inner, side: 1 }),
-        )
+        let a = Arc::new(ChannelEnd {
+            inner: inner.clone(),
+            side: 0,
+            pinned: AtomicBool::new(true),
+            closed_by_me: AtomicBool::new(false),
+        });
+        let b = Arc::new(ChannelEnd {
+            inner,
+            side: 1,
+            pinned: AtomicBool::new(true),
+            closed_by_me: AtomicBool::new(false),
+        });
+        let mut reg = REGISTRY.lock();
+        reg.push(Arc::downgrade(&a));
+        reg.push(Arc::downgrade(&b));
+        (a, b)
+    }
+
+    /// `true` se `other` é uma ponta deste mesmo canal (qualquer lado).
+    pub fn same_channel(&self, other: &ChannelEnd) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    /// Fecha esta ponta: descarta sua fila, acorda o par. Devolve `true` na primeira vez.
+    pub fn close(&self) -> bool {
+        if self.closed_by_me.swap(true, Ordering::AcqRel) {
+            return false;
+        }
+        let mut g = self.inner.lock();
+        g.closed[self.side] = true;
+        let dropped = core::mem::take(&mut g.queues[self.side]);
+        let waiters = core::mem::take(&mut g.waiters[1 - self.side]);
+        drop(g);
+        drop(dropped);
+        for w in waiters {
+            sched::unpark(w);
+        }
+        LIVE_ENDS.fetch_sub(1, Ordering::Relaxed);
+        true
     }
 
     /// Envia para a outra extremidade.
@@ -209,13 +326,6 @@ impl ChannelEnd {
 
 impl Drop for ChannelEnd {
     fn drop(&mut self) {
-        let mut g = self.inner.lock();
-        g.closed[self.side] = true;
-        let waiters = core::mem::take(&mut g.waiters[1 - self.side]);
-        drop(g);
-        for w in waiters {
-            sched::unpark(w);
-        }
-        LIVE_ENDS.fetch_sub(1, Ordering::Relaxed);
+        self.close();
     }
 }

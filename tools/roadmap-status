@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""roadmap-status — gera docs/ROADMAP_STATUS.md a partir das checklists do PLANO_MESTRE.
+
+Le todos os itens `- [x|-| |!]` do plano, agrupa por secao (fases, frentes permanentes,
+documentos, ADRs, 90 dias, inicio imediato) e escreve uma checklist consolidada com
+contagens, percentuais, estado dos gates e estimativa de esforco restante por fase.
+As estimativas e o estado dos gates ficam em ESTIMATES/GATES abaixo (editar aqui).
+"""
+import re
+import subprocess
+import sys
+from datetime import date
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+PLAN = ROOT / "PLANO_MESTRE_SISTEMA_OPERACIONAL.md"
+OUT = ROOT / "docs" / "ROADMAP_STATUS.md"
+
+ICON = {"x": "✅", "-": "🟡", " ": "⬜", "!": "⛔"}
+LABEL = {"x": "concluído", "-": "parcial", " ": "pendente", "!": "bloqueado"}
+
+# Esforço restante estimado por fase (uma pessoa, 15–25 h/semana, conforme §13 do plano;
+# as fases 0–2 avançaram mais rápido que o cronograma porque foram feitas com apoio de IA
+# em sessões intensivas). Formato: (faixa de esforço restante, observação).
+ESTIMATES = {
+    "Fase 0": ("0 (concluída)", "gate F0 atendido em clone limpo; release 0.0.1-boot publicada"),
+    "Fase 1": ("1–3 semanas", "só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação"),
+    "Fase 2": ("2–4 meses", "IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace"),
+    "Fase 3": ("6–12 meses", "PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia"),
+    "Fase 4": ("6–12 meses", "VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede"),
+    "Fase 5": ("12–18 meses", "renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade"),
+    "Fase 6": ("12–18 meses", "ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado"),
+    "Fase 7": ("12–24 meses", "USB/HID/armazenamento, NVMe/AHCI, áudio, Ethernet real, Wi-Fi, GPU/display, energia/suspensão, laboratório de hardware"),
+    "Fase 8": ("9–15 meses", "criptografia de disco, TPM, trust root, A/B, rollback, recovery, instalador, Secure Boot, backup, crash dumps, fuzzing contínuo, revisão externa"),
+    "Fase 9": ("12–24 meses", "hardware certificado, canais de release, servidores de símbolos/bugs, i18n, acessibilidade AA, documentação, 20→100 testadores, ABI candidata"),
+    "Fase 10": ("contínuo (12+ meses até 1.0)", "contrato de ABI 1.x, auditoria, certificação de modelos, repositório stable, SBOM, governança, 1.0; depois aarch64, GPU, VM Linux"),
+}
+
+GATES = {
+    "Fase 0": ("✅ atendido", "clone limpo + `make ci` verde (2026-08-29); `docs/releases/0.0.1-boot.md`"),
+    "Fase 1": ("🟡 quase", "30 min de stress com 4 CPUs sem erros; faltam as 24 h (`make stress DURATION=86400`)"),
+    "Fase 2": ("🟡 quase", "4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado"),
+}
+for k in ["Fase 3", "Fase 4", "Fase 5", "Fase 6", "Fase 7", "Fase 8", "Fase 9", "Fase 10"]:
+    GATES[k] = ("⬜ não iniciado", "")
+
+ITEM_RE = re.compile(r"^- \[([x\- !])\] (.*?)(?: — \*(.*?)\*)?[;.]?\s*$")
+HEAD_RE = re.compile(r"^(#{2,3}) (.+?)\s*$")
+
+
+def parse(plan: str):
+    sections = []  # (level, title, items)
+    cur = None
+    for line in plan.splitlines():
+        h = HEAD_RE.match(line)
+        if h:
+            cur = (len(h.group(1)), h.group(2).strip(), [])
+            sections.append(cur)
+            continue
+        m = ITEM_RE.match(line)
+        if m and cur is not None:
+            cur[2].append((m.group(1), m.group(2).strip(), (m.group(3) or "").strip()))
+    return sections
+
+
+def counts(items):
+    c = {"x": 0, "-": 0, " ": 0, "!": 0}
+    for st, _, _ in items:
+        c[st] += 1
+    return c
+
+
+def pct(c):
+    total = sum(c.values())
+    if total == 0:
+        return 0.0
+    return 100.0 * (c["x"] + 0.5 * c["-"]) / total
+
+
+def table(items):
+    out = ["| | Item | Evidência / nota |", "|---|---|---|"]
+    for st, text, note in items:
+        out.append(f"| {ICON[st]} | {text} | {note} |")
+    return "\n".join(out)
+
+
+def main() -> None:
+    plan = PLAN.read_text(encoding="utf-8")
+    sections = parse(plan)
+    try:
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    except OSError:
+        commit = "?"
+
+    phases = [s for s in sections if s[1].startswith("Fase ")]
+    fronts = [s for s in sections if re.match(r"^6\.\d+ ", s[1])]
+    docs = [s for s in sections if s[1].startswith("4.3 ") or s[1].startswith("4.4 ")]
+    ninety = [s for s in sections if s[1].startswith("Semanas ")]
+    immediate = [s for s in sections if s[1].startswith("15. ")]
+    study = [s for s in sections if s[1].startswith("Nível ") or s[1].startswith("Projetos de estudo")]
+
+    all_items = [it for s in sections for it in s[2]]
+    total = counts(all_items)
+
+    L = []
+    L.append("# Checklist consolidada do projeto — estado e caminho até a 1.0")
+    L.append("")
+    L.append(f"Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em {date.today().isoformat()} (commit `{commit}`). "
+             "Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.")
+    L.append("")
+    L.append(f"**Total de itens do plano:** {sum(total.values())} — ✅ {total['x']} · 🟡 {total['-']} · ⬜ {total[' ']} · ⛔ {total['!']} → **{pct(total):.0f}% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).")
+    L.append("")
+    L.append("## 1. Visão por fase")
+    L.append("")
+    L.append("| Fase | Gate | ✅ | 🟡 | ⬜ | % | Esforço restante estimado | O que falta (resumo) |")
+    L.append("|---|---|---|---|---|---|---|---|")
+    for lvl, title, items in phases:
+        key = title.split(" — ")[0]
+        c = counts(items)
+        gate, _ = GATES.get(key, ("⬜", ""))
+        est, what = ESTIMATES.get(key, ("?", ""))
+        L.append(f"| {title} | {gate} | {c['x']} | {c['-']} | {c[' ']} | {pct(c):.0f}% | {est} | {what} |")
+    L.append("")
+    L.append("Estimativas assumem uma pessoa com 15–25 h/semana (Plano §13). Somando as faixas, o caminho até a 1.0 fica em **~6 a 10 anos** de trabalho de uma pessoa; com uma equipe pequena (Plano §13.1) cai para 3–5 anos. As fases 0–2 avançaram em dias, não meses, por terem sido feitas com apoio de IA em sessões intensivas — o ritmo real das fases seguintes depende de hardware, drivers e testes com pessoas, que não se comprimem da mesma forma.")
+    L.append("")
+    L.append("## 2. Gates (Plano §5 e §7)")
+    L.append("")
+    L.append("| Gate | Critério (resumo) | Estado | Evidência |")
+    L.append("|---|---|---|---|")
+    crit = {
+        "Fase 0": "clone limpo → um comando gera imagem que inicia em QEMU; CI comprova a mensagem do kernel",
+        "Fase 1": "24 h de stress em QEMU, múltiplas CPUs, memória isolada, exceções tratadas, zero falha inexplicada",
+        "Fase 2": "3 processos isolados simultâneos; servidor reinicia sem reiniciar o kernel; acesso sem capability falha de forma testada",
+        "Fase 3": "arquivos sobre VirtIO block persistem; driver de armazenamento pode falhar sem corromper o kernel; cortes de energia simulados",
+        "Fase 4": "DHCP, DNS, TLS; tráfego malformado não derruba outros serviços",
+        "Fase 5": "login, dois apps, janelas/Contextos, teclado e mouse, sessão reiniciada sem reiniciar o kernel",
+        "Fase 6": "desenvolvedor novo cria, empacota, instala, depura e atualiza um app só pela documentação",
+        "Fase 7": "instalar em um PC de referência com disco, entrada, tela, rede, áudio, suspensão e regressão repetível",
+        "Fase 8": "falha de energia na atualização, slot corrompido, pacote malicioso e chave comprometida detectados/recuperados",
+        "Fase 9": "instalação/atualização acima da meta, zero corrupção, falhas críticas abaixo do limite, uso diário comprovado",
+        "Fase 10": "promessas públicas testáveis, hardware explícito, atualização e recuperação confiáveis, sem bloqueador crítico",
+    }
+    for k in crit:
+        g, ev = GATES[k]
+        L.append(f"| {k} | {crit[k]} | {g} | {ev} |")
+    L.append("")
+    L.append("## 3. Itens por fase")
+    L.append("")
+    for lvl, title, items in phases:
+        key = title.split(" — ")[0]
+        c = counts(items)
+        L.append(f"### {title} — {pct(c):.0f}% ({c['x']} ✅, {c['-']} 🟡, {c[' ']} ⬜)")
+        L.append("")
+        L.append(f"Gate: {GATES[key][0]}. {GATES[key][1]}")
+        L.append("")
+        L.append(table(items))
+        L.append("")
+    L.append("## 4. Frentes permanentes (Plano §6)")
+    L.append("")
+    L.append("| Frente | ✅ | 🟡 | ⬜ | % |")
+    L.append("|---|---|---|---|---|")
+    for lvl, title, items in fronts:
+        c = counts(items)
+        L.append(f"| {title} | {c['x']} | {c['-']} | {c[' ']} | {pct(c):.0f}% |")
+    L.append("")
+    for lvl, title, items in fronts:
+        L.append(f"### {title}")
+        L.append("")
+        L.append(table(items))
+        L.append("")
+    L.append("## 5. Governança: documentos obrigatórios e ADRs (Plano §4.3–4.4)")
+    L.append("")
+    for lvl, title, items in docs:
+        c = counts(items)
+        L.append(f"### {title} — {c['x']}/{len(items)}")
+        L.append("")
+        L.append(table(items))
+        L.append("")
+    L.append("## 6. Plano dos 90 dias (Plano §8) e checklist de início imediato (§15)")
+    L.append("")
+    for lvl, title, items in ninety + immediate:
+        c = counts(items)
+        L.append(f"### {title} — {c['x']}/{len(items)} ✅")
+        L.append("")
+        L.append(table(items))
+        L.append("")
+    L.append("## 7. Currículo de estudo (Plano §9) — atividade pessoal, não implementável pelo repositório")
+    L.append("")
+    for lvl, title, items in study:
+        c = counts(items)
+        L.append(f"### {title} — {c['x']}/{len(items)}")
+        L.append("")
+        L.append(table(items))
+        L.append("")
+    L.append("## 8. Próximas ações recomendadas (ordem)")
+    L.append("")
+    L.append("1. Rodar `make stress DURATION=86400 SMP=4` (de preferência também em host x86_64 com KVM) e cortar `0.1-kernel` com notas em `docs/releases/`.")
+    L.append("2. Fase 2: IDL de protocolos + gerador de código (ADR-0005), fuzzing contínuo de syscalls/IPC/parsers no CI, shell de diagnóstico, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla → `0.2-userspace`.")
+    L.append("3. Fase 3: enumeração PCI/ACPI, VirtIO block/input/rng/console em processos isolados, VFS + ramfs + FAT (só EFI), testes de corte de energia → `0.3-storage`.")
+    L.append("4. Escolher o computador de referência (regra: um único modelo) antes da Fase 7 e confirmar nome/licença/horas (decisões hoje provisórias).")
+    L.append("5. Revisar este documento e o Plano Mestre a cada trimestre (próxima revisão: 2026-11-29).")
+    L.append("")
+    OUT.write_text("\n".join(L) + "\n", encoding="utf-8")
+    print(f"{OUT}: {sum(total.values())} itens, {total['x']} concluidos, {total['-']} parciais, {pct(total):.0f}%")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

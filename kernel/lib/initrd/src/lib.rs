@@ -103,6 +103,74 @@ impl<'a> Initrd<'a> {
 
 #[cfg(test)]
 mod tests {
+    /// PRNG determinístico para os testes "fuzz-lite" (sem dependências).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n.max(1) as u64) as usize
+        }
+    }
+
+    /// Mutação aleatória de um buffer válido: bit flips, bytes aleatórios, truncamentos, extensões.
+    fn mutate(rng: &mut Rng, base: &[u8]) -> Vec<u8> {
+        let mut v = base.to_vec();
+        match rng.below(5) {
+            0 => {
+                for _ in 0..1 + rng.below(8) {
+                    if !v.is_empty() {
+                        let i = rng.below(v.len());
+                        v[i] ^= 1 << rng.below(8);
+                    }
+                }
+            }
+            1 => {
+                for _ in 0..1 + rng.below(16) {
+                    if !v.is_empty() {
+                        let i = rng.below(v.len());
+                        v[i] = rng.next() as u8;
+                    }
+                }
+            }
+            2 => v.truncate(rng.below(v.len() + 1)),
+            3 => {
+                let extra = rng.below(64);
+                v.extend((0..extra).map(|_| rng.next() as u8));
+            }
+            _ => {
+                if v.len() >= 8 {
+                    let i = rng.below(v.len() - 7);
+                    v[i..i + 8].copy_from_slice(&rng.next().to_le_bytes());
+                }
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn fuzz_lite_never_panics() {
+        let base = pack(&[
+            ("init", b"\x7fELF-init"),
+            ("svcmgr", b"\x7fELF-svc"),
+            ("utest", &[1u8; 300]),
+        ]);
+        let mut rng = Rng(0x0f0e_0d0c_0b0a_0908);
+        for _ in 0..20_000 {
+            let input = mutate(&mut rng, &base);
+            if let Ok(ird) = Initrd::parse(&input) {
+                for m in ird.iter() {
+                    let _ = m.data.len();
+                }
+                let _ = ird.find("init");
+            }
+        }
+    }
+
     extern crate std;
     use super::*;
     use std::vec::Vec;

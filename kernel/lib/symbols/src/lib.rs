@@ -257,6 +257,92 @@ fn write_ident(f: &mut fmt::Formatter<'_>, ident: &str) -> fmt::Result {
 
 #[cfg(test)]
 mod tests {
+    /// PRNG determinístico para os testes "fuzz-lite" (sem dependências).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n.max(1) as u64) as usize
+        }
+    }
+
+    /// Mutação aleatória de um buffer válido: bit flips, bytes aleatórios, truncamentos, extensões.
+    fn mutate(rng: &mut Rng, base: &[u8]) -> Vec<u8> {
+        let mut v = base.to_vec();
+        match rng.below(5) {
+            0 => {
+                for _ in 0..1 + rng.below(8) {
+                    if !v.is_empty() {
+                        let i = rng.below(v.len());
+                        v[i] ^= 1 << rng.below(8);
+                    }
+                }
+            }
+            1 => {
+                for _ in 0..1 + rng.below(16) {
+                    if !v.is_empty() {
+                        let i = rng.below(v.len());
+                        v[i] = rng.next() as u8;
+                    }
+                }
+            }
+            2 => v.truncate(rng.below(v.len() + 1)),
+            3 => {
+                let extra = rng.below(64);
+                v.extend((0..extra).map(|_| rng.next() as u8));
+            }
+            _ => {
+                if v.len() >= 8 {
+                    let i = rng.below(v.len() - 7);
+                    v[i..i + 8].copy_from_slice(&rng.next().to_le_bytes());
+                }
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn fuzz_lite_never_panics() {
+        let elf = synthetic_elf(&[
+            ("_ZN1k5kmain17h0000000000000000E", STT_FUNC, 0x1000, 0x100),
+            (
+                "_RNvNtCsaK74HBiwFa0_4core9panicking9panic_fmt",
+                STT_FUNC,
+                0x2000,
+                0x40,
+            ),
+        ]);
+        let mut rng = Rng(0x7777_1234_9999_0001);
+        for _ in 0..10_000 {
+            let input = mutate(&mut rng, &elf);
+            if let Some(t) = SymbolTable::parse(&input) {
+                let _ = t.lookup(0x1050);
+                for s in t.iter().take(16) {
+                    let _ = format!("{}", s.demangled());
+                }
+            }
+        }
+        // Demangler sobre strings arbitrárias (inclui prefixos válidos com corpo aleatório).
+        let prefixes = ["_ZN", "_R", "_RN", "_RI", "_RNvC", "_ZN3foo", "", "x"];
+        for i in 0..20_000 {
+            let p = prefixes[i % prefixes.len()];
+            let n = rng.below(40);
+            let body: String = (0..n)
+                .map(|_| {
+                    b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$.E"
+                        [rng.below(66)] as char
+                })
+                .collect();
+            let s = format!("{p}{body}");
+            let _ = format!("{}", Demangled(&s));
+        }
+    }
+
     extern crate std;
     use super::*;
     use std::format;

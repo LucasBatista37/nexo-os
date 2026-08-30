@@ -463,6 +463,80 @@ impl Hpet {
 
 #[cfg(test)]
 mod tests {
+    /// PRNG determinístico para os testes "fuzz-lite" (sem dependências).
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n.max(1) as u64) as usize
+        }
+    }
+
+    /// Mutação aleatória de um buffer válido: bit flips, bytes aleatórios, truncamentos, extensões.
+    fn mutate(rng: &mut Rng, base: &[u8]) -> Vec<u8> {
+        let mut v = base.to_vec();
+        match rng.below(5) {
+            0 => {
+                for _ in 0..1 + rng.below(8) {
+                    if !v.is_empty() {
+                        let i = rng.below(v.len());
+                        v[i] ^= 1 << rng.below(8);
+                    }
+                }
+            }
+            1 => {
+                for _ in 0..1 + rng.below(16) {
+                    if !v.is_empty() {
+                        let i = rng.below(v.len());
+                        v[i] = rng.next() as u8;
+                    }
+                }
+            }
+            2 => v.truncate(rng.below(v.len() + 1)),
+            3 => {
+                let extra = rng.below(64);
+                v.extend((0..extra).map(|_| rng.next() as u8));
+            }
+            _ => {
+                if v.len() >= 8 {
+                    let i = rng.below(v.len() - 7);
+                    v[i..i + 8].copy_from_slice(&rng.next().to_le_bytes());
+                }
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn fuzz_lite_never_panics() {
+        let (mem, rsdp_addr) = build();
+        let mut rng = Rng(0xa5a5_5a5a_1357_2468);
+        for _ in 0..5_000 {
+            let mutated = Mem {
+                base: mem.base,
+                data: mutate(&mut rng, &mem.data),
+            };
+            if let Ok(rsdp) = Rsdp::parse(&mutated, rsdp_addr) {
+                if let Ok(t) = find_table(&mutated, &rsdp, b"APIC")
+                    && let Ok(m) = Madt::parse(&t)
+                {
+                    let _ = m.entries().count();
+                    let _ = m.enabled_cpus().count();
+                    let _ = m.lapic_phys();
+                    let _ = m.isa_irq_to_gsi(0);
+                }
+                if let Ok(t) = find_table(&mutated, &rsdp, b"HPET") {
+                    let _ = Hpet::parse(&t);
+                }
+            }
+        }
+    }
+
     extern crate std;
     use super::*;
     use std::vec;

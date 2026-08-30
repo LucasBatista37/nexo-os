@@ -118,18 +118,33 @@ fn sys_channel_send(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let mut moved = Vec::with_capacity(ids.len());
     {
         let mut table = p.handles.lock();
-        for id in &ids {
-            if *id == h {
+        for (i, id) in ids.iter().enumerate() {
+            // Enviar o próprio canal ou repetir um handle na mesma mensagem é inválido.
+            if *id == h || ids[..i].contains(id) {
                 return (Status::InvalidArgs, 0);
             }
             match table.get(*id) {
+                Ok(Handle {
+                    object: Object::Channel(x),
+                    rights,
+                }) => {
+                    if !rights.contains(RIGHT_TRANSFER) {
+                        return (Status::Denied, 0);
+                    }
+                    if end.same_channel(&x) {
+                        return (Status::InvalidArgs, 0);
+                    }
+                }
                 Ok(hh) if hh.rights.contains(RIGHT_TRANSFER) => {}
                 Ok(_) => return (Status::Denied, 0),
                 Err(e) => return (e, 0),
             }
         }
         for id in &ids {
-            moved.push(table.take(*id).expect("verificado acima"));
+            match table.take(*id) {
+                Ok(hh) => moved.push(hh),
+                Err(e) => return (e, 0),
+            }
         }
     }
     match end.send(Message {
@@ -215,7 +230,11 @@ fn sys_process_spawn(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let mut moved = Vec::with_capacity(ids.len());
     {
         let mut table = p.handles.lock();
-        for id in &ids {
+        for (i, id) in ids.iter().enumerate() {
+            // Handles repetidos na mesma mensagem: o segundo `take` falharia.
+            if ids[..i].contains(id) {
+                return (Status::InvalidArgs, 0);
+            }
             match table.get(*id) {
                 Ok(hh) if hh.rights.contains(RIGHT_TRANSFER) => {}
                 Ok(_) => return (Status::Denied, 0),
@@ -223,7 +242,10 @@ fn sys_process_spawn(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
             }
         }
         for id in &ids {
-            moved.push(table.take(*id).expect("verificado acima"));
+            match table.take(*id) {
+                Ok(h) => moved.push(h),
+                Err(e) => return (e, 0),
+            }
         }
     }
     match process::spawn_named(name, arg, moved) {

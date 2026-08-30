@@ -63,6 +63,8 @@ SCENARIOS = {
             r"\[pid \d+ utest\] utest: ipc ok",
             r"\[pid \d+ utest\] utest: ola do modo usuario",
             r"\[TEST\] user_services .*ok",
+            r"\[TEST\] user_syscall_fuzz .*ok",
+            r"utest: fuzz terminou: ok=\d+ erros=\d+",
             r"svcmgr: echo \(pid \d+\) caiu com -1; reiniciando \(1/3\)",
             r"echo-client: 8 respostas ok, \d+ falhas",
             r"init: svcmgr terminou com \d+",

@@ -104,3 +104,5 @@ Substitui um board externo até o repositório ter issues. Uma linha por item do
 | [x] | criar `init` e `service-manager` | `services/init`, `services/svcmgr`; teste `user_services` |
 | [x] | políticas de reinício e dependências | `svcmgr` reinicia `echo` até 3 vezes; cliente reconecta; dependências explícitas ainda não modeladas |
 | [x] | `ramfs/initramfs` para bring-up (§3.9) | `kernel/lib/initrd`, `tools/mkinitrd.py` |
+| [x] | regras de compatibilidade do IPC | `docs/spec/ipc-compat.md` |
+| [-] | fuzzar decodificador de IPC e syscalls | fuzz-lite (parsers no host, syscalls via `utest` modo 7); fuzzing contínuo pendente |

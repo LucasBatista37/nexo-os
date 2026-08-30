@@ -34,7 +34,7 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 8 | `handle_close` | h | 0 | `BadHandle` |
 | 9 | `handle_duplicate` | h, rights | novo handle | `BadHandle`, `Denied` (sem `DUPLICATE` ou tentando ampliar direitos) |
 | 10 | `channel_create` | — | `h0 \| (h1 << 32)` | `NoMemory` |
-| 11 | `channel_send` | h, ptr, len, handles_ptr, n | bytes enviados | `BadHandle`, `Denied` (sem `WRITE`/`TRANSFER`), `TooBig` (> 4096 B ou > 8 handles), `BadAddress`, `PeerClosed`, `QueueFull` (> 64 pendentes), `InvalidArgs` (enviar o próprio canal) |
+| 11 | `channel_send` | h, ptr, len, handles_ptr, n | bytes enviados | `BadHandle`, `Denied` (sem `WRITE`/`TRANSFER`), `TooBig` (> 4096 B ou > 8 handles), `BadAddress`, `PeerClosed`, `QueueFull` (> 64 pendentes), `InvalidArgs` (enviar qualquer ponta do próprio canal, ou o mesmo handle duas vezes na lista) |
 | 12 | `channel_recv` | h, buf, cap, handles_buf, hcap | `len \| (nhandles << 32)` | `BadHandle`, `Denied` (sem `READ`), `BadAddress` (buffers não graváveis), `PeerClosed` (par fechado e fila vazia), `TooBig` (mensagem descartada; `RDX` traz os tamanhos necessários) |
 | 13 | `handle_info` | h | `rights \| (kind << 32)` | `BadHandle` |
 | 14 | `process_spawn` | name_ptr, name_len (≤ 32), arg, handles_ptr, n | handle do processo filho | `NotFound` (membro ausente no initrd), `Denied` (handle sem `TRANSFER`), `TooBig`, `BadAddress` |
@@ -54,6 +54,7 @@ Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` b
 - Objetos v0: extremidade de canal (`kind` 1), criada com `READ|WRITE|TRANSFER|DUPLICATE`; processo (`kind` 2), criado por `process_spawn` com `READ|TRANSFER|DUPLICATE` (`READ` = esperar/consultar). Os handles iniciais passados no spawn ocupam os índices 0.. na tabela do filho.
 - Handles enviados em uma mensagem saem da tabela do remetente e entram na do destinatário (índices novos) no `recv`; exigem `TRANSFER`.
 - Ao terminar, o processo fecha todos os handles; a última extremidade fechada de um canal libera o objeto; o par vê `PeerClosed`.
+- Mensagens pendentes podem carregar pontas de canal; se nenhum processo vivo alcança uma ponta (nem diretamente, nem por mensagens que ele poderia receber), o kernel a fecha ao término de um processo (coletor de ciclos). Fechar uma ponta descarta as mensagens que ela ainda não recebeu.
 
 ## 3.2 Canais (ADR-0005)
 

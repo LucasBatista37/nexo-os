@@ -4,7 +4,7 @@
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress roadmap
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 DURATION ?= 600
@@ -61,6 +61,9 @@ stress: image
 	mkdir -p build/logs
 	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress-long.log; \
 	rc=$$?; if [ $$rc -eq 33 ]; then echo "[nexo] stress de $(DURATION)s: PASS"; else echo "[nexo] stress: FALHA (codigo $$rc)"; exit 1; fi
+
+roadmap:
+	tools/roadmap-status
 
 clean:
 	rm -rf build target kernel/target boot/loader/target services/target

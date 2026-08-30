@@ -7,7 +7,9 @@
 //! 5 = servidor de IPC (handle 0 = canal): responde "pong:<msg>", recebe um
 //!     canal transferido e escreve "hi" nele, sai quando o par fecha;
 //! 6 = cliente de IPC (handle 0 = canal): ping/pong, transfere um canal,
-//!     testa direitos reduzidos e handles inválidos.
+//!     testa direitos reduzidos e handles inválidos;
+//! 7 = fuzz de syscalls: números e argumentos aleatórios (ponteiros nulos,
+//!     do kernel, desalinhados, tamanhos absurdos); o processo deve sobreviver.
 #![no_std]
 #![no_main]
 
@@ -46,6 +48,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         }
         5 => ipc_server(),
         6 => ipc_client(),
+        7 => syscall_fuzz(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -206,3 +209,98 @@ fn write_num(out: &mut [u8], mut v: u64) -> usize {
 // panic_handler: fornecido por nexo-rt (feature panic-handler).
 #[allow(unused_imports)]
 use nexo_rt as _;
+
+/// PRNG xorshift (determinístico).
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+}
+
+/// Fuzz de syscalls: nada aqui pode derrubar o kernel nem travar este processo.
+fn syscall_fuzz() -> ! {
+    use nexo_sys::abi::*;
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let buf = [0u8; 4096];
+    let mut sink = [0u32; 16];
+    let (ch_a, ch_b) = nexo_sys::channel_create().unwrap_or((u32::MAX, u32::MAX));
+    let mut ok = 0u64;
+    let mut errs = 0u64;
+    let iterations = 20_000u64;
+    for i in 0..iterations {
+        let r = rng.next();
+        // Números: válidos (com peso) e inválidos.
+        let n = match r % 8 {
+            0 => rng.next() % 64,
+            1 => rng.next(),
+            _ => rng.next() % (SYS_MAX + 1),
+        };
+        // Bloqueantes/terminais ficam de fora: exit, recv sem par, wait.
+        if n == SYS_EXIT || n == SYS_CHANNEL_RECV || n == SYS_PROCESS_WAIT {
+            continue;
+        }
+        let arg = |rng: &mut Rng| -> u64 {
+            match rng.next() % 10 {
+                0 => 0,
+                1 => 0xffff_ffff_8000_0000,
+                2 => buf.as_ptr() as u64,
+                3 => buf.as_ptr() as u64 + 4095,
+                4 => USER_ADDRESS_LIMIT - 8,
+                5 => USER_ADDRESS_LIMIT,
+                6 => rng.next() % 4097,
+                7 => ch_a as u64,
+                8 => ch_b as u64,
+                _ => rng.next(),
+            }
+        };
+        let (a0, a1, a2, a3, a4) = (
+            arg(&mut rng),
+            arg(&mut rng),
+            arg(&mut rng),
+            arg(&mut rng),
+            arg(&mut rng),
+        );
+        // Sleep só com valores curtos.
+        let a0 = if n == SYS_SLEEP { a0 % 300_000 } else { a0 };
+        // Handles enviados: ponteiro para lista pequena (pode conter lixo).
+        let (a3, a4) = if n == SYS_CHANNEL_SEND || n == SYS_PROCESS_SPAWN {
+            (sink.as_mut_ptr() as u64, rng.next() % 3)
+        } else {
+            (a3, a4)
+        };
+        // SAFETY: o kernel deve validar tudo; e o objetivo do teste.
+        let (st, _) = unsafe { nexo_sys::raw5(n, a0, a1, a2, a3, a4) };
+        if st.is_ok() {
+            ok += 1
+        } else {
+            errs += 1
+        }
+        if i % 5000 == 0 {
+            nexo_rt::log!(
+                "utest: fuzz {}/{} (ok={}, erros={})",
+                i,
+                iterations,
+                ok,
+                errs
+            );
+        }
+    }
+    // Invariantes finais: a ABI continua respondendo corretamente.
+    if nexo_sys::abi_version() != ABI_VERSION || nexo_sys::get_pid() == 0 {
+        nexo_sys::exit(90);
+    }
+    if nexo_sys::log("utest: fuzz ok") != Status::Ok {
+        nexo_sys::exit(91);
+    }
+    nexo_rt::log!(
+        "utest: fuzz terminou: ok={} erros={} handles={}",
+        ok,
+        errs,
+        nexo_sys::debug_info(3)
+    );
+    nexo_sys::exit(0)
+}

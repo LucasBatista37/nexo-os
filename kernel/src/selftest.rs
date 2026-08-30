@@ -62,6 +62,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_syscall_error", test_user_syscall_error),
     ("user_ipc", test_user_ipc),
     ("user_services", test_user_services),
+    ("user_syscall_fuzz", test_user_syscall_fuzz),
     ("symbols", test_symbols),
 ];
 
@@ -1008,6 +1009,44 @@ fn test_user_services() -> TestResult {
     kprint!(
         "({spawned} processos, {restarts} reinicio(s), max {} simultaneos) ",
         crate::process::live_max()
+    );
+    Ok(())
+}
+
+fn test_user_syscall_fuzz() -> TestResult {
+    let frames0 = phys::stats().free;
+    let ends0 = crate::ipc::live_channel_ends();
+    let exc0 = crate::x86::traps::exception_count();
+    let code = run_utest(7)?;
+    check!(code == 0, "fuzz de syscalls saiu com {code}");
+    check!(crate::process::count() == 0, "processo do fuzz sobrando");
+    sched::reap();
+    check!(
+        crate::ipc::live_channel_ends() == ends0,
+        "canais vazaram no fuzz: {} -> {}",
+        ends0,
+        crate::ipc::live_channel_ends()
+    );
+    let frames1 = phys::stats().free;
+    check!(
+        frames1 + 32 >= frames0,
+        "quadros vazaram no fuzz: {frames0} -> {frames1}"
+    );
+    let last = crate::x86::syscall::last_user_log();
+    check!(
+        last.starts_with("utest: fuzz terminou"),
+        "ultima mensagem: {last:?}"
+    );
+    kprint!(
+        "(coletor fechou {} ponta(s)) ",
+        crate::ipc::collected_ends()
+    );
+    let r = probe(ProbeKind::Read, KERNEL_STACK_BASE + 8);
+    check!(!r.faulted, "kernel instavel apos o fuzz");
+    kprint!(
+        "({}; {} excecoes) ",
+        last,
+        crate::x86::traps::exception_count() - exc0
     );
     Ok(())
 }

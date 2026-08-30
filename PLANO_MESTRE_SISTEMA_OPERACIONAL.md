@@ -373,18 +373,18 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] definir nome provisório, visão e público da versão 1.0 — *Nexo OS (provisório), PROJECT_CHARTER.md*;
 - [-] definir computador de desenvolvimento e computador de referência — *host macOS definido; PC de referência a escolher antes da Fase 7*;
 - [x] escolher licença do projeto — *MIT OR Apache-2.0, ADR-0012*;
-- [-] criar repositório, branches protegidas e convenções de commit — *repositório git local e convenções em CONTRIBUTING.md; remoto/branches protegidas pendentes*;
+- [x] criar repositório, branches protegidas e convenções de commit — *github.com/LucasBatista37/nexo-os, `main` protegida, convenções em CONTRIBUTING.md*;
 - [x] configurar Rust bare-metal, linker, Assembly e QEMU;
 - [x] fixar versões do toolchain e registrar atualização controlada — *rust-toolchain.toml, docs/toolchain.md*;
 - [x] configurar UEFI para QEMU — *edk2 via tools/run-qemu*;
 - [x] gerar imagem de disco reproduzível — *make reproducible*;
 - [x] iniciar logs por porta serial;
-- [x] criar CI que compila e inicia a imagem em QEMU — *.github/workflows/ci.yml + make ci; execução hospedada depende de remoto*;
+- [x] criar CI que compila e inicia a imagem em QEMU — *.github/workflows/ci.yml, verde no GitHub Actions*;
 - [x] criar teste que reconhece sucesso/falha pelo serial — *tools/test-qemu*;
 - [x] criar template de ADR e RFC;
 - [x] criar threat model v0 — *SECURITY.md*;
 - [-] concluir currículo básico de arquitetura de computadores — *guia em docs/study/; estudo pessoal contínuo*;
-- [-] publicar release `0.0.1-boot` — *tag local v0.0.1-boot e notas em docs/releases/; publicação exige remoto*.
+- [x] publicar release `0.0.1-boot` — *tag v0.0.1-boot publicada no GitHub; notas em docs/releases/*.
 
 **Gate F0:** em um clone limpo, um único comando gera uma imagem que inicia em QEMU e o CI comprova a mensagem do kernel.
 
@@ -427,14 +427,14 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] implementar espera múltipla, eventos e timers;
 - [-] validar cópias entre usuário e kernel — *ponteiros validados por faixa e bit USER antes de copiar (`copy_from_user`); cópia para o usuário ainda não existe*;
 - [ ] criar formato de protocolo tipado e gerador de código;
-- [ ] definir regras de compatibilidade do IPC;
+- [x] definir regras de compatibilidade do IPC — *docs/spec/ipc-compat.md*;
 - [x] criar `init` e `service-manager` — *`services/init` e `services/svcmgr` em ring 3*;
 - [-] criar políticas de reinício e dependências — *reinício com limite implementado e testado (`echo` cai e volta); dependências declarativas pendentes*;
 - [x] criar loader ELF de usuário — *`process::spawn_elf` (W^X, USER, pilha com guarda)*;
 - [-] criar runtime mínimo Rust e ABI C — *`sdk/nexo-sys` + `sdk/nexo-rt` (Rust, sem alocação); ABI C pendente*;
 - [ ] criar shell de diagnóstico no espaço de usuário;
 - [-] testar isolamento e negação de capabilities — *isolamento de memória/instruções e negação por direitos (Denied) testados; fuzzing pendente*;
-- [ ] fuzzar decodificador de IPC e syscalls;
+- [-] fuzzar decodificador de IPC e syscalls — *fuzz-lite determinístico dos parsers no host e fuzz de syscalls de um processo de usuário; fuzzing contínuo (cargo-fuzz/CI) pendente*;
 - [ ] publicar release `0.2-userspace`.
 
 **Gate F2:** três processos isolados executam simultaneamente, um servidor pode reiniciar sem reiniciar o kernel e acessos sem capability falham de forma testada.
@@ -796,7 +796,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [ ] pacotes e updates assinados;
 - [ ] proteção contra rollback;
 - [ ] rotação e revogação de chaves;
-- [ ] fuzzing e sanitizers onde aplicável;
+- [-] fuzzing e sanitizers onde aplicável — *fuzz-lite nos testes de host; sanitizers/cargo-fuzz pendentes*;
 - [ ] SBOM e análise de dependências;
 - [ ] política de vulnerabilidades;
 - [ ] auditoria externa.
@@ -809,7 +809,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [ ] testes de integração de serviços;
 - [ ] testes end-to-end de boot/login/app/update;
 - [ ] property tests;
-- [ ] fuzzing;
+- [-] fuzzing — *fuzz-lite determinístico (parsers e syscalls); fuzzing contínuo pendente*;
 - [ ] fault injection;
 - [ ] testes de corte de energia;
 - [-] testes SMP e race conditions — *stress multi-CPU básico*;
@@ -948,7 +948,7 @@ Não iniciar uma versão principal porque “o calendário chegou”. Avançar q
 - [x] executar duas tarefas cooperativas simples;
 - [x] automatizar boot no CI;
 - [x] automatizar timeout e resultado via serial;
-- [-] revisar documentação e publicar `0.0.1-boot` — *documentação revisada; release tagueada localmente, publicação pendente de remoto*.
+- [x] revisar documentação e publicar `0.0.1-boot` — *documentação revisada; tag publicada no GitHub*.
 
 **Entrega:** primeira release e relatório do que foi aprendido.
 
@@ -1200,7 +1200,7 @@ Use esta como a primeira página operacional do projeto:
 - [-] escolher um único computador de referência futuro — *regra definida; modelo a escolher*;
 - [x] escolher Rust `no_std` + Assembly mínimo;
 - [x] escolher licença — *MIT OR Apache-2.0*;
-- [-] criar repositório — *local; remoto pendente*;
+- [x] criar repositório — *github.com/LucasBatista37/nexo-os*;
 - [x] criar board com Fase 0 e primeiros 90 dias — *docs/board.md*;
 - [x] criar `PROJECT_CHARTER.md`;
 - [x] escrever ADR-0001 a ADR-0004;
@@ -1208,7 +1208,7 @@ Use esta como a primeira página operacional do projeto:
 - [x] gerar o primeiro binário UEFI;
 - [ ] inicializar no QEMU;
 - [x] obter log serial no CI — *tools/test-qemu; make ci*;
-- [-] publicar `0.0.1-boot` — *tag local; publicação pendente*;
+- [x] publicar `0.0.1-boot` — *tag no GitHub*;
 - [x] não começar GUI antes de memória, erros e testes básicos — *respeitado: só console de diagnóstico*;
 - [ ] revisar este plano no final de cada trimestre.
 
