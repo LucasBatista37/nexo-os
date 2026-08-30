@@ -478,7 +478,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] implementar UDP — *montagem/leitura em `nexo-netstack` (o DHCP viaja por UDP no cenário `net`); sockets e entrega por porta pendentes*;
 - [ ] implementar TCP com suíte de testes e estados documentados;
 - [-] implementar DHCP — *cliente completo (DISCOVER→OFFER→REQUEST→ACK com opções) obtém lease real do slirp no cenário `net`; renovação/temporizadores e serviço residente pendentes*;
-- [ ] implementar DNS com cache e validação de entradas;
+- [-] implementar DNS com cache e validação de entradas — *consulta A e parser (compressão com limites) em `nexo-netstack`; resolução real no cenário `net`; cache e serviço residente pendentes*;
 - [ ] criar API de sockets nativa;
 - [ ] criar compatibilidade POSIX de sockets;
 - [ ] implementar IPv6;

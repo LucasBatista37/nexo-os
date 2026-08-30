@@ -430,6 +430,7 @@ def run_net_scenario(timeout: float) -> bool:
                 r"utest: dhcp ok — ip 10\.0\.2\.15 mascara 255\.255\.255\.0 gw 10\.0\.2\.2 dns 10\.0\.2\.3",
                 r"utest: net: ARP reply do gateway",
                 r"utest: net ok — echo reply de 10\.0\.2\.2 \(ttl=\d+, 9 bytes\)",
+                r"utest: dns ok —",
                 r"\[NET\] teste de rede terminou com 0",
                 r"NEXO: boot completo"]:
         if not re.search(pat, text):

@@ -377,6 +377,139 @@ pub fn dhcp_parse(frame: &[u8], xid: u32) -> Option<(u8, DhcpLease)> {
     }
 }
 
+/// Porta do DNS.
+pub const DNS_PORT: u16 = 53;
+
+/// Monta uma consulta DNS A por `name` (rótulos ASCII separados por `.`) num quadro completo
+/// (Ethernet + IPv4 + UDP); devolve o tamanho do quadro, ou `None` se o nome for inválido.
+#[allow(clippy::too_many_arguments)]
+pub fn dns_query(
+    frame: &mut [u8],
+    src_mac: Mac,
+    dst_mac: Mac,
+    src_ip: Ipv4Addr,
+    dns_ip: Ipv4Addr,
+    src_port: u16,
+    id: u16,
+    name: &[u8],
+) -> Option<usize> {
+    if name.is_empty() || name.len() > 253 {
+        return None;
+    }
+    let mut q = [0u8; 300];
+    q[0..2].copy_from_slice(&id.to_be_bytes());
+    q[2] = 0x01; // RD
+    q[5] = 1; // QDCOUNT = 1
+    let mut o = 12usize;
+    for label in name.split(|&c| c == b'.') {
+        if label.is_empty() || label.len() > 63 {
+            return None;
+        }
+        q[o] = label.len() as u8;
+        q[o + 1..o + 1 + label.len()].copy_from_slice(label);
+        o += 1 + label.len();
+    }
+    q[o] = 0;
+    o += 1;
+    q[o..o + 2].copy_from_slice(&1u16.to_be_bytes()); // A
+    q[o + 2..o + 4].copy_from_slice(&1u16.to_be_bytes()); // IN
+    o += 4;
+    let eo = eth_write(frame, dst_mac, src_mac, ETHERTYPE_IPV4);
+    let po = ipv4_write(frame, eo, src_ip, dns_ip, IPPROTO_UDP, 8 + o, 64, id);
+    let bo = udp_write(frame, po, src_port, DNS_PORT, o);
+    frame[bo..bo + o].copy_from_slice(&q[..o]);
+    Some(bo + o)
+}
+
+/// Resposta DNS decodificada (mínimo necessário).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DnsAnswer {
+    /// RCODE (0 = sem erro, 3 = NXDOMAIN, …).
+    pub rcode: u8,
+    /// Número de respostas.
+    pub answers: u16,
+    /// Primeiro registro A, se houver.
+    pub a: Option<Ipv4Addr>,
+}
+
+/// Se `frame` é uma resposta DNS do servidor `dns_ip` para (`id`, porta `src_port`), decodifica.
+pub fn dns_parse(frame: &[u8], dns_ip: Ipv4Addr, src_port: u16, id: u16) -> Option<DnsAnswer> {
+    let (_, _, et, p) = eth_parse(frame)?;
+    if et != ETHERTYPE_IPV4 {
+        return None;
+    }
+    let ip = ipv4_parse(p)?;
+    if ip.proto != IPPROTO_UDP || ip.src != dns_ip {
+        return None;
+    }
+    let (sport, dport, d) = udp_parse(ip.payload)?;
+    if sport != DNS_PORT || dport != src_port || d.len() < 12 {
+        return None;
+    }
+    if be16(d, 0) != id || d[2] & 0x80 == 0 {
+        return None;
+    }
+    let mut ans = DnsAnswer {
+        rcode: d[3] & 0xf,
+        answers: be16(d, 6),
+        a: None,
+    };
+    // pula as perguntas
+    let qd = be16(d, 4) as usize;
+    let mut o = 12usize;
+    for _ in 0..qd {
+        let mut hops = 0;
+        while o < d.len() && d[o] != 0 {
+            if d[o] & 0xc0 == 0xc0 {
+                o += 1;
+                break;
+            }
+            o += 1 + d[o] as usize;
+            hops += 1;
+            if hops > 64 {
+                return None;
+            }
+        }
+        o += 1 + 4; // fim do nome + tipo/classe
+    }
+    // percorre as respostas atras do primeiro registro A
+    for _ in 0..ans.answers {
+        if o >= d.len() {
+            break;
+        }
+        // nome: rotulos ou ponteiro
+        let mut hops = 0;
+        while o < d.len() && d[o] != 0 {
+            if d[o] & 0xc0 == 0xc0 {
+                o += 1;
+                break;
+            }
+            o += 1 + d[o] as usize;
+            hops += 1;
+            if hops > 64 {
+                return None;
+            }
+        }
+        o += 1;
+        if o + 10 > d.len() {
+            break;
+        }
+        let rtype = be16(d, o);
+        let rdlen = be16(d, o + 8) as usize;
+        let ro = o + 10;
+        if ro + rdlen > d.len() {
+            break;
+        }
+        if rtype == 1 && rdlen == 4 && ans.a.is_none() {
+            let mut a = [0u8; 4];
+            a.copy_from_slice(&d[ro..ro + 4]);
+            ans.a = Some(a);
+        }
+        o = ro + rdlen;
+    }
+    Some(ans)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -511,6 +644,60 @@ mod tests {
     }
 
     #[test]
+    fn dns_query_and_answer() {
+        let mut f = [0u8; 512];
+        let n = dns_query(
+            &mut f,
+            MAC_A,
+            MAC_B,
+            IP_A,
+            [10, 0, 2, 3],
+            40000,
+            0x1234,
+            b"exemplo.nexo",
+        )
+        .unwrap();
+        assert!(n > 42);
+        assert!(dns_query(&mut f, MAC_A, MAC_B, IP_A, [10, 0, 2, 3], 40000, 1, b"").is_none());
+        // resposta sintetica: copia a pergunta, marca QR, 1 resposta A via ponteiro
+        let mut r = [0u8; 512];
+        let ro = eth_write(&mut r, MAC_A, MAC_B, ETHERTYPE_IPV4);
+        let qlen = n - ETH_HLEN - IPV4_HLEN - 8;
+        let alen = qlen + 16;
+        let po = ipv4_write(
+            &mut r,
+            ro,
+            [10, 0, 2, 3],
+            IP_A,
+            IPPROTO_UDP,
+            8 + alen,
+            64,
+            2,
+        );
+        let bo = udp_write(&mut r, po, DNS_PORT, 40000, alen);
+        r[bo..bo + qlen].copy_from_slice(&f[n - qlen..n]);
+        r[bo + 2] = 0x81; // QR + RD
+        r[bo + 3] = 0x80; // RA, rcode 0
+        r[bo + 7] = 1; // ANCOUNT = 1
+        let ao = bo + qlen;
+        r[ao..ao + 2].copy_from_slice(&0xc00cu16.to_be_bytes()); // ponteiro para a pergunta
+        r[ao + 2..ao + 4].copy_from_slice(&1u16.to_be_bytes()); // A
+        r[ao + 4..ao + 6].copy_from_slice(&1u16.to_be_bytes()); // IN
+        r[ao + 6..ao + 10].copy_from_slice(&60u32.to_be_bytes()); // TTL
+        r[ao + 10..ao + 12].copy_from_slice(&4u16.to_be_bytes());
+        r[ao + 12..ao + 16].copy_from_slice(&[93, 184, 216, 34]);
+        let total = ao + 16;
+        let ans = dns_parse(&r[..total], [10, 0, 2, 3], 40000, 0x1234).unwrap();
+        assert_eq!(ans.rcode, 0);
+        assert_eq!(ans.answers, 1);
+        assert_eq!(ans.a, Some([93, 184, 216, 34]));
+        // id errado -> ignora
+        assert!(dns_parse(&r[..total], [10, 0, 2, 3], 40000, 9).is_none());
+        // porta errada -> ignora
+        assert!(dns_parse(&r[..total], [10, 0, 2, 3], 40001, 0x1234).is_none());
+    }
+
+    #[test]
     fn fuzz_lite_parsers_never_panic() {
         let mut f = [0u8; 256];
         let n = icmp_echo_request(&mut f, MAC_A, MAC_B, IP_A, IP_B, 1, 1, &[7u8; 32]);
@@ -536,6 +723,7 @@ mod tests {
             }
             let _ = icmp_echo_reply(s, IP_B, 1, 1);
             let _ = dhcp_parse(s, 1);
+            let _ = dns_parse(s, [10, 0, 2, 3], 40000, 1);
             if s.len() > ETH_HLEN + IPV4_HLEN {
                 let _ = udp_parse(&s[ETH_HLEN + IPV4_HLEN..]);
             }

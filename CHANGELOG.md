@@ -97,6 +97,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo-netstack`: UDP (montagem/leitura com validação de tamanho) e cliente DHCP (DISCOVER/REQUEST com opções 53/50/54/55; parser de OFFER/ACK com xid, magic cookie e opções 1/3/6/54); testes de host e fuzz-lite ampliado.
 - Cenário `net` completo: **DHCP de verdade** contra o slirp (DISCOVER → OFFER → REQUEST → ACK; lease 10.0.2.15/24, gateway e DNS registrados no log) e o ARP + ping passam a usar o endereço do lease em vez de valores fixos.
 
+### Adicionado (Fase 4, bloco 4 — DNS)
+- `nexo-netstack`: consulta DNS A (montagem com rótulos validados) e parser de respostas (id/QR, perguntas puladas, ponteiros de compressão com limite, primeiro registro A); teste de host com resposta sintética e fuzz-lite ampliado.
+- Cenário `net` fecha o ciclo: DHCP → ARP → ping → **consulta DNS real** por `example.com` ao servidor do lease (10.0.2.3, encaminhada pelo slirp ao resolvedor do host), com o rcode/registro A no log.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

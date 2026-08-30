@@ -1269,7 +1269,7 @@ fn net_client() -> ! {
                 gw[4],
                 gw[5]
             );
-            net_ping(mac, gw, lease.ip, lease.router);
+            net_ping(mac, gw, lease.ip, lease.router, lease.dns);
         }
         if nexo_sys::time_now() - start > 20_000_000_000 {
             nexo_rt::log!("utest: net: sem ARP reply em 20 s");
@@ -1280,7 +1280,7 @@ fn net_client() -> ! {
 }
 
 /// Ping ICMP ao gateway com a biblioteca `nexo-netstack`; sai com 0 no echo reply.
-fn net_ping(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], gw_ip: [u8; 4]) -> ! {
+fn net_ping(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], gw_ip: [u8; 4], dns_ip: [u8; 4]) -> ! {
     use nexo_netstack as nsk;
     use nexo_proto::net::{RecvRequest, SendRequest, decode_recv_response, decode_send_response};
     let mut msg = [0u8; 4096];
@@ -1333,7 +1333,7 @@ fn net_ping(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], gw_ip: [u8; 4]) -> ! {
                     "utest: net ok — echo reply de 10.0.2.2 (ttl={}, 9 bytes)",
                     ttl
                 );
-                nexo_sys::exit(0)
+                dns_lookup(mac, gw, my_ip, dns_ip);
             }
             nexo_sys::exit(263)
         }
@@ -1408,4 +1408,83 @@ fn dhcp_handshake(mac: [u8; 6]) -> nexo_netstack::DhcpLease {
         nexo_sys::exit(276);
     }
     ack
+}
+
+/// Consulta DNS A por `example.com` ao servidor do lease (o slirp encaminha ao resolvedor do
+/// host); qualquer resposta valida com o mesmo id conta como sucesso (o rcode e registrado).
+fn dns_lookup(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], dns_ip: [u8; 4]) -> ! {
+    use nexo_netstack as nsk;
+    use nexo_proto::net::{RecvRequest, SendRequest, decode_recv_response, decode_send_response};
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    let mut send = SendRequest {
+        frame: [0; 1514],
+        frame_len: 0,
+    };
+    let Some(n) = nsk::dns_query(
+        &mut send.frame,
+        mac,
+        gw,
+        my_ip,
+        dns_ip,
+        40000,
+        0x4e59,
+        b"example.com",
+    ) else {
+        nexo_sys::exit(280)
+    };
+    send.frame_len = n as u32;
+    let m = send.encode_msg(&mut msg).unwrap_or(0);
+    if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+        nexo_sys::exit(281);
+    }
+    match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+        Ok((n, _)) if decode_send_response(&msg[..n]).is_ok() => {}
+        _ => nexo_sys::exit(282),
+    }
+    let start = nexo_sys::time_now();
+    loop {
+        let m = RecvRequest {}.encode_msg(&mut msg).unwrap_or(0);
+        if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(283);
+        }
+        let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+            Ok((n, _)) => n,
+            _ => nexo_sys::exit(284),
+        };
+        let mut frame = [0u8; 1514];
+        let flen = match decode_recv_response(&msg[..n]) {
+            Ok(r) => {
+                let l = r.frame().len();
+                frame[..l].copy_from_slice(r.frame());
+                l
+            }
+            Err(_) => nexo_sys::exit(285),
+        };
+        if let Some(ans) = nsk::dns_parse(&frame[..flen], dns_ip, 40000, 0x4e59) {
+            match ans.a {
+                Some(a) => nexo_rt::log!(
+                    "utest: dns ok — example.com rcode={} A={}.{}.{}.{}",
+                    ans.rcode,
+                    a[0],
+                    a[1],
+                    a[2],
+                    a[3]
+                ),
+                None => {
+                    nexo_rt::log!(
+                        "utest: dns ok — resposta rcode={} ({} registros)",
+                        ans.rcode,
+                        ans.answers
+                    );
+                }
+            }
+            nexo_sys::exit(0)
+        }
+        if nexo_sys::time_now() - start > 20_000_000_000 {
+            nexo_rt::log!("utest: dns: sem resposta em 20 s");
+            nexo_sys::exit(286)
+        }
+        nexo_sys::sleep_ns(20_000_000);
+    }
 }
