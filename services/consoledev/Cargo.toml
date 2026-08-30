@@ -9,6 +9,7 @@ build = "build.rs"
 [dependencies]
 nexo-sys.workspace = true
 nexo-rt = { workspace = true, features = ["panic-handler"] }
+nexo-proto.workspace = true
 nexo-virtio.workspace = true
 
 [lints.rust]

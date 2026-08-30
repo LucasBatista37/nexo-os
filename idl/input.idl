@@ -1,0 +1,13 @@
+# nexo.input — eventos de entrada (services/inputdev); formato evdev:
+# cada evento tem 8 bytes [type u16][code u16][value u32].
+# Erros remotos: 1 = pedido invalido.
+protocol input 1.0
+
+# Le os eventos disponiveis (sem bloquear; resposta pode vir vazia).
+method 1 poll {
+    request {
+    }
+    response {
+        events: bytes<3500>,
+    }
+}

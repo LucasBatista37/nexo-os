@@ -1,11 +1,12 @@
 //! `shell` — shell de diagnóstico na console VirtIO. Handle 0 = canal do `consoledev`
-//! (`nexo.console` v0), handle 1 = canal de um `vfs` (`nexo.fs` v0).
+//! (protocolo tipado `nexo.console` v1.0), handle 1 = canal de um `vfs` (`nexo.fs` v0).
 //! Comandos: `ajuda`, `info`, `tempo`, `ls [caminho]`, `cat <caminho>`,
 //! `escreve <caminho> <texto>`, `remove <caminho>`, `eco <texto>`, `sair`.
 #![no_std]
 #![no_main]
 
 use core::fmt::Write;
+use nexo_proto::console::{ReadRequest, WriteRequest, decode_read_response, decode_write_response};
 use nexo_rt::Buf;
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
@@ -14,26 +15,43 @@ const CON: Handle = 0;
 const VFS: Handle = 1;
 
 fn con_write(data: &[u8]) {
-    let mut msg = [0u8; 2048];
-    let n = data.len().min(2047);
-    msg[0] = 1;
-    msg[1..1 + n].copy_from_slice(&data[..n]);
-    if nexo_sys::channel_send(CON, &msg[..1 + n], &[]) != Status::Ok {
+    let mut msg = [0u8; 4096];
+    let n = data.len().min(2048);
+    let mut w = WriteRequest {
+        data: [0; 3500],
+        data_len: n as u32,
+    };
+    w.data[..n].copy_from_slice(&data[..n]);
+    let m = w.encode_msg(&mut msg).unwrap_or(0);
+    if nexo_sys::channel_send(CON, &msg[..m], &[]) != Status::Ok {
         nexo_sys::exit(70);
     }
-    let mut r = [0u8; 16];
     let mut hs = [0u32; 1];
-    let _ = nexo_sys::channel_recv(CON, &mut r, &mut hs);
+    match nexo_sys::channel_recv(CON, &mut msg, &mut hs) {
+        Ok((rn, _)) if decode_write_response(&msg[..rn]).is_ok() => {}
+        _ => nexo_sys::exit(74),
+    }
 }
 
+/// Le o que houver na console para `out`; devolve o tamanho.
 fn con_poll(out: &mut [u8; 4096]) -> usize {
-    let req = [0u8; 1];
-    if nexo_sys::channel_send(CON, &req, &[]) != Status::Ok {
+    let mut msg = [0u8; 64];
+    let m = ReadRequest {}.encode_msg(&mut msg).unwrap_or(0);
+    if nexo_sys::channel_send(CON, &msg[..m], &[]) != Status::Ok {
         nexo_sys::exit(71);
     }
     let mut hs = [0u32; 1];
     match nexo_sys::channel_recv(CON, out, &mut hs) {
-        Ok((n, _)) if n >= 1 && out[0] == 0 => n - 1,
+        Ok((n, _)) => match decode_read_response(&out[..n]) {
+            Ok(r) => {
+                let len = r.data().len();
+                let mut data = [0u8; 3500];
+                data[..len].copy_from_slice(r.data());
+                out[..len].copy_from_slice(&data[..len]);
+                len
+            }
+            Err(_) => 0,
+        },
         _ => 0,
     }
 }
@@ -189,8 +207,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             nexo_sys::sleep_ns(20_000_000);
             continue;
         }
-        for i in 0..n {
-            let c = inbuf[1 + i];
+        for &c in &inbuf[..n] {
             match c {
                 b'\r' | b'\n' => {
                     con_write(b"\r\n");

@@ -16,6 +16,7 @@ dependencies = [
 name = "nexo-consoledev"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
  "nexo-virtio",
@@ -83,6 +84,7 @@ dependencies = [
 name = "nexo-inputdev"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
  "nexo-virtio",
@@ -113,6 +115,7 @@ dependencies = [
 name = "nexo-shell"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
 ]

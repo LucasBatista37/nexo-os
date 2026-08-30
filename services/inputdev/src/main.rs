@@ -1,10 +1,11 @@
 //! `inputdev` — driver VirtIO-input (teclado/mouse). Handle 0 = concessão do dispositivo,
 //! handle 1 = canal. Fila 0 = eventos (`virtio_input_event`: `[type u16][code u16][value u32]`).
-//! Protocolo cru `nexo.input` v0: pedido `[0]` = ler eventos disponíveis (resposta
-//! `[0][evento 8 B]…`, possivelmente vazia, sem bloquear).
+//! Protocolo **tipado** `nexo.input` v1.0 (gerado de `idl/input.idl`; cabeçalho NXIP):
+//! `poll` devolve os eventos disponíveis (8 B cada, formato evdev), sem bloquear.
 #![no_std]
 #![no_main]
 
+use nexo_proto::input::{self, PollResponse, Request};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::{PciInfo, Status};
@@ -136,19 +137,24 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             Err(Status::PeerClosed) => nexo_sys::exit(0),
             Err(_) => fail(86, "recv"),
         };
-        if n == 0 || buf[0] != 0 {
-            let _ = nexo_sys::channel_send(CHAN, &[1u8], &[]);
+        let Ok(Request::Poll(_)) = input::decode_request(&buf[..n]) else {
+            let m = input::encode_error(0, 1, &mut reply).unwrap_or(0);
+            let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
             continue;
-        }
-        let mut out = 1usize;
+        };
+        let mut resp = PollResponse {
+            events: [0; 3500],
+            events_len: 0,
+        };
+        let mut out = 0usize;
         while let Some((id, len)) = q.pop_used() {
             let id = id as u16;
-            if id < nbufs && len >= EVENT_SIZE as u32 && out + 8 <= reply.len() {
+            if id < nbufs && len >= EVENT_SIZE as u32 && out + 8 <= resp.events.len() {
                 // SAFETY: página de DMA exclusiva; o evento tem 8 bytes dentro da página.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         (pool.virt + id as u64 * EVENT_SIZE) as *const u8,
-                        reply[out..].as_mut_ptr(),
+                        resp.events[out..].as_mut_ptr(),
                         8,
                     )
                 };
@@ -166,7 +172,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             }
         }
         let _ = t.isr_ack();
-        reply[0] = 0;
-        let _ = nexo_sys::channel_send(CHAN, &reply[..out], &[]);
+        resp.events_len = out as u32;
+        let m = resp.encode_msg(&mut reply).unwrap_or(0);
+        let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
     }
 }

@@ -923,25 +923,34 @@ fn vfs_client() -> ! {
 /// Modo 13: cliente do `inputdev` (handle 0): espera 3 teclas pressionadas (EV_KEY, value 1)
 /// injetadas pelo host via QMP e registra os codigos.
 fn input_client() -> ! {
-    let req = [0u8; 1];
-    let mut reply = [0u8; 4096];
+    use nexo_proto::input::{PollRequest, decode_poll_response};
+    let mut msg = [0u8; 4096];
     let mut hs = [0u32; 1];
     let mut keys = 0u32;
     let mut last_code = 0u16;
     let start = nexo_sys::time_now();
     loop {
-        if nexo_sys::channel_send(0, &req, &[]) != Status::Ok {
+        let m = PollRequest {}.encode_msg(&mut msg).unwrap_or(0);
+        if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
             nexo_sys::exit(240);
         }
-        let n = match nexo_sys::channel_recv(0, &mut reply, &mut hs) {
-            Ok((n, _)) if n >= 1 && reply[0] == 0 => n - 1,
+        let mut events = [0u8; 3500];
+        let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+            Ok((n, _)) => match decode_poll_response(&msg[..n]) {
+                Ok(r) => {
+                    let len = r.events().len();
+                    events[..len].copy_from_slice(r.events());
+                    len
+                }
+                Err(_) => nexo_sys::exit(241),
+            },
             _ => nexo_sys::exit(241),
         };
         let mut off = 0usize;
         while off + 8 <= n {
-            let ty = u16::from_le_bytes(reply[1 + off..3 + off].try_into().unwrap());
-            let code = u16::from_le_bytes(reply[3 + off..5 + off].try_into().unwrap());
-            let value = u32::from_le_bytes(reply[5 + off..9 + off].try_into().unwrap());
+            let ty = u16::from_le_bytes(events[off..off + 2].try_into().unwrap());
+            let code = u16::from_le_bytes(events[off + 2..off + 4].try_into().unwrap());
+            let value = u32::from_le_bytes(events[off + 4..off + 8].try_into().unwrap());
             if ty == 1 && value == 1 {
                 keys += 1;
                 last_code = code;

@@ -75,6 +75,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo.block` v1.0 migrado para a IDL (`idl/block.idl`): métodos `read`/`write`/`capacity`/`identity` com cabeçalho NXIP e erros remotos tipados; `blockdev` (servidor) e todos os clientes (`fs`, `espfs`, `devmgr`, `utest`) atualizados — restam crus `nexo.fs`, `nexo.esp`, `nexo.console` e `nexo.input`.
 - `tools/idlgen`: métodos sem campos geram encode/decode limpos (sem avisos).
 
+### Adicionado (Fase 3, bloco 11 — nexo.console e nexo.input tipados)
+- `nexo.console` v1.0 (`idl/console.idl`: `read`/`write`) e `nexo.input` v1.0 (`idl/input.idl`: `poll`) migrados para a IDL; `consoledev`, `shell`, `inputdev` e o cliente de teste falam NXIP. Dos protocolos crus restam `nexo.fs`, `nexo.esp` e os do bring-up (`svcmgr`/`echo`).
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

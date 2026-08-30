@@ -1,10 +1,11 @@
 //! `consoledev` — driver VirtIO-console (porta 0, sem `MULTIPORT`): fila 0 = recepção
 //! (host→guest), fila 1 = transmissão. Handle 0 = concessão do dispositivo, handle 1 = canal.
-//! Protocolo cru `nexo.console` v0: pedido `[op u8][dados…]` com `op` 0 = ler o que houver
-//! (resposta `[0][bytes…]`, possivelmente vazia) e 1 = escrever (resposta `[0]`).
+//! Protocolo **tipado** `nexo.console` v1.0 (gerado de `idl/console.idl`; cabeçalho NXIP):
+//! `read` (o que houver, sem bloquear) e `write`. Erro remoto 1 = pedido inválido.
 #![no_std]
 #![no_main]
 
+use nexo_proto::console::{self, ReadResponse, Request, WriteResponse};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::{PciInfo, Status};
@@ -137,23 +138,31 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             Err(Status::PeerClosed) => nexo_sys::exit(0),
             Err(_) => fail(67, "recv"),
         };
-        if n == 0 {
-            let _ = nexo_sys::channel_send(CHAN, &[1u8], &[]);
-            continue;
-        }
-        match buf[0] {
-            0 => {
+        let request = match console::decode_request(&buf[..n]) {
+            Ok(r) => r,
+            Err(_) => {
+                let m = console::encode_error(0, 1, &mut reply).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+                continue;
+            }
+        };
+        match request {
+            Request::Read(_) => {
                 // entrega tudo o que a recepcao tiver (sem bloquear)
-                let mut out = 1usize;
+                let mut resp = ReadResponse {
+                    data: [0; 3500],
+                    data_len: 0,
+                };
+                let mut out = 0usize;
                 while let Some((id, len)) = rx.pop_used() {
                     let id = id as usize;
                     let len = (len as usize).min(4096);
-                    if id < rx_bufs.len() && out + len <= reply.len() {
-                        // SAFETY: pagina de DMA exclusiva; len <= 4096 e cabe em reply.
+                    if id < rx_bufs.len() && out + len <= resp.data.len() {
+                        // SAFETY: pagina de DMA exclusiva; len <= 4096 e cabe em resp.data.
                         unsafe {
                             core::ptr::copy_nonoverlapping(
                                 rx_bufs[id].virt as *const u8,
-                                reply[out..].as_mut_ptr(),
+                                resp.data[out..].as_mut_ptr(),
                                 len,
                             )
                         };
@@ -165,12 +174,13 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     }
                 }
                 let _ = t.isr_ack();
-                reply[0] = 0;
-                let _ = nexo_sys::channel_send(CHAN, &reply[..out], &[]);
+                resp.data_len = out as u32;
+                let m = resp.encode_msg(&mut reply).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
             }
-            1 => {
-                let data = &buf[1..n];
-                let len = data.len().min(4096);
+            Request::Write(w) => {
+                let len = w.data().len().min(4096);
+                let data = &w.data()[..len];
                 // SAFETY: pagina de DMA exclusiva; len <= 4096.
                 unsafe {
                     core::ptr::copy_nonoverlapping(data.as_ptr(), tx_buf.virt as *mut u8, len)
@@ -192,10 +202,12 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     }
                 }
                 let _ = t.isr_ack();
-                let _ = nexo_sys::channel_send(CHAN, &[0u8], &[]);
-            }
-            _ => {
-                let _ = nexo_sys::channel_send(CHAN, &[1u8], &[]);
+                let m = WriteResponse {
+                    written: len as u32,
+                }
+                .encode_msg(&mut reply)
+                .unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
             }
         }
     }

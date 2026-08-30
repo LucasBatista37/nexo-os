@@ -1,0 +1,22 @@
+# nexo.console — porta serial paravirtualizada (services/consoledev)
+# Erros remotos: 1 = pedido invalido, 2 = dispositivo nao respondeu.
+protocol console 1.0
+
+# Le o que houver na recepcao (sem bloquear; resposta pode vir vazia).
+method 1 read {
+    request {
+    }
+    response {
+        data: bytes<3500>,
+    }
+}
+
+# Escreve na transmissao.
+method 2 write {
+    request {
+        data: bytes<3500>,
+    }
+    response {
+        written: u32,
+    }
+}
