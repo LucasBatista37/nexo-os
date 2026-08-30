@@ -6,6 +6,7 @@ version = 4
 name = "nexo-blockdev"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
  "nexo-virtio",
@@ -24,6 +25,7 @@ dependencies = [
 name = "nexo-devmgr"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
  "nexo-virtio",
@@ -50,6 +52,7 @@ name = "nexo-espfs"
 version = "0.0.1"
 dependencies = [
  "nexo-fat",
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
 ]
@@ -62,6 +65,7 @@ version = "0.0.1"
 name = "nexo-fs"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
  "nexofs",

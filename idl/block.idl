@@ -1,0 +1,45 @@
+# nexo.block — dispositivo de blocos (services/blockdev)
+# Erros remotos: 1 = pedido invalido, 2 = fora da capacidade, 3 = dados insuficientes,
+# 4 = dispositivo somente leitura, 0x10|st = erro do dispositivo VirtIO.
+protocol block 1.0
+
+# Le `count` setores (1..=7) a partir de `sector`.
+method 1 read {
+    request {
+        sector: u64,
+        count: u32,
+    }
+    response {
+        data: bytes<3584>,
+    }
+}
+
+# Escreve `count` setores a partir de `sector`.
+method 2 write {
+    request {
+        sector: u64,
+        count: u32,
+        data: bytes<3584>,
+    }
+    response {
+    }
+}
+
+# Capacidade do disco em setores.
+method 3 capacity {
+    request {
+    }
+    response {
+        sectors: u64,
+    }
+}
+
+# Identidade: somente leitura + serial (GET_ID).
+method 4 identity {
+    request {
+    }
+    response {
+        read_only: u8,
+        serial: bytes<20>,
+    }
+}

@@ -114,9 +114,14 @@ def gen_struct(out, proto_name, m, sec):
                 out.append("    }")
     # encode_payload
     out.append("    /// Codifica o payload; devolve o tamanho.")
-    out.append("    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {")
-    out.append("        let mut o = 0usize;")
-    for f in fields:
+    if not fields:
+        out.append("    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {")
+        out.append("        Ok(0)")
+        out.append("    }")
+    else:
+        out.append("    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {")
+        out.append("        let mut o = 0usize;")
+    for f in fields if fields else []:
         if f["max"] is not None:
             out.append(f"        let n = self.{f['name']}_len as usize;")
             out.append(f"        if n > {f['max']} {{ return Err(ProtoError::TooBig); }}")
@@ -129,13 +134,19 @@ def gen_struct(out, proto_name, m, sec):
             out.append(f"        if o + {size} > out.len() {{ return Err(ProtoError::Short); }}")
             out.append(f"        out[o..o + {size}].copy_from_slice(&self.{f['name']}.to_le_bytes());")
             out.append(f"        o += {size};")
-    out.append("        Ok(o)")
-    out.append("    }")
+    if fields:
+        out.append("        Ok(o)")
+        out.append("    }")
     # decode_payload
     out.append("    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao")
     out.append("    /// ausentes assumem o padrao — ipc-compat §3).")
-    out.append("    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {")
-    out.append("        let mut o = 0usize;")
+    if not fields:
+        out.append("    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {")
+        out.append(f"        Ok({name} {{}})")
+        out.append("    }")
+    else:
+        out.append("    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {")
+        out.append("        let mut o = 0usize;")
     for f in fields:
         n = f["name"]
         if f["max"] is not None:
@@ -163,14 +174,16 @@ def gen_struct(out, proto_name, m, sec):
                 out.append(f"        if o + {size} > b.len() {{ return Err(ProtoError::Short); }}")
                 out.append(f"        let {n} = {ty}::from_le_bytes(b[o..o + {size}].try_into().unwrap());")
                 out.append(f"        o += {size};")
-    out.append("        let _ = o;")
-    parts = []
-    for f in fields:
-        parts.append(f["name"])
-        if f["max"] is not None:
-            parts.append(f["name"] + "_len")
-    out.append(f"        Ok({name} {{ {', '.join(parts)} }})")
-    out.append("    }")
+    if fields:
+        out.append("        let _ = o;")
+    if fields:
+        parts = []
+        for f in fields:
+            parts.append(f["name"])
+            if f["max"] is not None:
+                parts.append(f["name"] + "_len")
+        out.append(f"        Ok({name} {{ {', '.join(parts)} }})")
+        out.append("    }")
     # encode_msg
     flags = "0" if sec == "request" else "FLAG_RESPONSE"
     out.append("    /// Codifica a mensagem completa (cabecalho NXIP + payload).")
@@ -215,6 +228,8 @@ def generate(path: pathlib.Path) -> str:
     # enum Request + decode_request
     out.append("/// Pedido decodificado.")
     out.append("#[derive(Clone, Debug, PartialEq, Eq)]")
+    out.append("// Sem alocador no espaço de usuário: variantes grandes (buffers embutidos) são inerentes.")
+    out.append("#[allow(clippy::large_enum_variant)]")
     out.append("pub enum Request {")
     for m in methods:
         out.append(f"    /// `{m['name']}`.")

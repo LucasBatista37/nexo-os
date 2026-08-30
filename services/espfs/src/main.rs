@@ -7,6 +7,7 @@
 #![no_main]
 
 use nexo_fat::{Fat, FatError, IoError, SECTOR, SectorDevice};
+use nexo_proto::block::{self, CapacityRequest, ReadRequest};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
@@ -20,8 +21,8 @@ struct ChanDisk {
     sectors: u64,
     cache_lba: u64,
     cache: [u8; 7 * SECTOR],
-    req: [u8; 16],
-    reply: [u8; 1 + 7 * SECTOR],
+    req: [u8; 64],
+    reply: [u8; 64 + 7 * SECTOR],
 }
 
 impl ChanDisk {
@@ -30,19 +31,24 @@ impl ChanDisk {
             sectors: 0,
             cache_lba: u64::MAX,
             cache: [0; 7 * SECTOR],
-            req: [0; 16],
-            reply: [0; 1 + 7 * SECTOR],
+            req: [0; 64],
+            reply: [0; 64 + 7 * SECTOR],
         };
-        d.req[0] = 2;
-        if nexo_sys::channel_send(BLK, &d.req, &[]) != Status::Ok {
+        let m = CapacityRequest {}
+            .encode_msg(&mut d.req)
+            .map_err(|_| "encode")?;
+        if nexo_sys::channel_send(BLK, &d.req[..m], &[]) != Status::Ok {
             return Err("send");
         }
         let mut hs = [0u32; 1];
         match nexo_sys::channel_recv(BLK, &mut d.reply, &mut hs) {
-            Ok((9, _)) if d.reply[0] == 0 => {
-                d.sectors = u64::from_le_bytes(d.reply[1..9].try_into().unwrap());
-                Ok(d)
-            }
+            Ok((n, _)) => match block::decode_capacity_response(&d.reply[..n]) {
+                Ok(r) => {
+                    d.sectors = r.sectors;
+                    Ok(d)
+                }
+                Err(_) => Err("capacidade"),
+            },
             _ => Err("capacidade"),
         }
     }
@@ -59,19 +65,23 @@ impl SectorDevice for ChanDisk {
         if self.cache_lba == u64::MAX || lba < self.cache_lba || lba >= self.cache_lba + CHUNK {
             let start = lba.min(self.sectors.saturating_sub(CHUNK));
             let count = CHUNK.min(self.sectors - start) as u32;
-            self.req[0] = 0;
-            self.req[1..4].fill(0);
-            self.req[4..12].copy_from_slice(&start.to_le_bytes());
-            self.req[12..16].copy_from_slice(&count.to_le_bytes());
-            if nexo_sys::channel_send(BLK, &self.req, &[]) != Status::Ok {
+            let rq = ReadRequest {
+                sector: start,
+                count,
+            };
+            let m = rq.encode_msg(&mut self.req).map_err(|_| IoError)?;
+            if nexo_sys::channel_send(BLK, &self.req[..m], &[]) != Status::Ok {
                 return Err(IoError);
             }
             let mut hs = [0u32; 1];
             match nexo_sys::channel_recv(BLK, &mut self.reply, &mut hs) {
-                Ok((n, _)) if n == 1 + count as usize * SECTOR && self.reply[0] == 0 => {
-                    self.cache[..n - 1].copy_from_slice(&self.reply[1..n]);
-                    self.cache_lba = start;
-                }
+                Ok((n, _)) => match block::decode_read_response(&self.reply[..n]) {
+                    Ok(r) if r.data().len() == count as usize * SECTOR => {
+                        self.cache[..r.data().len()].copy_from_slice(r.data());
+                        self.cache_lba = start;
+                    }
+                    _ => return Err(IoError),
+                },
                 _ => return Err(IoError),
             }
         }

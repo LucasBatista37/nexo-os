@@ -6,6 +6,7 @@
 #![no_std]
 #![no_main]
 
+use nexo_proto::block::{self, CapacityRequest, ReadRequest, WriteRequest};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
@@ -22,8 +23,8 @@ const CACHE_BLOCKS: usize = 8;
 
 struct ChanDisk {
     blocks: u64,
-    req: [u8; 16 + BLOCK],
-    reply: [u8; 1 + BLOCK],
+    req: [u8; 64 + BLOCK],
+    reply: [u8; 64 + BLOCK],
     cache_tags: [u64; CACHE_BLOCKS],
     cache: [[u8; BLOCK]; CACHE_BLOCKS],
     hits: u64,
@@ -34,33 +35,30 @@ impl ChanDisk {
     fn open() -> Result<Self, &'static str> {
         let mut d = ChanDisk {
             blocks: 0,
-            req: [0; 16 + BLOCK],
-            reply: [0; 1 + BLOCK],
+            req: [0; 64 + BLOCK],
+            reply: [0; 64 + BLOCK],
             cache_tags: [u64::MAX; CACHE_BLOCKS],
             cache: [[0; BLOCK]; CACHE_BLOCKS],
             hits: 0,
             misses: 0,
         };
-        d.req[0] = 2; // capacidade
-        if nexo_sys::channel_send(BLK, &d.req[..16], &[]) != Status::Ok {
+        let m = CapacityRequest {}
+            .encode_msg(&mut d.req)
+            .map_err(|_| "encode")?;
+        if nexo_sys::channel_send(BLK, &d.req[..m], &[]) != Status::Ok {
             return Err("send");
         }
         let mut hs = [0u32; 1];
         match nexo_sys::channel_recv(BLK, &mut d.reply, &mut hs) {
-            Ok((9, _)) if d.reply[0] == 0 => {
-                let sectors = u64::from_le_bytes(d.reply[1..9].try_into().unwrap());
-                d.blocks = sectors.saturating_sub(RESERVED_TAIL_SECTORS) / SECTORS_PER_BLOCK;
-                Ok(d)
-            }
+            Ok((n, _)) => match block::decode_capacity_response(&d.reply[..n]) {
+                Ok(r) => {
+                    d.blocks = r.sectors.saturating_sub(RESERVED_TAIL_SECTORS) / SECTORS_PER_BLOCK;
+                    Ok(d)
+                }
+                Err(_) => Err("capacidade"),
+            },
             _ => Err("capacidade"),
         }
-    }
-
-    fn header(&mut self, op: u8, block: u64) {
-        self.req[0] = op;
-        self.req[1..4].fill(0);
-        self.req[4..12].copy_from_slice(&(block * SECTORS_PER_BLOCK).to_le_bytes());
-        self.req[12..16].copy_from_slice(&(SECTORS_PER_BLOCK as u32).to_le_bytes());
     }
 }
 
@@ -79,18 +77,25 @@ impl BlockDevice for ChanDisk {
             return Ok(());
         }
         self.misses += 1;
-        self.header(0, block);
-        if nexo_sys::channel_send(BLK, &self.req[..16], &[]) != Status::Ok {
+        let rq = ReadRequest {
+            sector: block * SECTORS_PER_BLOCK,
+            count: SECTORS_PER_BLOCK as u32,
+        };
+        let m = rq.encode_msg(&mut self.req).map_err(|_| IoError)?;
+        if nexo_sys::channel_send(BLK, &self.req[..m], &[]) != Status::Ok {
             return Err(IoError);
         }
         let mut hs = [0u32; 1];
         match nexo_sys::channel_recv(BLK, &mut self.reply, &mut hs) {
-            Ok((n, _)) if n == 1 + BLOCK && self.reply[0] == 0 => {
-                buf.copy_from_slice(&self.reply[1..1 + BLOCK]);
-                self.cache_tags[slot] = block;
-                self.cache[slot].copy_from_slice(buf);
-                Ok(())
-            }
+            Ok((n, _)) => match block::decode_read_response(&self.reply[..n]) {
+                Ok(r) if r.data().len() == BLOCK => {
+                    buf.copy_from_slice(r.data());
+                    self.cache_tags[slot] = block;
+                    self.cache[slot].copy_from_slice(buf);
+                    Ok(())
+                }
+                _ => Err(IoError),
+            },
             _ => Err(IoError),
         }
     }
@@ -101,14 +106,22 @@ impl BlockDevice for ChanDisk {
         let slot = (block % CACHE_BLOCKS as u64) as usize;
         self.cache_tags[slot] = block;
         self.cache[slot].copy_from_slice(buf);
-        self.header(1, block);
-        self.req[16..].copy_from_slice(buf);
-        if nexo_sys::channel_send(BLK, &self.req, &[]) != Status::Ok {
+        let mut rq = WriteRequest {
+            sector: block * SECTORS_PER_BLOCK,
+            count: SECTORS_PER_BLOCK as u32,
+            data: [0; 3584],
+            data_len: BLOCK as u32,
+        };
+        rq.data[..BLOCK].copy_from_slice(buf);
+        let m = rq.encode_msg(&mut self.req).map_err(|_| IoError)?;
+        if nexo_sys::channel_send(BLK, &self.req[..m], &[]) != Status::Ok {
             return Err(IoError);
         }
         let mut hs = [0u32; 1];
         match nexo_sys::channel_recv(BLK, &mut self.reply, &mut hs) {
-            Ok((1, _)) if self.reply[0] == 0 => Ok(()),
+            Ok((n, _)) => block::decode_write_response(&self.reply[..n])
+                .map(|_| ())
+                .map_err(|_| IoError),
             _ => Err(IoError),
         }
     }

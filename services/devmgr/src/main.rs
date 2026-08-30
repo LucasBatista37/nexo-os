@@ -6,6 +6,7 @@
 #![no_std]
 #![no_main]
 
+use nexo_proto::block::{self, IdentityRequest};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::{PciInfo, Status};
@@ -32,19 +33,25 @@ fn fail(code: i64, what: &str) -> ! {
 
 /// Pergunta ao `blockdev` (op 3) o serial e se é somente leitura.
 fn block_identity(ch: Handle) -> (bool, [u8; 20]) {
-    let mut req = [0u8; 16];
-    req[0] = 3;
-    let mut reply = [0u8; 32];
+    let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    if nexo_sys::channel_send(ch, &req, &[]) == Status::Ok
-        && let Ok((22, _)) = nexo_sys::channel_recv(ch, &mut reply, &mut hs)
-        && reply[0] == 0
-    {
-        let mut serial = [0u8; 20];
-        serial.copy_from_slice(&reply[2..22]);
-        return (reply[1] != 0, serial);
+    let Ok(m) = IdentityRequest {}.encode_msg(&mut buf) else {
+        return (false, [0; 20]);
+    };
+    if nexo_sys::channel_send(ch, &buf[..m], &[]) != Status::Ok {
+        return (false, [0; 20]);
     }
-    (false, [0; 20])
+    let Ok((n, _)) = nexo_sys::channel_recv(ch, &mut buf, &mut hs) else {
+        return (false, [0; 20]);
+    };
+    match block::decode_identity_response(&buf[..n]) {
+        Ok(r) => {
+            let mut serial = [0u8; 20];
+            serial[..r.serial().len().min(20)].copy_from_slice(r.serial());
+            (r.read_only != 0, serial)
+        }
+        Err(_) => (false, [0; 20]),
+    }
 }
 
 fn serial_str(serial: &[u8; 20]) -> &str {

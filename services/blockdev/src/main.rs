@@ -1,12 +1,14 @@
 //! `blockdev` — driver VirtIO-block em modo usuário (VirtIO 1.x sobre PCI, interface moderna,
 //! fila dividida, MSI-X; transporte em `nexo-virtio`). Handle 0 = concessão de dispositivo;
-//! handle 1 = canal de pedidos. Protocolo provisório `nexo.block` v0 (`docs/spec/ipc-compat.md` §5):
-//! pedido `[op u8][pad 3][setor u64][n u32][dados…]` com `op` 0 = ler, 1 = escrever,
-//! 2 = capacidade; resposta `[status u8][dados…]`.
+//! handle 1 = canal de pedidos com o protocolo **tipado** `nexo.block` v1.0 (gerado de
+//! `idl/block.idl`; cabeçalho NXIP): `read`, `write`, `capacity`, `identity`. Erros remotos:
+//! 1 = pedido inválido, 2 = fora da capacidade, 3 = dados insuficientes, 4 = somente leitura,
+//! `0x10|st` = erro do dispositivo VirtIO.
 //! Argumento: `crash_after` — cai de propósito após esse número de pedidos (0 = nunca; testes).
 #![no_std]
 #![no_main]
 
+use nexo_proto::block::{self, ReadResponse, Request, WriteResponse};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::{PciInfo, Status};
@@ -241,6 +243,7 @@ pub extern "C" fn _start(crash_after: u64) -> ! {
         core::str::from_utf8(&dev.serial[..serial_len]).unwrap_or("?")
     );
     let mut buf = [0u8; 4096];
+    let mut reply = [0u8; 4096];
     let mut hs = [0u32; 1];
     let mut served = 0u64;
     loop {
@@ -252,84 +255,108 @@ pub extern "C" fn _start(crash_after: u64) -> ! {
             }
             Err(_) => fail(20, "recv"),
         };
-        if n < 16 {
-            let _ = nexo_sys::channel_send(CHAN, &[1u8], &[]);
-            continue;
-        }
-        let op = buf[0];
-        if op == 2 {
-            let mut r = [0u8; 9];
-            r[1..9].copy_from_slice(&dev.capacity.to_le_bytes());
-            let _ = nexo_sys::channel_send(CHAN, &r, &[]);
-            served += 1;
-            continue;
-        }
-        if op == 3 {
-            let mut r = [0u8; 22];
-            r[1] = dev.read_only as u8;
-            r[2..22].copy_from_slice(&dev.serial);
-            let _ = nexo_sys::channel_send(CHAN, &r, &[]);
-            served += 1;
-            continue;
-        }
-        if op == 1 && dev.read_only {
-            let _ = nexo_sys::channel_send(CHAN, &[4u8], &[]);
-            continue;
-        }
-        let sector = u64::from_le_bytes(buf[4..12].try_into().unwrap());
-        let count = u32::from_le_bytes(buf[12..16].try_into().unwrap()) as usize;
-        if count == 0 || count > MAX_SECTORS || sector + count as u64 > dev.capacity {
-            let _ = nexo_sys::channel_send(CHAN, &[2u8], &[]);
-            continue;
-        }
-        if crash_after != 0 && served >= crash_after {
-            log!("blockdev: caindo de proposito no pedido {}", served + 1);
+        let request = match block::decode_request(&buf[..n]) {
+            Ok(r) => r,
+            Err(_) => {
+                let m = block::encode_error(0, 1, &mut reply).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+                continue;
+            }
+        };
+        served += 1;
+        if crash_after != 0 && served > crash_after {
+            log!("blockdev: caindo de proposito no pedido {}", served);
             // SAFETY: deliberadamente inválido — o kernel encerra este processo.
             let v = unsafe { core::ptr::read_volatile(core::ptr::dangling::<u64>()) };
             nexo_sys::exit(21 + (v & 1) as i64)
         }
-        let bytes = count * SECTOR;
-        let result = if op == 1 {
-            if n < 16 + bytes {
-                let _ = nexo_sys::channel_send(CHAN, &[3u8], &[]);
-                continue;
+        match request {
+            Request::Capacity(_) => {
+                let m = block::CapacityResponse {
+                    sectors: dev.capacity,
+                }
+                .encode_msg(&mut reply)
+                .unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
             }
-            // SAFETY: página de DMA exclusiva; `bytes <= 3584`.
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    buf[16..16 + bytes].as_ptr(),
-                    dev.data.virt as *mut u8,
-                    bytes,
-                )
-            };
-            dev.request(true, sector, count)
-        } else {
-            dev.request(false, sector, count)
-        };
-        let mut reply = [0u8; 4096];
-        match result {
-            Ok(()) => {
-                reply[0] = 0;
-                let len = if op == 0 {
+            Request::Identity(_) => {
+                let mut r = block::IdentityResponse {
+                    read_only: dev.read_only as u8,
+                    serial: [0; 20],
+                    serial_len: 20,
+                };
+                r.serial.copy_from_slice(&dev.serial);
+                let m = r.encode_msg(&mut reply).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+            }
+            Request::Read(rq) => {
+                let count = rq.count as usize;
+                let m = if count == 0
+                    || count > MAX_SECTORS
+                    || rq.sector + rq.count as u64 > dev.capacity
+                {
+                    block::encode_error(block::ReadRequest::METHOD_ID, 2, &mut reply).unwrap_or(0)
+                } else {
+                    match dev.request(false, rq.sector, count) {
+                        Ok(()) => {
+                            let bytes = count * SECTOR;
+                            let mut r = ReadResponse {
+                                data: [0; 3584],
+                                data_len: bytes as u32,
+                            };
+                            // SAFETY: página de DMA exclusiva; `bytes <= 3584`.
+                            unsafe {
+                                core::ptr::copy_nonoverlapping(
+                                    dev.data.virt as *const u8,
+                                    r.data.as_mut_ptr(),
+                                    bytes,
+                                )
+                            };
+                            r.encode_msg(&mut reply).unwrap_or(0)
+                        }
+                        Err(st) => block::encode_error(
+                            block::ReadRequest::METHOD_ID,
+                            0x10 | (st & 0xf) as u32,
+                            &mut reply,
+                        )
+                        .unwrap_or(0),
+                    }
+                };
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+            }
+            Request::Write(rq) => {
+                let count = rq.count as usize;
+                let bytes = count * SECTOR;
+                let m = if dev.read_only {
+                    block::encode_error(block::WriteRequest::METHOD_ID, 4, &mut reply).unwrap_or(0)
+                } else if count == 0
+                    || count > MAX_SECTORS
+                    || rq.sector + rq.count as u64 > dev.capacity
+                {
+                    block::encode_error(block::WriteRequest::METHOD_ID, 2, &mut reply).unwrap_or(0)
+                } else if (rq.data_len as usize) < bytes {
+                    block::encode_error(block::WriteRequest::METHOD_ID, 3, &mut reply).unwrap_or(0)
+                } else {
                     // SAFETY: página de DMA exclusiva; `bytes <= 3584`.
                     unsafe {
                         core::ptr::copy_nonoverlapping(
-                            dev.data.virt as *const u8,
-                            reply[1..].as_mut_ptr(),
+                            rq.data.as_ptr(),
+                            dev.data.virt as *mut u8,
                             bytes,
                         )
                     };
-                    1 + bytes
-                } else {
-                    1
+                    match dev.request(true, rq.sector, count) {
+                        Ok(()) => WriteResponse {}.encode_msg(&mut reply).unwrap_or(0),
+                        Err(st) => block::encode_error(
+                            block::WriteRequest::METHOD_ID,
+                            0x10 | (st & 0xf) as u32,
+                            &mut reply,
+                        )
+                        .unwrap_or(0),
+                    }
                 };
-                let _ = nexo_sys::channel_send(CHAN, &reply[..len], &[]);
-            }
-            Err(st) => {
-                reply[0] = 0x10 | (st & 0xf);
-                let _ = nexo_sys::channel_send(CHAN, &reply[..1], &[]);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
             }
         }
-        served += 1;
     }
 }

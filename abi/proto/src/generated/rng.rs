@@ -136,6 +136,8 @@ impl FillResponse {
 
 /// Pedido decodificado.
 #[derive(Clone, Debug, PartialEq, Eq)]
+// Sem alocador no espaço de usuário: variantes grandes (buffers embutidos) são inerentes.
+#[allow(clippy::large_enum_variant)]
 pub enum Request {
     /// `fill`.
     Fill(FillRequest),
