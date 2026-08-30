@@ -20,7 +20,9 @@ static RO: [u64; 4] = [1, 2, 3, 4];
 /// Ponto de entrada (pilha alinhada pelo kernel; `RDI` = modo).
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(mode: u64) -> ! {
-    match mode {
+    // Bits 0..8 = modo; bits 8.. = parametro (semente do fuzz no modo 7).
+    let param = mode >> 8;
+    match mode & 0xff {
         0 => normal(),
         1 => {
             nexo_sys::log("utest: modo 1 — vou ler memoria do kernel");
@@ -48,7 +50,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         }
         5 => ipc_server(),
         6 => ipc_client(),
-        7 => syscall_fuzz(),
+        7 => syscall_fuzz(param),
         8 => block_client(),
         9 => fs_client(),
         10 => fs_churn(),
@@ -228,9 +230,15 @@ impl Rng {
 }
 
 /// Fuzz de syscalls: nada aqui pode derrubar o kernel nem travar este processo.
-fn syscall_fuzz() -> ! {
+fn syscall_fuzz(seed: u64) -> ! {
     use nexo_sys::abi::*;
-    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let seed = if seed == 0 {
+        0x9e37_79b9_7f4a_7c15
+    } else {
+        seed
+    };
+    nexo_rt::log!("utest: fuzz semente {:#x}", seed);
+    let mut rng = Rng(seed);
     let buf = [0u8; 4096];
     let mut sink = [0u32; 16];
     let (ch_a, ch_b) = nexo_sys::channel_create().unwrap_or((u32::MAX, u32::MAX));

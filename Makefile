@@ -4,7 +4,7 @@
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress roadmap idl idl-check
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz roadmap idl idl-check
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 DURATION ?= 600
@@ -59,8 +59,16 @@ ci: lint idl-check test-host image test-qemu reproducible
 stress: image
 	tools/build-image --no-build --cmdline "selftest=0 stress=$(DURATION) exit" --out build/nexo-stress-long.img
 	mkdir -p build/logs
-	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress-long.log; \
+	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --disk build/nexo-stress-data.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress-long.log; \
 	rc=$$?; if [ $$rc -eq 33 ]; then echo "[nexo] stress de $(DURATION)s: PASS"; else echo "[nexo] stress: FALHA (codigo $$rc)"; exit 1; fi
+
+# Fuzz de syscalls com sementes aleatorias (derivadas do TSC, registradas no log) por
+# DURATION segundos; usado pelo workflow semanal .github/workflows/fuzz.yml.
+fuzz: image
+	tools/build-image --no-build --cmdline "selftest=0 fuzz=$(DURATION) exit" --out build/nexo-fuzz.img
+	mkdir -p build/logs
+	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-fuzz.img --disk build/nexo-fuzz-data.img --timeout $$(( $(DURATION) + 600 )) --log build/logs/fuzz.log; \
+	rc=$$?; if [ $$rc -eq 33 ]; then echo "[nexo] fuzz de $(DURATION)s: PASS"; else echo "[nexo] fuzz: FALHA (codigo $$rc)"; exit 1; fi
 
 # Regenera os protocolos tipados a partir de idl/*.idl (abi/proto/src/generated) e formata
 # (a saida do gerador so e estavel depois do rustfmt).

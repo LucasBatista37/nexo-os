@@ -88,6 +88,9 @@ fn kmain(bi: &'static BootInfo) -> ! {
     if let Some(secs) = cmdline_value(cmdline, "stress").and_then(|v| v.parse::<u64>().ok()) {
         ok = stress::run(secs) && ok;
     }
+    if let Some(secs) = cmdline_value(cmdline, "fuzz").and_then(|v| v.parse::<u64>().ok()) {
+        ok = selftest::fuzz_mode(secs) && ok;
+    }
     if cmdline_value(cmdline, "fs-churn").is_some() {
         selftest::fs_churn();
     }

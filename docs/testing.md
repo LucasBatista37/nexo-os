@@ -18,6 +18,7 @@
 | Stress (SMP) | `tools/test-qemu --scenario stress` (15 s no CI) · `make stress DURATION=86400 SMP=4` (gate F1) | threads de lock/atomics/heap/sleep/spawn-join/map-unmap em todas as CPUs; a cada segundo `[STRESS] t=…` com invariantes (contador com lock exato, heap e quadros sem vazamento, ≥ 2 CPUs); fim com `[STRESS] PASS` |
 | Fuzz-lite (host) | `cargo test --workspace` (testes `fuzz_lite_*`) | mutação determinística de entradas válidas nos parsers de ELF, initrd, ACPI, símbolos e ABI de boot: nunca podem entrar em pânico |
 | Fuzz de syscalls (kernel) | teste `user_syscall_fuzz` (`utest` modo 7) | 20 000 syscalls aleatórias de um processo de usuário; o processo sobrevive e o kernel não vaza quadros nem canais |
+| Fuzzing contínuo | `make fuzz DURATION=1800` · workflow `fuzz` (semanal/cron + manual) | rodadas de 20 000 syscalls com sementes aleatórias do TSC (logadas para reprodução) até esgotar o tempo, checando vazamentos por rodada; host: todos os testes `*fuzz*` |
 | Reprodutibilidade | `make reproducible` | duas builds → mesma imagem |
 | Lint | `make lint` | fmt + clippy `-D warnings` nos três workspaces |
 

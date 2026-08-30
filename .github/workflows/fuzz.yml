@@ -1,0 +1,49 @@
+# Fuzzing contínuo (Plano §4.6/§14): toda semana, fuzz de syscalls com sementes aleatórias
+# derivadas do TSC (30 min em QEMU) + os testes fuzz-lite de host. Sementes ficam no log
+# para reproduzir falhas (utest: fuzz semente 0x...).
+name: fuzz
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # segundas 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "duração do fuzz em QEMU (segundos)"
+        default: "1800"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: fuzz de syscalls (QEMU) + fuzz-lite de host
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependências do sistema (QEMU, OVMF, mtools)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf mtools
+
+      - name: Toolchain fixada
+        run: |
+          rustup toolchain install $(grep '^channel' rust-toolchain.toml | cut -d'"' -f2) --profile minimal
+          rustup component add rustfmt clippy llvm-tools
+          rustup target add x86_64-unknown-none x86_64-unknown-uefi
+
+      - name: Fuzz-lite de host (parsers, FS, FAT, protocolos)
+        run: cargo test --workspace fuzz
+
+      - name: Fuzz de syscalls em QEMU
+        run: make fuzz DURATION=${{ github.event.inputs.duration || 1800 }}
+
+      - name: Log do fuzz
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-log
+          path: build/logs/fuzz.log
+          if-no-files-found: ignore

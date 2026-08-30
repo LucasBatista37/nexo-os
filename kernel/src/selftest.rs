@@ -1621,6 +1621,48 @@ pub fn input_test_mode() {
     kinfo!("[INPUT] teste de entrada terminou com {code}");
 }
 
+/// `fuzz=<segundos>` na linha de comando: rodadas de fuzz de syscalls (utest modo 7) com
+/// sementes derivadas do TSC (registradas no log para reproduzir), checando vazamentos de
+/// quadros/canais a cada rodada, ate esgotar o orcamento de tempo.
+pub fn fuzz_mode(secs: u64) -> bool {
+    let deadline = crate::time::monotonic_ns() + secs.saturating_mul(1_000_000_000);
+    let mut rounds = 0u64;
+    let mut ok = true;
+    kinfo!("[FUZZ] iniciando: {secs} s de fuzz de syscalls (20000 por rodada)");
+    while crate::time::monotonic_ns() < deadline {
+        rounds += 1;
+        let seed = crate::time::monotonic_ns() | 1;
+        let frames0 = phys::stats().free;
+        let ends0 = crate::ipc::live_channel_ends();
+        let arg = 7 | (seed << 8);
+        let code = match crate::process::spawn_named("utest", arg, Vec::new()) {
+            Ok(p) => crate::process::wait_and_reap(&p),
+            Err(e) => {
+                kerror!("[FUZZ] rodada {rounds}: spawn falhou: {e}");
+                ok = false;
+                break;
+            }
+        };
+        sched::reap();
+        let frames = settled_free_frames(frames0, 8);
+        let ends = crate::ipc::live_channel_ends();
+        if code != 0 || ends != ends0 || frames + 8 < frames0 {
+            kerror!(
+                "[FUZZ] FAIL rodada {rounds} semente {seed:#x}: codigo {code}, canais {ends0}->{ends}, quadros {frames0}->{frames}"
+            );
+            ok = false;
+            break;
+        }
+        if rounds.is_multiple_of(10) {
+            kinfo!("[FUZZ] {rounds} rodadas ({} syscalls)", rounds * 20_000);
+        }
+    }
+    if ok {
+        kinfo!("[FUZZ] PASS rodadas={rounds} syscalls={}", rounds * 20_000);
+    }
+    ok
+}
+
 /// `fs-churn=1` na linha de comando: blockdev + fs + utest(10) escrevendo sem parar, para o
 /// cenario `powercut` (o host mata o QEMU no meio das escritas e verifica o volume no boot seguinte).
 pub fn fs_churn() -> ! {

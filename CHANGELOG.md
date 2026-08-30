@@ -67,6 +67,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Testes do `nexo-proto`: layout do cabeçalho, ida-e-volta, protocolo/versão/método desconhecidos rejeitados, payload estendido lido por decodificador antigo, erro remoto, 20 000 mutações sem pânico.
 - Primeiro protocolo migrado: `nexo.rng` v1.0 — `rngdev` e o cliente (`utest` 11) falam NXIP; mensagens malformadas e pedidos inválidos viram erros tipados (códigos 3 e 1) sem derrubar o driver.
 
+### Adicionado (Fase 3, bloco 9 — fuzzing contínuo)
+- `make fuzz DURATION=<s>`: rodadas de fuzz de syscalls (20 000 por rodada, utest modo 7) com **sementes aleatórias** derivadas do TSC — registradas no log (`utest: fuzz semente 0x…`) para reproduzir falhas — e verificação de vazamento de quadros/canais a cada rodada (`[FUZZ] PASS rodadas=…`).
+- Workflow agendado `.github/workflows/fuzz.yml` (semanal + manual): fuzz-lite de host (parsers, NexoFS, FAT, protocolos NXIP) e 30 min de fuzz de syscalls em QEMU, com o log como artefato.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

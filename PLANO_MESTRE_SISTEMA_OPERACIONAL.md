@@ -434,7 +434,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] criar runtime mínimo Rust e ABI C — *`sdk/nexo-sys` + `sdk/nexo-rt` (Rust, sem alocação); ABI C pendente*;
 - [x] criar shell de diagnóstico no espaço de usuário — *`services/shell` sobre a console VirtIO e o VFS; cenário `shell` interativo*;
 - [-] testar isolamento e negação de capabilities — *isolamento de memória/instruções e negação por direitos (Denied) testados; fuzzing pendente*;
-- [-] fuzzar decodificador de IPC e syscalls — *fuzz-lite determinístico dos parsers no host e fuzz de syscalls de um processo de usuário; fuzzing contínuo (cargo-fuzz/CI) pendente*;
+- [x] fuzzar decodificador de IPC e syscalls — *fuzz-lite determinístico dos parsers e dos decodificadores NXIP no host; fuzz de syscalls aleatório com sementes registradas, agendado toda semana no CI (`make fuzz`, workflow `fuzz`); cobertura guiada (cargo-fuzz) pendente*;
 - [ ] publicar release `0.2-userspace`.
 
 **Gate F2:** três processos isolados executam simultaneamente, um servidor pode reiniciar sem reiniciar o kernel e acessos sem capability falham de forma testada.
@@ -809,7 +809,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [ ] testes de integração de serviços;
 - [ ] testes end-to-end de boot/login/app/update;
 - [ ] property tests;
-- [-] fuzzing — *fuzz-lite determinístico (parsers e syscalls); fuzzing contínuo pendente*;
+- [-] fuzzing — *fuzz-lite determinístico + fuzz de syscalls semanal no CI (`make fuzz`); cobertura guiada e fuzz de rede/FS reais pendentes*;
 - [ ] fault injection;
 - [ ] testes de corte de energia;
 - [-] testes SMP e race conditions — *stress multi-CPU básico*;
