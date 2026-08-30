@@ -121,6 +121,35 @@ SCENARIOS = {
             (["check"], r"consistente"),
         ],
     },
+    "powercut": {
+        # 1a execucao: escreve sem parar e o host mata o QEMU (SIGKILL) no meio das escritas.
+        # 2a execucao: boot normal com o mesmo disco — o fs monta (reparando orfaos se preciso) e
+        # os testes passam; no host, `nexo-disk check` confirma o volume consistente.
+        "cmdline": "selftest=0 fs-churn=1",
+        "cmdline_run2": "exit",
+        "exit_code": 99,
+        "exit_code_run2": 33,
+        "runs": 2,
+        "fresh_disk": True,
+        "kill_on": r"utest: churn: 1[05] ciclos",
+        "kill_delay_ms": 150,
+        "expect": [
+            r"\[CHURN\] blockdev, fs e utest\(10\) ativos",
+            r"utest: churn: 10 ciclos",
+            r"corte de energia simulado",
+        ],
+        "expect_run2": [
+            r"fs: montado NexoFS v0: \d+ blocos, \d+ livres, \d+ reparo\(s\)",
+            r"utest: fs: boot numero 1",
+            r"\[TEST\] user_fs \.\.\. ok",
+            r"NEXO: boot completo",
+        ],
+        "forbid": [r"KERNEL PANIC", r"EXCEPTION", r"blockdev: falha", r"fs: falha", r"fs: AVISO"],
+        "host_check": [
+            (["check"], r"consistente"),
+            (["ls", "/churn"], r"ciclos"),
+        ],
+    },
     "stress": {
         "cmdline": "selftest=0 stress=15 exit",
         "exit_code": 33,
@@ -170,23 +199,35 @@ SCENARIOS = {
 
 def run_scenario(name: str, timeout: float) -> bool:
     sc = SCENARIOS[name]
-    image = BUILD / f"nexo-{name}.img"
     logfile = BUILD / "logs" / f"{name}.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
-    run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline", sc["cmdline"], "--out", image],
-        stdout=subprocess.DEVNULL)
+    images = {}
+    for run_no in range(1, sc.get("runs", 1) + 1):
+        cmdline = sc.get(f"cmdline_run{run_no}", sc["cmdline"])
+        if cmdline not in images:
+            image = BUILD / (f"nexo-{name}.img" if run_no == 1 else f"nexo-{name}-{run_no}.img")
+            run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline", cmdline, "--out", image],
+                stdout=subprocess.DEVNULL)
+            images[cmdline] = image
     disk = BUILD / f"nexo-{name}-data.img"
     if sc.get("fresh_disk") and disk.exists():
         disk.unlink()
     ok = True
     for run_no in range(1, sc.get("runs", 1) + 1):
-        log(f"=== cenario '{name}' (cmdline: {sc['cmdline']!r}, execucao {run_no}) ===")
+        cmdline = sc.get(f"cmdline_run{run_no}", sc["cmdline"])
+        image = images[cmdline]
+        log(f"=== cenario '{name}' (cmdline: {cmdline!r}, execucao {run_no}) ===")
         run_log = logfile if run_no == 1 else logfile.with_suffix(f".{run_no}.log")
-        rc = subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
-                              "--disk", disk, "--timeout", str(timeout), "--log", run_log])
+        cmd = [sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
+               "--disk", disk, "--timeout", str(timeout), "--log", run_log]
+        kill_on = sc.get(f"kill_on_run{run_no}", sc.get("kill_on") if run_no == 1 else None)
+        if kill_on:
+            cmd += ["--kill-on", kill_on, "--kill-delay-ms", str(sc.get("kill_delay_ms", 0))]
+        rc = subprocess.call(cmd)
         text = run_log.read_bytes().decode("utf-8", errors="replace")
-        if rc != sc["exit_code"]:
-            log(f"FALHA: codigo de saida {rc}, esperado {sc['exit_code']}")
+        expected_rc = sc.get(f"exit_code_run{run_no}", sc["exit_code"])
+        if rc != expected_rc:
+            log(f"FALHA: codigo de saida {rc}, esperado {expected_rc}")
             ok = False
         expect = sc.get(f"expect_run{run_no}", sc["expect"])
         for pat in expect:

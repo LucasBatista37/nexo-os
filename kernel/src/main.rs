@@ -88,6 +88,9 @@ fn kmain(bi: &'static BootInfo) -> ! {
     if let Some(secs) = cmdline_value(cmdline, "stress").and_then(|v| v.parse::<u64>().ok()) {
         ok = stress::run(secs) && ok;
     }
+    if cmdline_value(cmdline, "fs-churn").is_some() {
+        selftest::fs_churn();
+    }
     match cmdline_value(cmdline, "test") {
         Some("panic") => {
             kinfo!("cenario: panic deliberado");

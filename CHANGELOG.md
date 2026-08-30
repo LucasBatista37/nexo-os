@@ -31,6 +31,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 9: cria, lê, altera parcialmente, estende sobre vários blocos, trunca, lista e remove arquivos e diretórios; contador de boots persistente (`boot.count`). Testes `user_fs` e `user_block_crash` (driver morto no 2º pedido: cliente vê o canal fechado, kernel íntegro, vetor de IRQ devolvido). 37 testes no boot.
 - `tools/nexo-disk` (Python, independente do Rust): `info`, `ls`, `cat`, `check` de um volume; o cenário `storage` verifica com ele o disco após os dois boots (`boot.count` = 2, volume consistente).
 - Pilha de usuário de 256 KiB.
+- Cenário `powercut`: `run-qemu --kill-on REGEX [--kill-delay-ms N]` mata o QEMU (SIGKILL) durante escritas contínuas (`fs-churn=1`, `utest` modo 10); o boot seguinte monta o volume sem reformatar e o host o verifica com `nexo-disk check`.
 
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).

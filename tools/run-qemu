@@ -7,6 +7,8 @@ Uso: tools/run-qemu [--image build/nexo.img] [--test] [--timeout 120] [--log arq
 """
 import argparse
 import os
+import random
+import re
 import selectors
 import shutil
 import subprocess
@@ -80,6 +82,10 @@ def main() -> int:
     ap.add_argument("--disk", default=str(BUILD / "data.img"),
                     help="disco de dados virtio-blk (raw; criado com 16 MiB se nao existir)")
     ap.add_argument("--no-disk", action="store_true", help="nao anexa o disco de dados")
+    ap.add_argument("--kill-on", default=None, metavar="REGEX",
+                    help="mata o QEMU (SIGKILL, como um corte de energia) assim que a saida serial casar; sai com 99")
+    ap.add_argument("--kill-delay-ms", type=int, default=0,
+                    help="com --kill-on: espera um atraso aleatorio de 0..N ms antes de matar (para cair no meio das escritas)")
     ap.add_argument("--smp", type=int, default=int(os.environ.get("NEXO_SMP", "4")), help="numero de CPUs (padrao 4)")
     ap.add_argument("extra", nargs="*", help="argumentos extras para o QEMU (apos --)")
     a = ap.parse_args()
@@ -104,12 +110,18 @@ def main() -> int:
     sel = selectors.DefaultSelector()
     sel.register(proc.stdout, selectors.EVENT_READ)
     timed_out = False
+    killed = False
+    kill_re = re.compile(a.kill_on.encode()) if a.kill_on else None
+    tail = b""
 
     def emit(chunk: bytes) -> None:
+        nonlocal tail
         sys.stdout.buffer.write(chunk)
         sys.stdout.flush()
         if logf:
             logf.write(chunk)
+        if kill_re:
+            tail = (tail + chunk)[-8192:]
 
     while True:
         if proc.poll() is not None:
@@ -125,8 +137,19 @@ def main() -> int:
             chunk = os.read(proc.stdout.fileno(), 65536)
             if chunk:
                 emit(chunk)
+        if kill_re and kill_re.search(tail):
+            delay = random.randint(0, a.kill_delay_ms) if a.kill_delay_ms > 0 else 0
+            time.sleep(delay / 1000.0)
+            killed = True
+            proc.kill()
+            emit(b"\n[nexo] corte de energia simulado: QEMU morto (SIGKILL) " + str(delay).encode()
+                 + b" ms apos casar /" + a.kill_on.encode() + b"/\n")
+            break
     if logf:
         logf.close()
+    if killed:
+        proc.wait()
+        return 99
     if timed_out:
         log(f"TIMEOUT apos {a.timeout:.0f}s")
         return 124

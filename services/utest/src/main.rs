@@ -51,6 +51,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         7 => syscall_fuzz(),
         8 => block_client(),
         9 => fs_client(),
+        10 => fs_churn(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -560,4 +561,49 @@ fn fs_client() -> ! {
     nexo_rt::log!("utest: fs: boot numero {} ({} blocos livres)", boots, free2);
     nexo_sys::log("utest: fs ok");
     nexo_sys::exit(0)
+}
+
+/// Modo 10: escreve sem parar (cria, sobrescreve, estende e remove arquivos em `churn/`),
+/// registrando os ciclos; termina so quando o host corta a energia.
+fn fs_churn() -> ! {
+    let mut c = FsClient {
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let _ = c.call(2, 0, 0, 0, b"churn");
+    let mut pattern = [0u8; 3000];
+    let mut cycle = 0u64;
+    loop {
+        cycle += 1;
+        for (i, b) in pattern.iter_mut().enumerate() {
+            *b = ((i as u64 + cycle) % 253) as u8;
+        }
+        let mut name = nexo_rt::Buf::<32>::new();
+        let _ = core::fmt::Write::write_fmt(&mut name, format_args!("churn/f{}", cycle % 8));
+        let _ = c.call(3, 0, 0, 0, name.as_bytes());
+        let (st, ino, _) = c.call(1, 0, 0, 0, name.as_bytes());
+        if st != 0 {
+            nexo_rt::log!("utest: churn: create falhou ({})", st);
+            nexo_sys::exit(170);
+        }
+        let ino = ino as u32;
+        c.ok(5, ino, 0, 0, &pattern, 171);
+        c.ok(5, ino, 1500, 0, &pattern[..1000], 172);
+        c.ok(5, ino, 3000, 0, &pattern, 173);
+        c.ok(9, ino, 100, 0, &[], 174);
+        c.ok(5, ino, 100, 0, &pattern[..2000], 175);
+        // contador de ciclos persistente: cada ciclo reescreve `churn/ciclos`
+        let (st, cino, _) = c.call(0, 0, 0, 0, b"churn/ciclos");
+        let cino = if st == 0 {
+            cino as u32
+        } else {
+            c.ok(1, 0, 0, 0, b"churn/ciclos", 176).0 as u32
+        };
+        let mut txt = nexo_rt::Buf::<32>::new();
+        let _ = core::fmt::Write::write_fmt(&mut txt, format_args!("{}", cycle));
+        c.ok(5, cino, 0, 0, txt.as_bytes(), 177);
+        if cycle % 5 == 0 {
+            nexo_rt::log!("utest: churn: {} ciclos", cycle);
+        }
+    }
 }

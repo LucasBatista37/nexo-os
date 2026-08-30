@@ -461,7 +461,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] implementar FAT somente para EFI;
 - [x] implementar leitura de um filesystem persistente de teste — *NexoFS v0 (ADR-0016): `libraries/nexofs` + `services/fs`; `user_fs` e cenário `storage`*;
 - [x] implementar escrita, flush e sincronização — *copy-on-write com commit atômico por setor, `sync`; sem cache de blocos ainda*;
-- [x] criar testes de imagem corrompida e corte de energia — *host: corte em cada escrita (com escritas rasgadas) e 400 imagens corrompidas; falta simular cortes no QEMU real*;
+- [x] criar testes de imagem corrompida e corte de energia — *host: corte em cada escrita (com escritas rasgadas) e 400 imagens corrompidas; QEMU: cenário `powercut` (SIGKILL durante escritas, boot seguinte monta e `nexo-disk check` confirma)*;
 - [x] criar ferramenta de inspeção do disco no host — *`tools/nexo-disk` (info/ls/cat/check), usado pelo cenário `storage`*;
 - [ ] publicar release `0.3-storage`.
 

@@ -1343,6 +1343,32 @@ fn test_user_fs() -> TestResult {
     Ok(())
 }
 
+/// `fs-churn=1` na linha de comando: blockdev + fs + utest(10) escrevendo sem parar, para o
+/// cenario `powercut` (o host mata o QEMU no meio das escritas e verifica o volume no boot seguinte).
+pub fn fs_churn() -> ! {
+    use crate::ipc::ChannelEnd;
+    if !has_virtio_blk() {
+        panic!("fs-churn exige o disco de dados (virtio-blk)");
+    }
+    let (a, b) = ChannelEnd::create_pair();
+    let (c, d) = ChannelEnd::create_pair();
+    let driver = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a)],
+    )
+    .expect("blockdev");
+    let fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
+            .expect("fs");
+    let client =
+        crate::process::spawn_named("utest", 10, alloc::vec![channel_handle(d)]).expect("utest");
+    kinfo!("[CHURN] blockdev, fs e utest(10) ativos; aguardando o corte de energia");
+    let code = crate::process::wait_and_reap(&client);
+    let _ = (driver, fs);
+    panic!("fs-churn: o cliente terminou com {code} (deveria escrever ate o corte)");
+}
+
 fn test_symbols() -> TestResult {
     let addr = test_symbols as fn() -> TestResult as usize as u64;
     let s = crate::symbols::lookup(addr + 4).ok_or("simbolo nao encontrado")?;
