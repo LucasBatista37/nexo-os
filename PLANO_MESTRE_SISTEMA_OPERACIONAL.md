@@ -487,7 +487,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] portar uma biblioteca TLS auditada compatível com a licença;
 - [ ] criar armazenamento seguro de certificados;
 - [ ] implementar cliente HTTP para atualizações;
-- [ ] fuzzar pacotes, parsers e estados de protocolo;
+- [-] fuzzar pacotes, parsers e estados de protocolo — *parsers de Ethernet/ARP/IPv4/ICMP/UDP/DHCP/DNS/TCP com fuzz-lite determinístico (20 000 mutações) no host, incluídos no fuzzing semanal do CI; fuzz de estados de protocolo e pacotes na pilha residente pendem do `netd`*;
 - [ ] criar captura de rede autorizada para diagnóstico;
 - [ ] publicar release `0.4-network`.
 
