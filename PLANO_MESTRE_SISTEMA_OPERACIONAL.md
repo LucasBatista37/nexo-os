@@ -449,7 +449,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] implementar binding por IDs e propriedades — *binding por IDs (vendor/tipo VirtIO → driver) no `devmgr`; por propriedades (classe, ACPI) pendente*;
 - [x] implementar VirtIO transport — *`libraries/virtio` (`nexo-virtio`): capabilities, negociação, MSI-X, fila dividida; usado por `blockdev` e `rngdev`*;
 - [x] implementar VirtIO block — *`services/blockdev` em modo usuário; teste `user_block` + cenário `storage`*;
-- [ ] implementar VirtIO input;
+- [x] implementar VirtIO input — *`services/inputdev` (eventos evdev, MSI-X); cenário `input` injeta teclas por QMP e confere os códigos*;
 - [x] implementar VirtIO RNG — *`services/rngdev` + `nexo.rng` v0; teste `user_devmgr`*;
 - [x] implementar VirtIO console — *`services/consoledev` (porta 0, MSI-X) + `nexo.console` v0; cenário `shell` conversa por socket UNIX*;
 - [x] implementar drivers em processos isolados — *driver de bloco em ring 3 com handle de dispositivo; queda do driver não afeta o kernel*;

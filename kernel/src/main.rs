@@ -94,6 +94,9 @@ fn kmain(bi: &'static BootInfo) -> ! {
     if cmdline_value(cmdline, "shell").is_some() {
         selftest::shell_mode();
     }
+    if cmdline_value(cmdline, "input-test").is_some() {
+        selftest::input_test_mode();
+    }
     match cmdline_value(cmdline, "test") {
         Some("panic") => {
             kinfo!("cenario: panic deliberado");

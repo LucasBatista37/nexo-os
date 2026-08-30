@@ -1584,6 +1584,28 @@ pub fn shell_mode() {
     kinfo!("[SHELL] shell terminou com {code}");
 }
 
+/// `input-test=1` na linha de comando: inputdev + utest(13) esperando teclas do host (QMP).
+pub fn input_test_mode() {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    let bdf = crate::pci::devices()
+        .iter()
+        .find(|d| d.is_virtio() && d.device == 0x1052)
+        .map(|d| d.bdf)
+        .expect("input-test=1 exige virtio-keyboard-pci");
+    let (a, b) = ChannelEnd::create_pair();
+    let g = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let _drv = crate::process::spawn_named("inputdev", 0, alloc::vec![g, channel_handle(a)])
+        .expect("inputdev");
+    let client =
+        crate::process::spawn_named("utest", 13, alloc::vec![channel_handle(b)]).expect("utest");
+    kinfo!("[INPUT] aguardando teclas injetadas pelo host");
+    let code = crate::process::wait_and_reap(&client);
+    kinfo!("[INPUT] teste de entrada terminou com {code}");
+}
+
 /// `fs-churn=1` na linha de comando: blockdev + fs + utest(10) escrevendo sem parar, para o
 /// cenario `powercut` (o host mata o QEMU no meio das escritas e verifica o volume no boot seguinte).
 pub fn fs_churn() -> ! {

@@ -15,8 +15,8 @@ Contagem em 2026-08-30 (`grep -rhoE 'unsafe( \{| fn| impl| extern)' --include='*
 | `nexo-kernel` | 120 | 111 |
 | `nexo-sys + nexo-rt` | 31 | 27 |
 | `nexo-virtio` | 10 | 10 (acessos voláteis a MMIO e às páginas da fila; um `SAFETY` por método/bloco) |
-| `services/*` | 18 | 18 (drivers: cópias de/para páginas de DMA e a queda deliberada do `blockdev`) |
-| **total** | **354** | **293** |
+| `services/*` | 19 | 19 (drivers: cópias de/para páginas de DMA e a queda deliberada do `blockdev`) |
+| **total** | **355** | **294** |
 
 Atualize junto com o código.
 

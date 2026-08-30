@@ -54,6 +54,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         10 => fs_churn(),
         11 => devmgr_client(),
         12 => vfs_client(),
+        13 => input_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -881,4 +882,49 @@ fn vfs_client() -> ! {
         ksize
     );
     nexo_sys::exit(0)
+}
+
+/// Modo 13: cliente do `inputdev` (handle 0): espera 3 teclas pressionadas (EV_KEY, value 1)
+/// injetadas pelo host via QMP e registra os codigos.
+fn input_client() -> ! {
+    let req = [0u8; 1];
+    let mut reply = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    let mut keys = 0u32;
+    let mut last_code = 0u16;
+    let start = nexo_sys::time_now();
+    loop {
+        if nexo_sys::channel_send(0, &req, &[]) != Status::Ok {
+            nexo_sys::exit(240);
+        }
+        let n = match nexo_sys::channel_recv(0, &mut reply, &mut hs) {
+            Ok((n, _)) if n >= 1 && reply[0] == 0 => n - 1,
+            _ => nexo_sys::exit(241),
+        };
+        let mut off = 0usize;
+        while off + 8 <= n {
+            let ty = u16::from_le_bytes(reply[1 + off..3 + off].try_into().unwrap());
+            let code = u16::from_le_bytes(reply[3 + off..5 + off].try_into().unwrap());
+            let value = u32::from_le_bytes(reply[5 + off..9 + off].try_into().unwrap());
+            if ty == 1 && value == 1 {
+                keys += 1;
+                last_code = code;
+                nexo_rt::log!("utest: input: tecla code={}", code);
+            }
+            off += 8;
+        }
+        if keys >= 3 {
+            nexo_rt::log!(
+                "utest: input ok ({} teclas, ultima code={})",
+                keys,
+                last_code
+            );
+            nexo_sys::exit(0)
+        }
+        if nexo_sys::time_now() - start > 30_000_000_000 {
+            nexo_rt::log!("utest: input: apenas {} tecla(s) em 30 s", keys);
+            nexo_sys::exit(242)
+        }
+        nexo_sys::sleep_ns(10_000_000);
+    }
 }

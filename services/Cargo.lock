@@ -76,6 +76,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-inputdev"
+version = "0.0.1"
+dependencies = [
+ "nexo-rt",
+ "nexo-sys",
+ "nexo-virtio",
+]
+
+[[package]]
 name = "nexo-rngdev"
 version = "0.0.1"
 dependencies = [
