@@ -602,7 +602,7 @@ fn fs_churn() -> ! {
         let mut txt = nexo_rt::Buf::<32>::new();
         let _ = core::fmt::Write::write_fmt(&mut txt, format_args!("{}", cycle));
         c.ok(5, cino, 0, 0, txt.as_bytes(), 177);
-        if cycle % 5 == 0 {
+        if cycle.is_multiple_of(5) {
             nexo_rt::log!("utest: churn: {} ciclos", cycle);
         }
     }
