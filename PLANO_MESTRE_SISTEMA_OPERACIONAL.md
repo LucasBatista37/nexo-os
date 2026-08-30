@@ -471,7 +471,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 **Resultado:** sistema conectado com APIs de rede e controles de segurança.
 
-- [ ] implementar VirtIO net;
+- [x] implementar VirtIO net — *`services/netdev` (nexo.net tipado, MSI-X); cenário `net` troca ARP de verdade com o slirp*;
 - [ ] implementar Ethernet e ARP/NDP conforme a fase IPv6;
 - [ ] implementar IPv4;
 - [ ] implementar ICMP;

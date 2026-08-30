@@ -410,11 +410,44 @@ def run_input_scenario(timeout: float) -> bool:
     return ok
 
 
+def run_net_scenario(timeout: float) -> bool:
+    """virtio-net + slirp: um ARP request sai do driver de usuario e o reply volta."""
+    image = BUILD / "nexo-net.img"
+    run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline", "selftest=0 net-test=1 exit",
+         "--out", image], stdout=subprocess.DEVNULL)
+    logfile = BUILD / "logs" / "net.log"
+    logfile.parent.mkdir(parents=True, exist_ok=True)
+    log("=== cenario 'net' (ARP com o slirp) ===")
+    rc = subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
+                          "--disk", BUILD / "nexo-net-data.img", "--net",
+                          "--timeout", str(timeout), "--log", logfile])
+    text = logfile.read_bytes().decode("utf-8", errors="replace")
+    ok = True
+    if rc != 33:
+        log(f"FALHA: codigo de saida {rc}, esperado 33")
+        ok = False
+    for pat in [r"netdev: virtio-net bdf 0x[0-9a-f]+ mac 52:54:00:12:34:56 \(rx \d+, tx \d+, MSI-X\)",
+                r"utest: net ok — ARP reply de 10\.0\.2\.2",
+                r"\[NET\] teste de rede terminou com 0",
+                r"NEXO: boot completo"]:
+        if not re.search(pat, text):
+            log(f"FALHA: marcador ausente: /{pat}/")
+            ok = False
+    for pat in [r"KERNEL PANIC", r"EXCEPTION", r"netdev: falha"]:
+        if re.search(pat, text):
+            log(f"FALHA: marcador proibido presente: /{pat}/")
+            ok = False
+    log(f"=== cenario 'net': {'PASS' if ok else 'FAIL'} (log: {logfile}) ===")
+    return ok
+
+
 def run_scenario(name: str, timeout: float) -> bool:
     if name == "shell":
         return run_shell_scenario(timeout)
     if name == "input":
         return run_input_scenario(timeout)
+    if name == "net":
+        return run_net_scenario(timeout)
     sc = SCENARIOS[name]
     logfile = BUILD / "logs" / f"{name}.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
@@ -469,13 +502,13 @@ def run_scenario(name: str, timeout: float) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenario", choices=sorted(list(SCENARIOS) + ["shell", "input"]), default=None)
+    ap.add_argument("--scenario", choices=sorted(list(SCENARIOS) + ["shell", "input", "net"]), default=None)
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--no-build", action="store_true", help="nao recompila loader/kernel")
     a = ap.parse_args()
     if not a.no_build:
         run([sys.executable, ROOT / "tools" / "build-image", "--cmdline", "exit"])
-    names = [a.scenario] if a.scenario else list(SCENARIOS) + ["shell", "input"]
+    names = [a.scenario] if a.scenario else list(SCENARIOS) + ["shell", "input", "net"]
     results = {n: run_scenario(n, a.timeout) for n in names}
     log("resumo: " + ", ".join(f"{n}={'PASS' if ok else 'FAIL'}" for n, ok in results.items()))
     return 0 if all(results.values()) else 1

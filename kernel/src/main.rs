@@ -102,6 +102,9 @@ fn kmain(bi: &'static BootInfo) -> ! {
     if cmdline_value(cmdline, "input-test").is_some() {
         selftest::input_test_mode();
     }
+    if cmdline_value(cmdline, "net-test").is_some() {
+        selftest::net_test_mode();
+    }
     match cmdline_value(cmdline, "test") {
         Some("panic") => {
             kinfo!("cenario: panic deliberado");

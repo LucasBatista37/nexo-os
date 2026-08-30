@@ -1,0 +1,30 @@
+# nexo.net — interface de rede (services/netdev): quadros Ethernet crus.
+# Erros remotos: 1 = pedido invalido, 2 = dispositivo nao respondeu.
+protocol net 1.0
+
+# Endereco MAC da interface.
+method 1 mac {
+    request {
+    }
+    response {
+        addr: bytes<6>,
+    }
+}
+
+# Transmite um quadro Ethernet (14..=1514 bytes).
+method 2 send {
+    request {
+        frame: bytes<1514>,
+    }
+    response {
+    }
+}
+
+# Le um quadro recebido, se houver (sem bloquear; resposta vazia = nada).
+method 3 recv {
+    request {
+    }
+    response {
+        frame: bytes<1514>,
+    }
+}

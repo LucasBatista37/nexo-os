@@ -1,0 +1,16 @@
+[package]
+name = "nexo-netdev"
+description = "Driver VirtIO-net (quadros Ethernet) em processo de usuario"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+nexo-sys.workspace = true
+nexo-rt = { workspace = true, features = ["panic-handler"] }
+nexo-virtio.workspace = true
+nexo-proto.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

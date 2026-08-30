@@ -85,6 +85,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `channel_try_recv` (syscall 25): como `channel_recv`, mas devolve `WouldBlock` em vez de bloquear (base para laços de serviço que também esperam E/S; espera múltipla real fica para os objetos de evento).
 - `blockdev` assíncrono: até 4 pedidos de E/S em voo na virtqueue (páginas de DMA por slot), respostas **na ordem de chegada**; quando há E/S pendente o driver usa `try_recv` + MSI-X em vez de bloquear no canal. `utest` (modo 8) encadeia 4 leituras sem esperar e confere ordem e conteúdo.
 
+### Adicionado (Fase 4, bloco 1 — VirtIO net)
+- `services/netdev`: driver VirtIO-net em modo usuário (filas rx/tx, cabeçalho `virtio_net_hdr` de 12 B, MAC da configuração via `VIRTIO_NET_F_MAC`, MSI-X, fila local de 8 quadros recebidos); protocolo tipado `nexo.net` v1.0 (`idl/net.idl`: `mac`/`send`/`recv`).
+- `run-qemu --net` (virtio-net-pci + slirp) e cenário `net`: o `utest` (modo 14) monta um ARP request pelo canal do driver e confere o ARP reply do gateway 10.0.2.2 — o primeiro pacote de rede de verdade indo e voltando por um driver em ring 3.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

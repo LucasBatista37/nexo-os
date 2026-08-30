@@ -57,6 +57,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         11 => devmgr_client(),
         12 => vfs_client(),
         13 => input_client(),
+        14 => net_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1150,5 +1151,107 @@ fn input_client() -> ! {
             nexo_sys::exit(242)
         }
         nexo_sys::sleep_ns(10_000_000);
+    }
+}
+
+/// Modo 14: cliente do `netdev` (handle 0): pergunta o MAC, manda um ARP request pelo
+/// gateway do slirp (10.0.2.2) e espera o ARP reply — um pacote de verdade indo e voltando.
+fn net_client() -> ! {
+    use nexo_proto::net::{
+        MacRequest, RecvRequest, SendRequest, decode_mac_response, decode_recv_response,
+        decode_send_response,
+    };
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    let m = MacRequest {}.encode_msg(&mut msg).unwrap_or(0);
+    if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+        nexo_sys::exit(250);
+    }
+    let mac = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+        Ok((n, _)) => match decode_mac_response(&msg[..n]) {
+            Ok(r) if r.addr().len() == 6 => {
+                let mut m6 = [0u8; 6];
+                m6.copy_from_slice(r.addr());
+                m6
+            }
+            _ => nexo_sys::exit(251),
+        },
+        _ => nexo_sys::exit(251),
+    };
+    nexo_rt::log!(
+        "utest: net: mac {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        mac[0],
+        mac[1],
+        mac[2],
+        mac[3],
+        mac[4],
+        mac[5]
+    );
+    // ARP request: quem tem 10.0.2.2? (nosso IP: 10.0.2.15, padrao do slirp)
+    let mut arp = SendRequest {
+        frame: [0; 1514],
+        frame_len: 42,
+    };
+    let f = &mut arp.frame;
+    f[0..6].fill(0xff); // broadcast
+    f[6..12].copy_from_slice(&mac);
+    f[12..14].copy_from_slice(&0x0806u16.to_be_bytes()); // ARP
+    f[14..16].copy_from_slice(&1u16.to_be_bytes()); // Ethernet
+    f[16..18].copy_from_slice(&0x0800u16.to_be_bytes()); // IPv4
+    f[18] = 6;
+    f[19] = 4;
+    f[20..22].copy_from_slice(&1u16.to_be_bytes()); // request
+    f[22..28].copy_from_slice(&mac);
+    f[28..32].copy_from_slice(&[10, 0, 2, 15]);
+    f[38..42].copy_from_slice(&[10, 0, 2, 2]);
+    let m = arp.encode_msg(&mut msg).unwrap_or(0);
+    if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+        nexo_sys::exit(252);
+    }
+    match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+        Ok((n, _)) if decode_send_response(&msg[..n]).is_ok() => {}
+        _ => nexo_sys::exit(253),
+    }
+    // Espera o ARP reply do gateway.
+    let start = nexo_sys::time_now();
+    loop {
+        let m = RecvRequest {}.encode_msg(&mut msg).unwrap_or(0);
+        if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(254);
+        }
+        let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+            Ok((n, _)) => n,
+            _ => nexo_sys::exit(255),
+        };
+        let mut frame = [0u8; 1514];
+        let flen = match decode_recv_response(&msg[..n]) {
+            Ok(r) => {
+                let l = r.frame().len();
+                frame[..l].copy_from_slice(r.frame());
+                l
+            }
+            Err(_) => nexo_sys::exit(256),
+        };
+        if flen >= 42
+            && frame[12..14] == 0x0806u16.to_be_bytes()
+            && frame[20..22] == 2u16.to_be_bytes()
+            && frame[28..32] == [10, 0, 2, 2]
+        {
+            nexo_rt::log!(
+                "utest: net ok — ARP reply de 10.0.2.2 ({:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x})",
+                frame[22],
+                frame[23],
+                frame[24],
+                frame[25],
+                frame[26],
+                frame[27]
+            );
+            nexo_sys::exit(0)
+        }
+        if nexo_sys::time_now() - start > 20_000_000_000 {
+            nexo_rt::log!("utest: net: sem ARP reply em 20 s");
+            nexo_sys::exit(257)
+        }
+        nexo_sys::sleep_ns(20_000_000);
     }
 }

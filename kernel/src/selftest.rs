@@ -1669,6 +1669,28 @@ pub fn fuzz_mode(secs: u64) -> bool {
     ok
 }
 
+/// `net-test=1` na linha de comando: netdev + utest(14) trocando ARP com o slirp do QEMU.
+pub fn net_test_mode() {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    let bdf = crate::pci::devices()
+        .iter()
+        .find(|d| d.is_virtio() && (d.device == 0x1041 || d.device == 0x1000))
+        .map(|d| d.bdf)
+        .expect("net-test=1 exige virtio-net-pci (rode com --net)");
+    let (a, b) = ChannelEnd::create_pair();
+    let g = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let _drv = crate::process::spawn_named("netdev", 0, alloc::vec![g, channel_handle(a)])
+        .expect("netdev");
+    let client =
+        crate::process::spawn_named("utest", 14, alloc::vec![channel_handle(b)]).expect("utest");
+    kinfo!("[NET] aguardando troca ARP com o gateway do slirp");
+    let code = crate::process::wait_and_reap(&client);
+    kinfo!("[NET] teste de rede terminou com {code}");
+}
+
 /// `fs-churn=1` na linha de comando: blockdev + fs + utest(10) escrevendo sem parar, para o
 /// cenario `powercut` (o host mata o QEMU no meio das escritas e verifica o volume no boot seguinte).
 pub fn fs_churn() -> ! {

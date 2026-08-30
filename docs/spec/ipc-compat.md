@@ -54,6 +54,7 @@ A IDL existe: `idl/*.idl` → `tools/idlgen` (`make idl`) → `abi/proto` (`nexo
 | cliente → `vfs` | **tipado**: o mesmo `nexo.fs` v1.0, roteado por prefixo do namespace da instância: `/disk` → `fs`, `/boot` → `espfs` (só leitura; escrita → erro 13), `/tmp` → ramfs interno (16 arquivos × 16 KiB, volátil, por instância); inodes carregam a montagem nos bits 28..30 | um `vfs` por cliente = namespace por processo; handles: 0 `fs`, 1 `espfs`, 2 cliente; argumento = máscara de montagens |
 | cliente → `consoledev` | **tipado**: `nexo.console` v1.0 (`idl/console.idl`; `read{}`→`{data}` sem bloquear, `write{data}`→`{written}`) | porta 0 da VirtIO-console, sem `MULTIPORT`; um cliente por driver |
 | cliente → `inputdev` | **tipado**: `nexo.input` v1.0 (`idl/input.idl`; `poll{}`→`{events}` sem bloquear; evento = 8 B evdev `[type u16][code u16][value u32]`) | um cliente por driver |
+| cliente → `netdev` | **tipado**: `nexo.net` v1.0 (`idl/net.idl`; `mac{}`→`{addr}`, `send{frame}` 14..=1514 B, `recv{}`→`{frame}` sem bloquear, vazio = nada) | quadros Ethernet crus; um cliente por driver |
 | `devmgr` → cliente | `fs`+handle (canal do servidor de arquivos), `rng`+handle (canal do `rngdev`), `esp`+handle (canal do `espfs`), `done` | canal do handle 1 do `devmgr`; drivers recebem `[concessão, canal]` como handles iniciais |
 | cliente → `fs` | **tipado**: `nexo.fs` v1.0 (`idl/fs.idl`; métodos 1–10: stat/create/mkdir/unlink/read/write/list/sync/info/truncate); erros remotos 1–11 = `nexofs::FsError::code()`, 255 malformado | um cliente por servidor (handle 1); ADR-0016 |
 
