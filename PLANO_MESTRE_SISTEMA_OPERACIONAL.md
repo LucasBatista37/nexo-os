@@ -454,7 +454,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] implementar VirtIO console — *`services/consoledev` (porta 0, MSI-X) + `nexo.console` v0; cenário `shell` conversa por socket UNIX*;
 - [x] implementar drivers em processos isolados — *driver de bloco em ring 3 com handle de dispositivo; queda do driver não afeta o kernel*;
 - [-] restringir MMIO, IRQ e DMA por capabilities — *concessões por função PCI (`device_open`): config, `pci_enum` e MMIO limitados ao BDF; IRQ/DMA por handle; falta IOMMU para conter DMA*;
-- [-] criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro — *caminho sem IOMMU documentado como inseguro (ADR-0015); abstração IOMMU pendente*;
+- [-] criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro — *abstração criada (`kernel/src/iommu.rs`: modo `Passthrough` explícito, detecção da tabela `DMAR`, aviso `IRRESTRITO (caminho inseguro)` no boot verificado pelo cenário `boot`; ADR-0015); tradução VT-d/AMD-Vi pendente*;
 - [-] implementar cache de blocos e fila assíncrona — *cache de leitura write-through (8 blocos) no `fs`; fila assíncrona (pedidos em voo) pendente*;
 - [x] definir VFS e namespace por sessão/processo — *`services/vfs` (protocolo `nexo.fs` roteado; um vfs por cliente com máscara de montagens); teste `user_vfs` com dois namespaces isolados; protocolo tipado e montagem dinâmica pendentes*;
 - [x] implementar `ramfs` — *gravável em `/tmp` do vfs (16×16 KiB, volátil, por instância) + initramfs `NEXOIRD1` só leitura*;

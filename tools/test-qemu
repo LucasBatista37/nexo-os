@@ -66,6 +66,7 @@ SCENARIOS = {
             r"\[TEST\] user_services .*ok",
             r"\[TEST\] user_syscall_fuzz .*ok",
             r"pci: \d+ funcao\(oes\):",
+            r"iommu: (ausente|tabela DMAR presente).*DMA de drivers IRRESTRITO \(caminho inseguro",
             r"pci:   00:\d\d\.\d 1af4:10(01|42) classe 01\.00\.00 .*virtio",
             r"\[TEST\] pci \.\.\. ok",
             r"blockdev: virtio-blk 1af4:10(01|42) bdf 0x[0-9a-f]+ capacidade 32768 setores, fila \d+, MSI-X",

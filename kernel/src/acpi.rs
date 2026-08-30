@@ -66,6 +66,8 @@ pub struct PlatformInfo {
     pub lapic_phys: u64,
     /// PIC 8259 presente.
     pub pic_present: bool,
+    /// Tabela `DMAR` (VT-d) anunciada pelo firmware.
+    pub dmar_present: bool,
     cpus: [CpuInfo; MAX_CPUS],
     cpu_count: usize,
     ioapics: [IoApicInfo; MAX_IOAPICS],
@@ -112,6 +114,7 @@ pub fn init() {
         oem_id: [0; 6],
         lapic_phys: 0,
         pic_present: true,
+        dmar_present: false,
         cpus: [CpuInfo::default(); MAX_CPUS],
         cpu_count: 0,
         ioapics: [IoApicInfo::default(); MAX_IOAPICS],
@@ -144,6 +147,7 @@ pub fn init() {
                 rsdp.xsdt_addr,
                 rsdp.rsdt_addr
             );
+            info.dmar_present = find_table(&reader, &rsdp, b"DMAR").is_ok();
             match find_table(&reader, &rsdp, b"APIC").and_then(|t| Madt::parse(&t)) {
                 Ok(madt) => fill_from_madt(&mut info, &madt),
                 Err(e) => kwarn!("acpi: MADT indisponivel ({e}); assumindo 1 CPU"),
@@ -277,6 +281,11 @@ fn fill_from_madt(info: &mut PlatformInfo, madt: &Madt<'_>) {
 }
 
 /// Informação de plataforma.
+/// `true` se a plataforma anuncia uma tabela `DMAR` (VT-d).
+pub fn dmar_present() -> bool {
+    info().dmar_present
+}
+
 pub fn info() -> &'static PlatformInfo {
     INFO.get().expect("acpi::init nao foi chamado")
 }

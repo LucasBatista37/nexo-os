@@ -3,16 +3,16 @@
 Preencher a cada 4 semanas. Primeira medição: 2026-08-29.
 
 ```text
-Release atual:                 0.0.1-boot (main: Fase 1 completa + Fase 2 blocos 1–2)
-Marco ativo:                   0.1-kernel (gate: 24 h de stress) e 0.2-userspace
+Release atual:                 0.0.1-boot (main: Fases 1–2 completas + Fase 3 com gate F3 atendido)
+Marco ativo:                   0.1-kernel (gate: 24 h de stress — EM EXECUÇÃO) → 0.2-userspace → 0.3-storage
 Horas disponíveis/semana:      meta provisória 10–15 (confirmar)
-Itens concluídos:              94 [x] no Plano Mestre; 15/15 testes de kernel; 41 testes de host
-Itens bloqueados:              0 (4 pendentes de decisão: nome, licença, horas, hospedagem)
-Cobertura de testes relevante: crates de lógica pura 100% com testes; kernel: 15 auto-testes + 4 cenários
-Tempo de boot:                 74 ms de tick até "boot completo" (QEMU TCG, sem calibração de TSC)
-RAM ociosa:                    503 MiB livres de 512 MiB; kernel 1.7 MiB; heap 4 MiB mapeado
-Crash mais recente:            nenhum não intencional (cenários panic/fault/overflow são deliberados); stress de 30 min sem erros em 2026-08-30
-Maior risco atual:             escopo e continuidade (§11)
-Decisão necessária:            confirmar nome/licença/horas; escolher hospedagem para CI e release
-Próxima demonstração pública:  boot 0.0.1-boot em QEMU (docs/releases/0.0.1-boot.md)
+Itens concluídos:              145+ [x] no Plano Mestre; 39 testes de kernel no boot; 79 testes de host; 9 cenários de QEMU
+Itens bloqueados:              0 (4 pendentes de decisão: nome, licença, horas, PC de referência)
+Cobertura de testes relevante: crates de lógica pura com testes + fuzz-lite; kernel: 39 auto-testes; cortes de energia simulados (host e QEMU)
+Tempo de boot:                 ~2,5 s até "boot completo" com 39 testes (QEMU TCG); serviços: 7 drivers/servidores em ring 3
+RAM ociosa:                    ~500 MiB livres de 512 MiB no fim do boot
+Crash mais recente:            nenhum não intencional; stress de 2 h sem erros (2026-08-30); 24 h em execução
+Maior risco atual:             escopo e continuidade (§11); DMA sem IOMMU (ADR-0015)
+Decisão necessária:            confirmar nome/licença/horas; PC de referência
+Próxima demonstração pública:  shell de diagnóstico interativo na console VirtIO (cenário `shell`)
 ```

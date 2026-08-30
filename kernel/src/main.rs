@@ -17,6 +17,7 @@ mod boot;
 mod cell;
 mod console;
 mod initrd;
+mod iommu;
 mod ipc;
 mod irq;
 mod mm;
@@ -78,6 +79,7 @@ fn kmain(bi: &'static BootInfo) -> ! {
     timer::init();
     initrd::init();
     pci::init();
+    iommu::init(acpi::dmar_present());
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());
 
     let cmdline = boot::cmdline();

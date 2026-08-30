@@ -1168,6 +1168,12 @@ fn test_pci() -> TestResult {
             d.bdf
         );
     }
+    // Estado documentado do DMA (ADR-0015): sem traducao IOMMU, o caminho e inseguro.
+    check!(
+        crate::iommu::dma_is_unrestricted(),
+        "modo de IOMMU inesperado: {:?}",
+        crate::iommu::mode()
+    );
     check!(
         !crate::pci::is_mmio_range(None, 0, PAGE_SIZE),
         "pagina 0 aceita como MMIO"
