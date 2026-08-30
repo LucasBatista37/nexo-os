@@ -46,6 +46,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `run-qemu` anexa a própria imagem de boot como um segundo `virtio-blk` **somente leitura** (`serial=nexoboot`); `blockdev` negocia `VIRTIO_BLK_F_RO`, lê o serial (`GET_ID`) e recusa escritas em dispositivos somente leitura; `devmgr` roteia por serial (`nexodata` → `fs`, `nexoboot` → `espfs`).
 - `utest` modo 11 verifica pelo `espfs`: raiz com `EFI` e `nexo`, tamanhos, cabeçalhos `MZ` e `\x7fELF`, caminho inexistente → não encontrado.
 
+### Adicionado (Fase 3, bloco 5 — VFS, namespace por processo, ramfs, cache de blocos)
+- `services/vfs`: VFS servindo o próprio protocolo `nexo.fs` com **namespace por instância** (máscara de montagens no argumento): `/disk` → NexoFS (caminhos reescritos, inodes etiquetados), `/boot` → ESP via `espfs` (só leitura; escrita → status 13), `/tmp` → ramfs gravável interno (16 arquivos × 16 KiB, volátil, por instância).
+- Cache de blocos de leitura no `fs` (8 blocos, write-through; estatísticas no log ao desmontar).
+- `utest` modo 12 e teste `user_vfs`: dois namespaces simultâneos (completo e só `/tmp`) — roteamento, leitura do kernel pela ESP via VFS, ramfs isolado entre instâncias, montagens invisíveis fora do namespace. 39 testes no boot.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

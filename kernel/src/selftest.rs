@@ -69,6 +69,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_block_crash", test_user_block_crash),
     ("user_fs", test_user_fs),
     ("user_devmgr", test_user_devmgr),
+    ("user_vfs", test_user_vfs),
     ("symbols", test_symbols),
 ];
 
@@ -1395,6 +1396,105 @@ fn test_user_devmgr() -> TestResult {
         live <= live0,
         "processos ainda vivos: {live} (antes {live0})"
     );
+    let ends = crate::ipc::live_channel_ends();
+    check!(
+        ends == ends0,
+        "extremidades de canal vazaram: {ends0} -> {ends}"
+    );
+    let frames = phys::stats().free;
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    for v in 0..4u8 {
+        crate::irq::free(crate::irq::USER_VECTOR_BASE + v);
+    }
+    Ok(())
+}
+
+/// vfs com dois namespaces (completo e so /tmp) sobre fs + espfs; utest(12) verifica
+/// roteamento, ramfs por instancia e isolamento entre namespaces.
+fn test_user_vfs() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let mut blks: Vec<u16> = crate::pci::devices()
+        .iter()
+        .filter(|d| d.is_virtio() && (d.device == 0x1001 || d.device == 0x1042))
+        .map(|d| d.bdf)
+        .collect();
+    blks.sort_unstable();
+    if blks.len() < 2 {
+        return Err(String::from("disco de boot virtio ausente"));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    // cadeia de dados: blockdev (primeiro disco) + fs
+    let (a1, b1) = ChannelEnd::create_pair();
+    let (c1, d1) = ChannelEnd::create_pair();
+    let blk_data = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a1)],
+    )
+    .map_err(String::from)?;
+    let fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b1), channel_handle(c1)])
+            .map_err(String::from)?;
+    // cadeia de boot: blockdev restrito ao segundo disco + espfs
+    let (a2, b2) = ChannelEnd::create_pair();
+    let (c2, d2) = ChannelEnd::create_pair();
+    let boot_grant = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(blks[1]))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let blk_boot =
+        crate::process::spawn_named("blockdev", 0, alloc::vec![boot_grant, channel_handle(a2)])
+            .map_err(String::from)?;
+    let espfs = crate::process::spawn_named(
+        "espfs",
+        0,
+        alloc::vec![channel_handle(b2), channel_handle(c2)],
+    )
+    .map_err(String::from)?;
+    // vfs completo (arg 0 = tudo) e vfs so /tmp (arg 4, com canais dummy)
+    let (x1, y1) = ChannelEnd::create_pair();
+    let vfs_full = crate::process::spawn_named(
+        "vfs",
+        0,
+        alloc::vec![channel_handle(d1), channel_handle(d2), channel_handle(x1)],
+    )
+    .map_err(String::from)?;
+    let (dm1, dm2) = ChannelEnd::create_pair();
+    let (x2, y2) = ChannelEnd::create_pair();
+    let vfs_tmp = crate::process::spawn_named(
+        "vfs",
+        4,
+        alloc::vec![channel_handle(dm1), channel_handle(dm2), channel_handle(x2)],
+    )
+    .map_err(String::from)?;
+    let client = crate::process::spawn_named(
+        "utest",
+        12,
+        alloc::vec![channel_handle(y1), channel_handle(y2)],
+    )
+    .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let v1 = crate::process::wait_and_reap(&vfs_full);
+    let v2 = crate::process::wait_and_reap(&vfs_tmp);
+    let fc = crate::process::wait_and_reap(&fs);
+    let ec = crate::process::wait_and_reap(&espfs);
+    let d1c = crate::process::wait_and_reap(&blk_data);
+    let d2c = crate::process::wait_and_reap(&blk_boot);
+    drop((client, vfs_full, vfs_tmp, fs, espfs, blk_data, blk_boot));
+    sched::reap();
+    check!(cc == 0, "cliente do vfs saiu com {cc}");
+    check!(v1 == 0 && v2 == 0, "vfs saiu com {v1}/{v2}");
+    check!(fc == 0 && ec == 0, "fs/espfs sairam com {fc}/{ec}");
+    check!(d1c == 0 && d2c == 0, "blockdevs sairam com {d1c}/{d2c}");
     let ends = crate::ipc::live_channel_ends();
     check!(
         ends == ends0,

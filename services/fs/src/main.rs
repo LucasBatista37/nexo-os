@@ -16,11 +16,18 @@ const CLIENT: Handle = 1;
 /// Setores no fim do disco fora do volume (area crua usada pelos testes de bloco).
 const RESERVED_TAIL_SECTORS: u64 = 256;
 
-/// Dispositivo de blocos sobre o canal do `blockdev`.
+/// Dispositivo de blocos sobre o canal do `blockdev`, com um cache de leitura pequeno
+/// (write-through: escrita atualiza o cache e vai direto ao driver).
+const CACHE_BLOCKS: usize = 8;
+
 struct ChanDisk {
     blocks: u64,
     req: [u8; 16 + BLOCK],
     reply: [u8; 1 + BLOCK],
+    cache_tags: [u64; CACHE_BLOCKS],
+    cache: [[u8; BLOCK]; CACHE_BLOCKS],
+    hits: u64,
+    misses: u64,
 }
 
 impl ChanDisk {
@@ -29,6 +36,10 @@ impl ChanDisk {
             blocks: 0,
             req: [0; 16 + BLOCK],
             reply: [0; 1 + BLOCK],
+            cache_tags: [u64::MAX; CACHE_BLOCKS],
+            cache: [[0; BLOCK]; CACHE_BLOCKS],
+            hits: 0,
+            misses: 0,
         };
         d.req[0] = 2; // capacidade
         if nexo_sys::channel_send(BLK, &d.req[..16], &[]) != Status::Ok {
@@ -61,6 +72,13 @@ impl BlockDevice for ChanDisk {
         if block >= self.blocks {
             return Err(IoError);
         }
+        let slot = (block % CACHE_BLOCKS as u64) as usize;
+        if self.cache_tags[slot] == block {
+            self.hits += 1;
+            buf.copy_from_slice(&self.cache[slot]);
+            return Ok(());
+        }
+        self.misses += 1;
         self.header(0, block);
         if nexo_sys::channel_send(BLK, &self.req[..16], &[]) != Status::Ok {
             return Err(IoError);
@@ -69,6 +87,8 @@ impl BlockDevice for ChanDisk {
         match nexo_sys::channel_recv(BLK, &mut self.reply, &mut hs) {
             Ok((n, _)) if n == 1 + BLOCK && self.reply[0] == 0 => {
                 buf.copy_from_slice(&self.reply[1..1 + BLOCK]);
+                self.cache_tags[slot] = block;
+                self.cache[slot].copy_from_slice(buf);
                 Ok(())
             }
             _ => Err(IoError),
@@ -78,6 +98,9 @@ impl BlockDevice for ChanDisk {
         if block >= self.blocks {
             return Err(IoError);
         }
+        let slot = (block % CACHE_BLOCKS as u64) as usize;
+        self.cache_tags[slot] = block;
+        self.cache[slot].copy_from_slice(buf);
         self.header(1, block);
         self.req[16..].copy_from_slice(buf);
         if nexo_sys::channel_send(BLK, &self.req, &[]) != Status::Ok {
@@ -154,6 +177,14 @@ pub extern "C" fn _start(arg: u64) -> ! {
             Ok(v) => v,
             Err(Status::PeerClosed) => {
                 let _ = fs.sync();
+                {
+                    let d = fs.device();
+                    log!(
+                        "fs: cache de blocos: {} acertos, {} leituras do driver",
+                        d.hits,
+                        d.misses
+                    );
+                }
                 log!(
                     "fs: cliente desconectou apos {} pedidos; volume sincronizado",
                     served

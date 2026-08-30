@@ -53,6 +53,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         9 => fs_client(),
         10 => fs_churn(),
         11 => devmgr_client(),
+        12 => vfs_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -777,4 +778,107 @@ fn esp_checks(esp: Option<nexo_sys::Handle>, hs: &mut [u32; 1]) {
         boot_size,
         kernel_size
     );
+}
+
+/// Modo 12: cliente do `vfs` — handle 0 = namespace completo (/boot /disk /tmp),
+/// handle 1 = namespace so com /tmp. Verifica roteamento, ramfs e isolamento.
+fn vfs_client() -> ! {
+    let mut a = FsClient {
+        ch: 0,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    // raiz do namespace completo: boot, disk, tmp
+    let (count, n) = a.ok(6, 0, 0, 0, b"/", 210);
+    if count != 3 {
+        nexo_rt::log!("utest: vfs: raiz com {} entradas ({} bytes)", count, n);
+        nexo_sys::exit(211);
+    }
+    // /boot: stat + leitura do cabecalho ELF por inode; escrita recusada (13)
+    let (kino, n) = a.ok(0, 0, 0, 0, b"/boot/nexo/kernel.elf", 212);
+    let ksize = u64::from_le_bytes(a.data(n)[1..9].try_into().unwrap());
+    if a.data(n)[0] != 1 || ksize == 0 {
+        nexo_sys::exit(213);
+    }
+    let kino = kino as u32;
+    let (r, n) = a.ok(4, kino, 0, 4, &[], 214);
+    if r != 4 || a.data(n) != b"\x7fELF" {
+        nexo_sys::exit(215);
+    }
+    let (st, _, _) = a.call(5, kino, 0, 0, b"x");
+    if st != 13 {
+        nexo_rt::log!("utest: vfs: escrita no /boot devolveu {}", st);
+        nexo_sys::exit(216);
+    }
+    // /tmp (ramfs): cria, escreve, le, lista, remove
+    let (tino, _) = a.ok(1, 0, 0, 0, b"/tmp/nota.txt", 217);
+    let tino = tino as u32;
+    a.ok(5, tino, 0, 0, b"ola tmp", 218);
+    let (r, n) = a.ok(4, tino, 0, 32, &[], 219);
+    if r != 7 || a.data(n) != b"ola tmp" {
+        nexo_sys::exit(220);
+    }
+    let (count, _) = a.ok(6, 0, 0, 0, b"/tmp", 221);
+    if count != 1 {
+        nexo_sys::exit(222);
+    }
+    a.ok(3, 0, 0, 0, b"/tmp/nota.txt", 223);
+    let (st, _, _) = a.call(0, 0, 0, 0, b"/tmp/nota.txt");
+    if st != 3 {
+        nexo_sys::exit(224);
+    }
+    // /disk (NexoFS via vfs): cria, escreve, le por inode, remove
+    let _ = a.call(3, 0, 0, 0, b"/disk/vfs.txt");
+    let (dino, _) = a.ok(1, 0, 0, 0, b"/disk/vfs.txt", 225);
+    let dino = dino as u32;
+    a.ok(5, dino, 0, 0, b"via vfs", 226);
+    let (r, n) = a.ok(4, dino, 0, 32, &[], 227);
+    if r != 7 || a.data(n) != b"via vfs" {
+        nexo_sys::exit(228);
+    }
+    let (st, sino, n) = a.call(0, 0, 0, 0, b"/disk/vfs.txt");
+    if st != 0
+        || sino != dino as u64
+        || u64::from_le_bytes(a.data(n)[1..9].try_into().unwrap()) != 7
+    {
+        nexo_sys::exit(229);
+    }
+    a.ok(3, 0, 0, 0, b"/disk/vfs.txt", 230);
+    // criar fora de montagem
+    let (st, _, _) = a.call(1, 0, 0, 0, b"/qualquer");
+    if st != 3 && st != 11 {
+        nexo_sys::exit(231);
+    }
+    // namespace restrito (handle 1): so /tmp; /disk e /boot nao existem
+    let mut b = FsClient {
+        ch: 1,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let (count, _) = b.ok(6, 0, 0, 0, b"/", 232);
+    if count != 1 {
+        nexo_rt::log!("utest: vfs: namespace restrito com {} entradas", count);
+        nexo_sys::exit(233);
+    }
+    let (st, _, _) = b.call(0, 0, 0, 0, b"/disk");
+    if st != 3 {
+        nexo_sys::exit(234);
+    }
+    let (st, _, _) = b.call(0, 0, 0, 0, b"/boot/nexo/kernel.elf");
+    if st != 3 {
+        nexo_sys::exit(235);
+    }
+    let (xino, _) = b.ok(1, 0, 0, 0, b"/tmp/isolada", 236);
+    b.ok(5, xino as u32, 0, 0, b"so aqui", 237);
+    // o arquivo do namespace restrito nao aparece no completo? (ramfs e por instancia)
+    let (st, _, _) = a.call(0, 0, 0, 0, b"/tmp/isolada");
+    if st != 3 {
+        nexo_rt::log!("utest: vfs: ramfs vazou entre namespaces ({})", st);
+        nexo_sys::exit(238);
+    }
+    nexo_rt::log!(
+        "utest: vfs ok (namespaces isolados, kernel.elf {} bytes)",
+        ksize
+    );
+    nexo_sys::exit(0)
 }

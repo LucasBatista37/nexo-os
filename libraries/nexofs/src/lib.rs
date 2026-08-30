@@ -470,6 +470,11 @@ impl<D: BlockDevice> Fs<D> {
         self.dev
     }
 
+    /// Acesso ao dispositivo montado.
+    pub fn device(&self) -> &D {
+        &self.dev
+    }
+
     /// Estatísticas.
     pub fn info(&self) -> Info {
         let mut free = 0;

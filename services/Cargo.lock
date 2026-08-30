@@ -110,6 +110,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-vfs"
+version = "0.0.1"
+dependencies = [
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-virtio"
 version = "0.0.1"
 
