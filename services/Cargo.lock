@@ -85,9 +85,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-proto"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-rngdev"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
  "nexo-virtio",
@@ -131,6 +136,7 @@ version = "0.0.1"
 name = "nexo-utest"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
 ]

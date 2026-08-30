@@ -1,9 +1,11 @@
 //! `rngdev` — driver VirtIO-RNG em modo usuário. Handle 0 = concessão do dispositivo
-//! (restrita à função), handle 1 = canal de pedidos (`nexo.rng` v0: pedido `[len u32]`,
-//! `len` ≤ 1024; resposta `[status u8][bytes]`).
+//! (restrita à função), handle 1 = canal de pedidos com o protocolo **tipado** `nexo.rng` v1.0
+//! (gerado de `idl/rng.idl`; cabeçalho NXIP, `docs/spec/ipc-compat.md` §2). Erros: código 1 =
+//! pedido inválido, 2 = dispositivo não respondeu, 3 = mensagem malformada.
 #![no_std]
 #![no_main]
 
+use nexo_proto::rng::{self, FillRequest, FillResponse, Request};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::{PciInfo, Status};
@@ -117,8 +119,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         size,
         if msix.is_some() { "MSI-X" } else { "polling" }
     );
-    let mut req = [0u8; 16];
-    let mut reply = [0u8; 1 + MAX_REQUEST];
+    let mut req = [0u8; 64];
+    let mut reply = [0u8; 4096];
     let mut hs = [0u32; 1];
     let mut seen = 0u64;
     loop {
@@ -127,13 +129,17 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             Err(Status::PeerClosed) => nexo_sys::exit(0),
             Err(_) => fail(20, "recv"),
         };
-        let want = if n >= 4 {
-            u32::from_le_bytes(req[0..4].try_into().unwrap()) as usize
-        } else {
-            0
+        let want = match rng::decode_request(&req[..n]) {
+            Ok(Request::Fill(f)) => f.len as usize,
+            Err(_) => {
+                let m = rng::encode_error(FillRequest::METHOD_ID, 3, &mut reply).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+                continue;
+            }
         };
         if want == 0 || want > MAX_REQUEST {
-            let _ = nexo_sys::channel_send(CHAN, &[1u8], &[]);
+            let m = rng::encode_error(FillRequest::METHOD_ID, 1, &mut reply).unwrap_or(0);
+            let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
             continue;
         }
         q.set_desc(0, buf.phys, want as u32, DESC_WRITE, 0);
@@ -160,19 +166,24 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         match got {
             Some((_, len)) => {
                 let len = (len as usize).min(want);
-                reply[0] = 0;
+                let mut resp = FillResponse {
+                    data: [0; 1024],
+                    data_len: len as u32,
+                };
                 // SAFETY: página de DMA exclusiva; `len ≤ 1024`.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         buf.virt as *const u8,
-                        reply[1..].as_mut_ptr(),
+                        resp.data.as_mut_ptr(),
                         len,
                     )
                 };
-                let _ = nexo_sys::channel_send(CHAN, &reply[..1 + len], &[]);
+                let m = resp.encode_msg(&mut reply).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
             }
             None => {
-                let _ = nexo_sys::channel_send(CHAN, &[2u8], &[]);
+                let m = rng::encode_error(FillRequest::METHOD_ID, 2, &mut reply).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
             }
         }
     }

@@ -1,0 +1,9 @@
+[package]
+name = "nexo-proto"
+description = "Protocolos IPC tipados do Nexo OS: cabecalho NXIP (ipc-compat §2) e modulos gerados por tools/idlgen a partir de idl/*.idl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

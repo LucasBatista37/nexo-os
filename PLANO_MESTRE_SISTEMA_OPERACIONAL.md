@@ -426,7 +426,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] implementar canais IPC e transferência de handles — *canais com filas por extremidade, bloqueio em recv, transferência testada entre processos*;
 - [ ] implementar espera múltipla, eventos e timers;
 - [-] validar cópias entre usuário e kernel — *ponteiros validados por faixa e bit USER antes de copiar (`copy_from_user`); cópia para o usuário ainda não existe*;
-- [ ] criar formato de protocolo tipado e gerador de código;
+- [x] criar formato de protocolo tipado e gerador de código — *IDL própria (`idl/*.idl`) + `tools/idlgen` → `abi/proto` (cabeçalho NXIP, ipc-compat §2, testes de compatibilidade e fuzz-lite); `nexo.rng` migrado, demais protocolos na fila*;
 - [x] definir regras de compatibilidade do IPC — *docs/spec/ipc-compat.md*;
 - [x] criar `init` e `service-manager` — *`services/init` e `services/svcmgr` em ring 3*;
 - [-] criar políticas de reinício e dependências — *reinício com limite implementado e testado (`echo` cai e volta); dependências declarativas pendentes*;

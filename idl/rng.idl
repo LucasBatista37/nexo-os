@@ -1,0 +1,12 @@
+# nexo.rng — fonte de entropia (services/rngdev)
+protocol rng 1.0
+
+# Pede ate `len` bytes aleatorios (1..=1024).
+method 1 fill {
+    request {
+        len: u32,
+    }
+    response {
+        data: bytes<1024>,
+    }
+}

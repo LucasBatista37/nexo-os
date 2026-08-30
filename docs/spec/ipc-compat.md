@@ -39,7 +39,9 @@ Decodificadores rejeitam (sem efeitos) magic, `protocol_id`, `version_major` ou 
 - Decodificador submetido ao fuzz-lite (mutação determinística) e, quando houver, ao fuzzing contínuo.
 - Teste de compatibilidade cruzada: mensagem da versão N-1 lida pela N e vice-versa (campos extras ignorados, padrões aplicados).
 
-## 5. Protocolos crus provisórios (até a IDL existir)
+## 5. Protocolos tipados e crus
+
+A IDL existe: `idl/*.idl` → `tools/idlgen` (`make idl`) → `abi/proto` (`nexo-proto`, cabeçalho NXIP do §2, structs com encode/decode, enum de pedidos, erros remotos tipados; testes de layout, ida-e-volta, compatibilidade N±1 e fuzz-lite no crate). O CI falha se os módulos gerados estiverem defasados (`make idl-check`). **Migrados:** `nexo.rng` v1.0 (`rngdev` + clientes). Os demais protocolos abaixo continuam crus e serão migrados um a um:
 
 | Canal | Mensagens | Observação |
 |---|---|---|
@@ -47,7 +49,7 @@ Decodificadores rejeitam (sem efeitos) magic, `protocol_id`, `version_major` ou 
 | `svcmgr` → `echo` | `serve`+handle | idem `nexo.service` |
 | cliente → `echo` | texto livre · resposta `echo: <texto>` | exemplo; não faz parte da ABI |
 | cliente → `blockdev` (`nexo.block` v0) | pedido `[op u8][pad 3][setor u64][n u32][dados n×512 se escrita]`, `op` 0 = ler, 1 = escrever, 2 = capacidade (resposta `[0][setores u64]`), 3 = identidade (resposta `[0][ro u8][serial 20 B]`), `n` ≤ 7 · resposta `[status u8][dados n×512 se leitura]`; status 0 ok, 1 pedido curto, 2 fora da capacidade/`n` inválido, 3 dados insuficientes, 4 dispositivo somente leitura, `0x1x` erro do dispositivo | um canal por cliente (handle 1 do driver); substituído por `nexo.block` tipado |
-| cliente → `rngdev` (`nexo.rng` v0) | pedido `[len u32]` (1..=1024) · resposta `[status u8][bytes]`; status 1 = pedido inválido, 2 = dispositivo não respondeu | um canal por cliente (handle 1 do driver) |
+| cliente → `rngdev` | **tipado**: `nexo.rng` v1.0 (`idl/rng.idl`, método 1 `fill{len}` → `{data}`); erros remotos 1 = pedido inválido, 2 = dispositivo não respondeu, 3 = malformado | um canal por cliente (handle 1 do driver) |
 | cliente → `espfs` (`nexo.esp` v0) | pedido `[op u8][pad 3][offset u64][len u32][caminho]`; ops 0 list → `[attr u8][size u32][len u8][nome]…` (valor = nº de entradas), 1 stat → `[attr u8][size u32]` (valor = tamanho), 2 read(offset, len ≤ 4084) → dados · resposta `[status u8][pad 3][valor u64][dados]`; status 1 E/S, 2 corrompido, 3 não encontrado, 5 não é diretório, 6 é diretório, 12 sem ESP | somente leitura; um cliente por servidor |
 | cliente → `vfs` (`nexo.fs` v0 roteado) | mesmo protocolo `nexo.fs`; caminhos roteados por prefixo do namespace da instância: `/disk` → `fs`, `/boot` → `espfs` (só leitura; escrita → status 13), `/tmp` → ramfs interno (16 arquivos × 16 KiB, volátil, por instância); inodes carregam a montagem nos bits 28..30 | um `vfs` por cliente = namespace por processo; handles: 0 `fs`, 1 `espfs`, 2 cliente; argumento = máscara de montagens |
 | cliente → `consoledev` (`nexo.console` v0) | pedido `[op u8][dados…]`; op 0 = ler o que houver (resposta `[0][bytes…]`, possivelmente vazia, sem bloquear), 1 = escrever (resposta `[0]`) | porta 0 da VirtIO-console, sem `MULTIPORT`; um cliente por driver |

@@ -15,6 +15,7 @@ nexo-rt = { path = "../sdk/nexo-rt" }
 nexofs = { path = "../libraries/nexofs" }
 nexo-virtio = { path = "../libraries/virtio" }
 nexo-fat = { path = "../libraries/fat" }
+nexo-proto = { path = "../abi/proto" }
 
 [profile.dev]
 panic = "abort"

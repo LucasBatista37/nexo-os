@@ -4,7 +4,7 @@
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress roadmap
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress roadmap idl idl-check
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 DURATION ?= 600
@@ -54,13 +54,21 @@ reproducible:
 	tools/build-image --cmdline "" --out build/repro-b.img | tee build/repro-b.txt
 	@cmp build/repro-a.img build/repro-b.img && echo "[nexo] imagem reproduzivel: OK" || (echo "[nexo] imagem NAO reproduzivel; primeiras diferencas (offset, a, b):"; cmp -l build/repro-a.img build/repro-b.img | head -20; exit 1)
 
-ci: lint test-host image test-qemu reproducible
+ci: lint idl-check test-host image test-qemu reproducible
 
 stress: image
 	tools/build-image --no-build --cmdline "selftest=0 stress=$(DURATION) exit" --out build/nexo-stress-long.img
 	mkdir -p build/logs
 	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress-long.log; \
 	rc=$$?; if [ $$rc -eq 33 ]; then echo "[nexo] stress de $(DURATION)s: PASS"; else echo "[nexo] stress: FALHA (codigo $$rc)"; exit 1; fi
+
+# Regenera os protocolos tipados a partir de idl/*.idl (abi/proto/src/generated).
+idl:
+	tools/idlgen
+
+# Falha se os modulos gerados estiverem defasados em relacao a IDL (usado no CI).
+idl-check: idl
+	git diff --exit-code -- abi/proto/src/generated || (echo "erro: rode 'make idl' e commite abi/proto/src/generated"; exit 1)
 
 roadmap:
 	tools/roadmap-status

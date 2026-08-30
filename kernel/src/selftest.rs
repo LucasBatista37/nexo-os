@@ -1231,13 +1231,28 @@ fn test_user_block() -> TestResult {
         ends == ends0,
         "extremidades de canal vazaram: {ends0} -> {ends}"
     );
-    let frames = phys::stats().free;
+    let frames = settled_free_frames(frames0, 4);
     // As paginas de DMA e as tabelas de paginas do driver devem ter sido liberadas.
     check!(
         frames + 4 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
     );
     Ok(())
+}
+
+/// Quadros livres apos dar tempo de as threads mortas serem colhidas (os quadros de um
+/// processo sao liberados quando o ultimo `Arc` cai, um instante depois de ele sair da tabela).
+fn settled_free_frames(frames0: u64, slack: u64) -> u64 {
+    let mut frames = phys::stats().free;
+    for _ in 0..200 {
+        if frames + slack >= frames0 {
+            break;
+        }
+        sched::sleep_ms(10);
+        sched::reap();
+        frames = phys::stats().free;
+    }
+    frames
 }
 
 fn has_virtio_blk() -> bool {
@@ -1294,7 +1309,7 @@ fn test_user_block_crash() -> TestResult {
         ends == ends0,
         "extremidades de canal vazaram: {ends0} -> {ends}"
     );
-    let frames = phys::stats().free;
+    let frames = settled_free_frames(frames0, 4);
     check!(
         frames + 4 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
@@ -1344,7 +1359,7 @@ fn test_user_fs() -> TestResult {
         ends == ends0,
         "extremidades de canal vazaram: {ends0} -> {ends}"
     );
-    let frames = phys::stats().free;
+    let frames = settled_free_frames(frames0, 4);
     check!(
         frames + 4 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
@@ -1401,7 +1416,7 @@ fn test_user_devmgr() -> TestResult {
         ends == ends0,
         "extremidades de canal vazaram: {ends0} -> {ends}"
     );
-    let frames = phys::stats().free;
+    let frames = settled_free_frames(frames0, 8);
     check!(
         frames + 8 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
@@ -1500,7 +1515,7 @@ fn test_user_vfs() -> TestResult {
         ends == ends0,
         "extremidades de canal vazaram: {ends0} -> {ends}"
     );
-    let frames = phys::stats().free;
+    let frames = settled_free_frames(frames0, 8);
     check!(
         frames + 8 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"

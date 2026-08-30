@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `3bdd581`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `a18fe9c`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 143 · 🟡 30 · ⬜ 362 · ⛔ 0 → **30% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 144 · 🟡 30 · ⬜ 361 · ⛔ 0 → **30% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -10,7 +10,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 |---|---|---|---|---|---|---|---|
 | Fase 0 — Fundação e preparação (meses 0–6) | ✅ atendido | 13 | 2 | 0 | 93% | 0 (concluída) | gate F0 atendido em clone limpo; release 0.0.1-boot publicada |
 | Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 17 | 2 | 0 | 95% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
-| Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 8 | 7 | 3 | 64% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
+| Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 9 | 7 | 2 | 69% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
 | Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 16 | 4 | 1 | 86% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 0 | 0 | 19 | 0% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
@@ -88,7 +88,7 @@ Gate: 🟡 quase. 30 min de stress com 4 CPUs sem erros; faltam as 24 h (`make s
 | ✅ | adicionar symbolication e dump mínimo de falhas |  |
 | 🟡 | publicar release `0.1-kernel` | gate F1 exige 24 h de stress; ferramenta pronta, execução pendente |
 
-### Fase 2 — Modo usuário, IPC e capabilities (ano 2) — 64% (8 ✅, 7 🟡, 3 ⬜)
+### Fase 2 — Modo usuário, IPC e capabilities (ano 2) — 69% (9 ✅, 7 🟡, 2 ⬜)
 
 Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado
 
@@ -102,7 +102,7 @@ Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem re
 | ✅ | implementar canais IPC e transferência de handles | canais com filas por extremidade, bloqueio em recv, transferência testada entre processos |
 | ⬜ | implementar espera múltipla, eventos e timers |  |
 | 🟡 | validar cópias entre usuário e kernel | ponteiros validados por faixa e bit USER antes de copiar (`copy_from_user`); cópia para o usuário ainda não existe |
-| ⬜ | criar formato de protocolo tipado e gerador de código |  |
+| ✅ | criar formato de protocolo tipado e gerador de código | IDL própria (`idl/*.idl`) + `tools/idlgen` → `abi/proto` (cabeçalho NXIP, ipc-compat §2, testes de compatibilidade e fuzz-lite); `nexo.rng` migrado, demais protocolos na fila |
 | ✅ | definir regras de compatibilidade do IPC | docs/spec/ipc-compat.md |
 | ✅ | criar `init` e `service-manager` | `services/init` e `services/svcmgr` em ring 3 |
 | 🟡 | criar políticas de reinício e dependências | reinício com limite implementado e testado (`echo` cai e volta); dependências declarativas pendentes |

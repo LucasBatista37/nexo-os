@@ -6,6 +6,7 @@ resolver = "2"
 members = [
     "abi/boot",
     "abi/syscall",
+    "abi/proto",
     "arch/x86_64",
     "kernel/lib/mm",
     "kernel/lib/heap",

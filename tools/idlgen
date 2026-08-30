@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""Gera os modulos Rust dos protocolos tipados (NXIP) a partir de idl/*.idl.
+
+Formato da IDL (linhas; `#` comenta):
+  protocol <nome> <maior>.<menor>
+  method <id> <nome> { request { campo: tipo [= padrao], ... } response { ... } }
+Tipos: u8 u16 u32 u64 i32 i64 bytes<N>. Campos com padrao devem ser os ultimos
+(leitores novos assumem o padrao quando o payload antigo e curto — ipc-compat §3).
+
+Saida: abi/proto/src/gen/<nome>.rs (+ mod.rs). Rode `make idl` apos editar a IDL.
+"""
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+SCALARS = {"u8": 1, "u16": 2, "u32": 4, "u64": 8, "i32": 4, "i64": 8}
+
+
+def fnv1a(data: bytes) -> int:
+    h = 0x811C9DC5
+    for b in data:
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+def parse(text: str, path):
+    toks = []
+    for ln, line in enumerate(text.splitlines(), 1):
+        line = line.split("#", 1)[0].strip()
+        if line:
+            toks.append((ln, line))
+    it = iter(toks)
+    proto = None
+    methods = []
+    cur = None
+    section = None
+    for ln, line in it:
+        m = re.fullmatch(r"protocol (\w[\w.-]*) (\d+)\.(\d+)", line)
+        if m:
+            proto = (m.group(1), int(m.group(2)), int(m.group(3)))
+            continue
+        m = re.fullmatch(r"method (\d+) (\w+) \{", line)
+        if m:
+            cur = {"id": int(m.group(1)), "name": m.group(2), "request": [], "response": []}
+            continue
+        m = re.fullmatch(r"(request|response) \{", line)
+        if m:
+            section = m.group(1)
+            continue
+        if line == "}":
+            if section:
+                section = None
+            elif cur:
+                methods.append(cur)
+                cur = None
+            continue
+        m = re.fullmatch(r"(\w+): (u8|u16|u32|u64|i32|i64|bytes<(\d+)>)(?: = (-?\d+))?,?", line)
+        if m and cur and section:
+            ty = m.group(2)
+            cur[section].append({"name": m.group(1), "type": ty, "max": int(m.group(3)) if m.group(3) else None,
+                                 "default": m.group(4)})
+            continue
+        sys.exit(f"{path}:{ln}: linha invalida: {line!r}")
+    if not proto:
+        sys.exit(f"{path}: sem declaracao 'protocol'")
+    ids = [m["id"] for m in methods]
+    if len(ids) != len(set(ids)):
+        sys.exit(f"{path}: method_id repetido")
+    for m in methods:
+        for sec in ("request", "response"):
+            seen_default = False
+            for f in m[sec]:
+                if f["default"] is not None:
+                    if f["type"].startswith("bytes"):
+                        sys.exit(f"{path}: padrao so em escalares ({m['name']}.{f['name']})")
+                    seen_default = True
+                elif seen_default:
+                    sys.exit(f"{path}: campos com padrao devem ser os ultimos ({m['name']}.{f['name']})")
+    return proto, methods
+
+
+def camel(s: str) -> str:
+    return "".join(p.capitalize() for p in s.split("_"))
+
+
+def gen_struct(out, proto_name, m, sec):
+    name = f"{camel(m['name'])}{'Request' if sec == 'request' else 'Response'}"
+    fields = m[sec]
+    out.append(f"/// `{proto_name}.{m['name']}` — {'pedido' if sec == 'request' else 'resposta'}.")
+    out.append("#[derive(Clone, Debug, PartialEq, Eq)]")
+    out.append(f"pub struct {name} {{")
+    for f in fields:
+        if f["max"] is not None:
+            out.append(f"    /// Bytes de `{f['name']}` (ate {f['max']}).")
+            out.append(f"    pub {f['name']}: [u8; {f['max']}],")
+            out.append(f"    /// Tamanho valido de `{f['name']}`.")
+            out.append(f"    pub {f['name']}_len: u32,")
+        else:
+            d = f" (padrao {f['default']})" if f["default"] is not None else ""
+            out.append(f"    /// Campo `{f['name']}`{d}.")
+            out.append(f"    pub {f['name']}: {f['type']},")
+    out.append("}")
+    out.append("")
+    out.append(f"impl {name} {{")
+    out.append(f"    /// Numero do metodo.")
+    out.append(f"    pub const METHOD_ID: u32 = {m['id']};")
+    if any(f["max"] is not None for f in fields):
+        for f in fields:
+            if f["max"] is not None:
+                out.append(f"    /// Fatia valida de `{f['name']}`.")
+                out.append(f"    pub fn {f['name']}(&self) -> &[u8] {{")
+                out.append(f"        &self.{f['name']}[..(self.{f['name']}_len as usize).min({f['max']})]")
+                out.append("    }")
+    # encode_payload
+    out.append("    /// Codifica o payload; devolve o tamanho.")
+    out.append("    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {")
+    out.append("        let mut o = 0usize;")
+    for f in fields:
+        if f["max"] is not None:
+            out.append(f"        let n = self.{f['name']}_len as usize;")
+            out.append(f"        if n > {f['max']} {{ return Err(ProtoError::TooBig); }}")
+            out.append("        if o + 4 + n > out.len() { return Err(ProtoError::Short); }")
+            out.append(f"        out[o..o + 4].copy_from_slice(&(n as u32).to_le_bytes());")
+            out.append(f"        out[o + 4..o + 4 + n].copy_from_slice(&self.{f['name']}[..n]);")
+            out.append("        o += 4 + n;")
+        else:
+            size = SCALARS[f["type"]]
+            out.append(f"        if o + {size} > out.len() {{ return Err(ProtoError::Short); }}")
+            out.append(f"        out[o..o + {size}].copy_from_slice(&self.{f['name']}.to_le_bytes());")
+            out.append(f"        o += {size};")
+    out.append("        Ok(o)")
+    out.append("    }")
+    # decode_payload
+    out.append("    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao")
+    out.append("    /// ausentes assumem o padrao — ipc-compat §3).")
+    out.append("    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {")
+    out.append("        let mut o = 0usize;")
+    for f in fields:
+        n = f["name"]
+        if f["max"] is not None:
+            out.append(f"        let mut {n} = [0u8; {f['max']}];")
+            out.append(f"        let {n}_len: u32;")
+            out.append("        {")
+            out.append("            if o + 4 > b.len() { return Err(ProtoError::Short); }")
+            out.append("            let l = u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as usize;")
+            out.append(f"            if l > {f['max']} {{ return Err(ProtoError::TooBig); }}")
+            out.append("            if o + 4 + l > b.len() { return Err(ProtoError::Short); }")
+            out.append(f"            {n}[..l].copy_from_slice(&b[o + 4..o + 4 + l]);")
+            out.append(f"            {n}_len = l as u32;")
+            out.append("            o += 4 + l;")
+            out.append("        }")
+        else:
+            size = SCALARS[f["type"]]
+            ty = f["type"]
+            if f["default"] is not None:
+                out.append(f"        let {n}: {ty} = if o + {size} <= b.len() {{")
+                out.append(f"            let v = {ty}::from_le_bytes(b[o..o + {size}].try_into().unwrap());")
+                out.append(f"            o += {size};")
+                out.append("            v")
+                out.append(f"        }} else {{ {f['default']} }};")
+            else:
+                out.append(f"        if o + {size} > b.len() {{ return Err(ProtoError::Short); }}")
+                out.append(f"        let {n} = {ty}::from_le_bytes(b[o..o + {size}].try_into().unwrap());")
+                out.append(f"        o += {size};")
+    out.append("        let _ = o;")
+    parts = []
+    for f in fields:
+        parts.append(f["name"])
+        if f["max"] is not None:
+            parts.append(f["name"] + "_len")
+    out.append(f"        Ok({name} {{ {', '.join(parts)} }})")
+    out.append("    }")
+    # encode_msg
+    flags = "0" if sec == "request" else "FLAG_RESPONSE"
+    out.append("    /// Codifica a mensagem completa (cabecalho NXIP + payload).")
+    out.append("    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {")
+    out.append("        if out.len() < HEADER_LEN { return Err(ProtoError::Short); }")
+    out.append("        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;")
+    out.append("        let h = Header {")
+    out.append("            protocol_id: PROTOCOL_ID,")
+    out.append("            version_major: VERSION_MAJOR,")
+    out.append("            version_minor: VERSION_MINOR,")
+    out.append(f"            method_id: Self::METHOD_ID,")
+    out.append(f"            flags: {flags},")
+    out.append("            payload_len: plen as u32,")
+    out.append("        };")
+    out.append("        h.encode(out)?;")
+    out.append("        Ok(HEADER_LEN + plen)")
+    out.append("    }")
+    out.append("}")
+    out.append("")
+    return name
+
+
+def generate(path: pathlib.Path) -> str:
+    proto, methods = parse(path.read_text(), path)
+    pname, major, minor = proto
+    full = f"nexo.{pname}"
+    out = []
+    out.append(f"//! Protocolo tipado `{full}` v{major}.{minor} — **gerado por `tools/idlgen` de `idl/{pname}.idl`; nao editar**.")
+    out.append("")
+    out.append("use crate::{FLAG_ERROR, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};")
+    out.append("")
+    out.append(f"/// FNV-1a de `\"{full}\"`.")
+    out.append(f"pub const PROTOCOL_ID: u32 = 0x{fnv1a(full.encode()):08x};")
+    out.append("/// Versao maior (incompatibilidades).")
+    out.append(f"pub const VERSION_MAJOR: u16 = {major};")
+    out.append("/// Versao menor (adicoes compativeis).")
+    out.append(f"pub const VERSION_MINOR: u16 = {minor};")
+    out.append("")
+    names = {}
+    for m in methods:
+        names[m["id"]] = (gen_struct(out, full, m, "request"), gen_struct(out, full, m, "response"))
+    # enum Request + decode_request
+    out.append("/// Pedido decodificado.")
+    out.append("#[derive(Clone, Debug, PartialEq, Eq)]")
+    out.append("pub enum Request {")
+    for m in methods:
+        out.append(f"    /// `{m['name']}`.")
+        out.append(f"    {camel(m['name'])}({names[m['id']][0]}),")
+    out.append("}")
+    out.append("")
+    out.append("/// Decodifica um pedido completo (cabecalho + payload).")
+    out.append("pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {")
+    out.append("    let h = Header::decode(msg)?;")
+    out.append("    if h.protocol_id != PROTOCOL_ID { return Err(ProtoError::Protocol); }")
+    out.append("    if h.version_major != VERSION_MAJOR { return Err(ProtoError::Version); }")
+    out.append("    if h.flags != 0 { return Err(ProtoError::Flags); }")
+    out.append("    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];")
+    out.append("    match h.method_id {")
+    for m in methods:
+        out.append(f"        {m['id']} => Ok(Request::{camel(m['name'])}({names[m['id']][0]}::decode_payload(p)?)),")
+    out.append("        _ => Err(ProtoError::Method),")
+    out.append("    }")
+    out.append("}")
+    out.append("")
+    for m in methods:
+        rname = names[m["id"]][1]
+        out.append(f"/// Decodifica a resposta de `{m['name']}` (erro remoto vira `ProtoError::Remote`).")
+        out.append(f"pub fn decode_{m['name']}_response(msg: &[u8]) -> Result<{rname}, ProtoError> {{")
+        out.append("    let h = Header::decode(msg)?;")
+        out.append("    if h.protocol_id != PROTOCOL_ID { return Err(ProtoError::Protocol); }")
+        out.append("    if h.version_major != VERSION_MAJOR { return Err(ProtoError::Version); }")
+        out.append(f"    if h.method_id != {m['id']} {{ return Err(ProtoError::Method); }}")
+        out.append("    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];")
+        out.append("    if h.flags & FLAG_ERROR != 0 {")
+        out.append("        let code = if p.len() >= 4 { u32::from_le_bytes([p[0], p[1], p[2], p[3]]) } else { 0 };")
+        out.append("        return Err(ProtoError::Remote(code));")
+        out.append("    }")
+        out.append("    if h.flags != FLAG_RESPONSE { return Err(ProtoError::Flags); }")
+        out.append(f"    {rname}::decode_payload(p)")
+        out.append("}")
+        out.append("")
+    out.append("/// Codifica uma resposta de erro para o metodo `method_id`.")
+    out.append("pub fn encode_error(method_id: u32, code: u32, out: &mut [u8]) -> Result<usize, ProtoError> {")
+    out.append("    if out.len() < HEADER_LEN + 4 { return Err(ProtoError::Short); }")
+    out.append("    let h = Header {")
+    out.append("        protocol_id: PROTOCOL_ID,")
+    out.append("        version_major: VERSION_MAJOR,")
+    out.append("        version_minor: VERSION_MINOR,")
+    out.append("        method_id,")
+    out.append("        flags: FLAG_RESPONSE | FLAG_ERROR,")
+    out.append("        payload_len: 4,")
+    out.append("    };")
+    out.append("    h.encode(out)?;")
+    out.append("    out[HEADER_LEN..HEADER_LEN + 4].copy_from_slice(&code.to_le_bytes());")
+    out.append("    Ok(HEADER_LEN + 4)")
+    out.append("}")
+    out.append("")
+    return "\n".join(out)
+
+
+def main() -> int:
+    gen_dir = ROOT / "abi" / "proto" / "src" / "generated"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    mods = []
+    for idl in sorted((ROOT / "idl").glob("*.idl")):
+        name = idl.stem
+        (gen_dir / f"{name}.rs").write_text(generate(idl))
+        mods.append(name)
+        print(f"[idl] {idl.name} -> abi/proto/src/generated/{name}.rs")
+    lines = ["//! Modulos gerados por `tools/idlgen` — nao editar.", ""]
+    for m in mods:
+        lines.append(f"pub mod {m};")
+    (gen_dir / "mod.rs").write_text("\n".join(lines) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

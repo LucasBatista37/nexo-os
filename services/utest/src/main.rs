@@ -646,35 +646,44 @@ fn devmgr_client() -> ! {
     let Some(fs) = fs else { nexo_sys::exit(182) };
     let Some(rng) = rng else { nexo_sys::exit(183) };
     fs_exercise(fs, false);
+    use nexo_proto::ProtoError;
+    use nexo_proto::rng::{FillRequest, decode_fill_response};
     let mut r1 = [0u8; 64];
     let mut r2 = [0u8; 64];
+    let mut rbuf = [0u8; 4096];
     for (i, out) in [&mut r1, &mut r2].into_iter().enumerate() {
-        if nexo_sys::channel_send(rng, &32u32.to_le_bytes(), &[]) != Status::Ok {
+        let m = FillRequest { len: 32 }.encode_msg(&mut rbuf).unwrap_or(0);
+        if nexo_sys::channel_send(rng, &rbuf[..m], &[]) != Status::Ok {
             nexo_sys::exit(184);
         }
-        match nexo_sys::channel_recv(rng, &mut buf, &mut hs) {
-            Ok((33, _)) if buf[0] == 0 => out[..32].copy_from_slice(&buf[1..33]),
-            Ok((n, _)) => {
-                nexo_rt::log!(
-                    "utest: rng: resposta {} inesperada ({} bytes, status {})",
-                    i,
-                    n,
-                    buf[0]
-                );
+        let n = match nexo_sys::channel_recv(rng, &mut rbuf, &mut hs) {
+            Ok((n, _)) => n,
+            Err(_) => nexo_sys::exit(186),
+        };
+        match decode_fill_response(&rbuf[..n]) {
+            Ok(resp) if resp.data().len() == 32 => out[..32].copy_from_slice(resp.data()),
+            other => {
+                nexo_rt::log!("utest: rng: resposta {} inesperada: {:?}", i, other.err());
                 nexo_sys::exit(185)
             }
-            Err(_) => nexo_sys::exit(186),
         }
     }
     if r1[..32].iter().all(|&b| b == 0) || r1[..32] == r2[..32] {
         nexo_sys::log("utest: rng: bytes nulos ou repetidos");
         nexo_sys::exit(187);
     }
-    // pedido invalido e recusado sem derrubar o driver
-    let _ = nexo_sys::channel_send(rng, &4096u32.to_le_bytes(), &[]);
-    match nexo_sys::channel_recv(rng, &mut buf, &mut hs) {
-        Ok((1, _)) if buf[0] == 1 => {}
+    // pedido invalido e recusado com erro tipado, sem derrubar o driver
+    let m = FillRequest { len: 4096 }.encode_msg(&mut rbuf).unwrap_or(0);
+    let _ = nexo_sys::channel_send(rng, &rbuf[..m], &[]);
+    match nexo_sys::channel_recv(rng, &mut rbuf, &mut hs) {
+        Ok((n, _)) if decode_fill_response(&rbuf[..n]) == Err(ProtoError::Remote(1)) => {}
         _ => nexo_sys::exit(188),
+    }
+    // mensagem malformada -> erro tipado 3
+    let _ = nexo_sys::channel_send(rng, b"lixo", &[]);
+    match nexo_sys::channel_recv(rng, &mut rbuf, &mut hs) {
+        Ok((n, _)) if decode_fill_response(&rbuf[..n]) == Err(ProtoError::Remote(3)) => {}
+        _ => nexo_sys::exit(199),
     }
     esp_checks(esp, &mut hs);
     nexo_rt::log!(

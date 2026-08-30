@@ -62,6 +62,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `run-qemu --input-keyboard` (virtio-keyboard-pci) e `--qmp-socket` (controle QMP); `input-test=1` na linha de comando sobe inputdev + utest(13).
 - Cenário `input`: o harness injeta teclas reais por QMP (`send-key` a, b, Enter) e o driver de usuário as entrega ao cliente, que confere os códigos (30, 48, 28).
 
+### Adicionado (Fase 3, bloco 8 — IDL e protocolos tipados)
+- IDL própria (`idl/*.idl`) e gerador `tools/idlgen` (`make idl`): produz módulos Rust `no_std` em `abi/proto` (`nexo-proto`) com o cabeçalho NXIP (`ipc-compat` §2 — magic, `protocol_id` FNV-1a, versões, `method_id`, flags, `payload_len` validado), structs com encode/decode append-only (campos com padrão para leitores novos ↔ payloads antigos), enum de pedidos e erros remotos tipados; `make idl-check` no CI recusa módulos defasados.
+- Testes do `nexo-proto`: layout do cabeçalho, ida-e-volta, protocolo/versão/método desconhecidos rejeitados, payload estendido lido por decodificador antigo, erro remoto, 20 000 mutações sem pânico.
+- Primeiro protocolo migrado: `nexo.rng` v1.0 — `rngdev` e o cliente (`utest` 11) falam NXIP; mensagens malformadas e pedidos inválidos viram erros tipados (códigos 3 e 1) sem derrubar o driver.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

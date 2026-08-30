@@ -45,6 +45,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-proto"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-rt"
 version = "0.0.1"
 dependencies = [
