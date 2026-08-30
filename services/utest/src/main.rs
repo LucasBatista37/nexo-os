@@ -57,7 +57,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         11 => devmgr_client(),
         12 => vfs_client(),
         13 => input_client(),
-        14 => net_client(),
+        14 => net_client(param as u16),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1156,7 +1156,7 @@ fn input_client() -> ! {
 
 /// Modo 14: cliente do `netdev` (handle 0): pergunta o MAC, manda um ARP request pelo
 /// gateway do slirp (10.0.2.2) e espera o ARP reply — um pacote de verdade indo e voltando.
-fn net_client() -> ! {
+fn net_client(tcp_port: u16) -> ! {
     use nexo_proto::net::{
         MacRequest, RecvRequest, SendRequest, decode_mac_response, decode_recv_response,
         decode_send_response,
@@ -1269,7 +1269,7 @@ fn net_client() -> ! {
                 gw[4],
                 gw[5]
             );
-            net_ping(mac, gw, lease.ip, lease.router, lease.dns);
+            net_ping(mac, gw, lease.ip, lease.router, lease.dns, tcp_port);
         }
         if nexo_sys::time_now() - start > 20_000_000_000 {
             nexo_rt::log!("utest: net: sem ARP reply em 20 s");
@@ -1280,7 +1280,14 @@ fn net_client() -> ! {
 }
 
 /// Ping ICMP ao gateway com a biblioteca `nexo-netstack`; sai com 0 no echo reply.
-fn net_ping(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], gw_ip: [u8; 4], dns_ip: [u8; 4]) -> ! {
+fn net_ping(
+    mac: [u8; 6],
+    gw: [u8; 6],
+    my_ip: [u8; 4],
+    gw_ip: [u8; 4],
+    dns_ip: [u8; 4],
+    tcp_port: u16,
+) -> ! {
     use nexo_netstack as nsk;
     use nexo_proto::net::{RecvRequest, SendRequest, decode_recv_response, decode_send_response};
     let mut msg = [0u8; 4096];
@@ -1333,7 +1340,7 @@ fn net_ping(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], gw_ip: [u8; 4], dns_ip: [
                     "utest: net ok — echo reply de 10.0.2.2 (ttl={}, 9 bytes)",
                     ttl
                 );
-                dns_lookup(mac, gw, my_ip, dns_ip);
+                dns_lookup(mac, gw, my_ip, dns_ip, tcp_port);
             }
             nexo_sys::exit(263)
         }
@@ -1412,7 +1419,7 @@ fn dhcp_handshake(mac: [u8; 6]) -> nexo_netstack::DhcpLease {
 
 /// Consulta DNS A por `example.com` ao servidor do lease (o slirp encaminha ao resolvedor do
 /// host); qualquer resposta valida com o mesmo id conta como sucesso (o rcode e registrado).
-fn dns_lookup(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], dns_ip: [u8; 4]) -> ! {
+fn dns_lookup(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], dns_ip: [u8; 4], tcp_port: u16) -> ! {
     use nexo_netstack as nsk;
     use nexo_proto::net::{RecvRequest, SendRequest, decode_recv_response, decode_send_response};
     let mut msg = [0u8; 4096];
@@ -1479,7 +1486,10 @@ fn dns_lookup(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], dns_ip: [u8; 4]) -> ! {
                     );
                 }
             }
-            nexo_sys::exit(0)
+            if tcp_port == 0 {
+                nexo_sys::exit(0)
+            }
+            tcp_check(mac, gw, my_ip, tcp_port);
         }
         if nexo_sys::time_now() - start > 20_000_000_000 {
             nexo_rt::log!("utest: dns: sem resposta em 20 s");
@@ -1487,4 +1497,129 @@ fn dns_lookup(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], dns_ip: [u8; 4]) -> ! {
         }
         nexo_sys::sleep_ns(20_000_000);
     }
+}
+
+/// Handshake TCP + eco com um servidor no host (10.0.2.2:`port`, atras do slirp):
+/// SYN -> SYN-ACK -> ACK, envia "ola tcp\n", espera "nexo-tcp-ok" e encerra com RST.
+fn tcp_check(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], port: u16) -> ! {
+    use nexo_netstack as nsk;
+    use nexo_proto::net::{RecvRequest, SendRequest, decode_recv_response, decode_send_response};
+    let host: [u8; 4] = [10, 0, 2, 2];
+    let sport = 40100u16;
+    let iss = 0x4e58_2000u32;
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    let tx =
+        |seq: u32, ack: u32, flags: u8, payload: &[u8], msg: &mut [u8; 4096], hs: &mut [u32; 1]| {
+            let mut sr = SendRequest {
+                frame: [0; 1514],
+                frame_len: 0,
+            };
+            let n = nsk::tcp_write(
+                &mut sr.frame,
+                mac,
+                gw,
+                my_ip,
+                host,
+                sport,
+                port,
+                seq,
+                ack,
+                flags,
+                8192,
+                payload,
+            );
+            sr.frame_len = n as u32;
+            let m = sr.encode_msg(msg).unwrap_or(0);
+            if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+                nexo_sys::exit(290);
+            }
+            match nexo_sys::channel_recv(0, msg, hs) {
+                Ok((n, _)) if decode_send_response(&msg[..n]).is_ok() => {}
+                _ => nexo_sys::exit(291),
+            }
+        };
+    let rx = |want: u8,
+              msg: &mut [u8; 4096],
+              hs: &mut [u32; 1],
+              out: &mut [u8; 1024]|
+     -> (u32, u32, u8, usize) {
+        let start = nexo_sys::time_now();
+        loop {
+            let m = RecvRequest {}.encode_msg(msg).unwrap_or(0);
+            if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+                nexo_sys::exit(292);
+            }
+            let n = match nexo_sys::channel_recv(0, msg, hs) {
+                Ok((n, _)) => n,
+                _ => nexo_sys::exit(293),
+            };
+            let mut frame = [0u8; 1514];
+            let flen = match decode_recv_response(&msg[..n]) {
+                Ok(r) => {
+                    let l = r.frame().len();
+                    frame[..l].copy_from_slice(r.frame());
+                    l
+                }
+                Err(_) => nexo_sys::exit(294),
+            };
+            if let Some(seg) = nsk::tcp_parse(&frame[..flen], host, sport)
+                && seg.src_port == port
+                && seg.flags & want == want
+            {
+                let dl = seg.payload.len().min(1024);
+                out[..dl].copy_from_slice(&seg.payload[..dl]);
+                return (seg.seq, seg.ack, seg.flags, dl);
+            }
+            if nexo_sys::time_now() - start > 20_000_000_000 {
+                nexo_rt::log!("utest: tcp: sem segmento com flags {:#x} em 20 s", want);
+                nexo_sys::exit(295)
+            }
+            nexo_sys::sleep_ns(10_000_000);
+        }
+    };
+    let mut data = [0u8; 1024];
+    // 1. SYN -> SYN-ACK -> ACK
+    tx(iss, 0, nsk::TCP_SYN, b"", &mut msg, &mut hs);
+    let (srv_seq, srv_ack, _, _) = rx(nsk::TCP_SYN | nsk::TCP_ACK, &mut msg, &mut hs, &mut data);
+    if srv_ack != iss.wrapping_add(1) {
+        nexo_sys::exit(296);
+    }
+    let mut my_seq = iss.wrapping_add(1);
+    let mut their_seq = srv_seq.wrapping_add(1);
+    tx(my_seq, their_seq, nsk::TCP_ACK, b"", &mut msg, &mut hs);
+    nexo_rt::log!("utest: tcp: handshake completo com 10.0.2.2:{}", port);
+    // 2. envia a linha e espera a resposta do servidor
+    let payload = b"ola tcp\n";
+    tx(
+        my_seq,
+        their_seq,
+        nsk::TCP_ACK | nsk::TCP_PSH,
+        payload,
+        &mut msg,
+        &mut hs,
+    );
+    my_seq = my_seq.wrapping_add(payload.len() as u32);
+    let (dseq, _, _, dl) = rx(nsk::TCP_ACK | nsk::TCP_PSH, &mut msg, &mut hs, &mut data);
+    if &data[..dl] != b"nexo-tcp-ok" {
+        nexo_rt::log!("utest: tcp: resposta inesperada ({} bytes)", dl);
+        nexo_sys::exit(297);
+    }
+    their_seq = dseq.wrapping_add(dl as u32);
+    tx(my_seq, their_seq, nsk::TCP_ACK, b"", &mut msg, &mut hs);
+    nexo_rt::log!(
+        "utest: tcp ok — dados recebidos de 10.0.2.2:{} ({} bytes)",
+        port,
+        dl
+    );
+    // 3. encerra sem estados demorados (RST)
+    tx(
+        my_seq,
+        their_seq,
+        nsk::TCP_RST | nsk::TCP_ACK,
+        b"",
+        &mut msg,
+        &mut hs,
+    );
+    nexo_sys::exit(0)
 }

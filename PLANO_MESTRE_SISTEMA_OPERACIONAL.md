@@ -476,7 +476,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] implementar IPv4 — *cabeçalho + checksum com validação (`nexo-netstack`), usado no ping do cenário `net`; sem roteamento/fragmentação/pilha residente*;
 - [-] implementar ICMP — *echo request/reply completos no cenário `net` (ping real ao slirp); demais tipos pendentes*;
 - [-] implementar UDP — *montagem/leitura em `nexo-netstack` (o DHCP viaja por UDP no cenário `net`); sockets e entrega por porta pendentes*;
-- [ ] implementar TCP com suíte de testes e estados documentados;
+- [-] implementar TCP com suíte de testes e estados documentados — *segmentos com checksum de pseudo-cabeçalho em `nexo-netstack`; handshake, dados e RST reais com um servidor no host (cenário `net`); máquina de estados completa, retransmissão e suíte dedicada pendentes*;
 - [-] implementar DHCP — *cliente completo (DISCOVER→OFFER→REQUEST→ACK com opções) obtém lease real do slirp no cenário `net`; renovação/temporizadores e serviço residente pendentes*;
 - [-] implementar DNS com cache e validação de entradas — *consulta A e parser (compressão com limites) em `nexo-netstack`; resolução real no cenário `net`; cache e serviço residente pendentes*;
 - [ ] criar API de sockets nativa;

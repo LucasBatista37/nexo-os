@@ -101,6 +101,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo-netstack`: consulta DNS A (montagem com rótulos validados) e parser de respostas (id/QR, perguntas puladas, ponteiros de compressão com limite, primeiro registro A); teste de host com resposta sintética e fuzz-lite ampliado.
 - Cenário `net` fecha o ciclo: DHCP → ARP → ping → **consulta DNS real** por `example.com` ao servidor do lease (10.0.2.3, encaminhada pelo slirp ao resolvedor do host), com o rcode/registro A no log.
 
+### Adicionado (Fase 4, bloco 5 — TCP: handshake e dados reais)
+- `nexo-netstack`: segmentos TCP (montagem/leitura sem opções, checksum com pseudo-cabeçalho IPv4 validado nos dois sentidos, flags/seq/ack/janela); testes de host e fuzz-lite ampliado.
+- Cenário `net`: o harness sobe um servidor TCP no host (porta efêmera, passada por `tcp-port=` na linha de comando) e o cliente no Nexo faz o handshake completo (SYN → SYN-ACK → ACK) com `10.0.2.2:<porta>` através do slirp, envia uma linha, recebe `nexo-tcp-ok` e encerra com RST — sequência DHCP → ARP → ICMP → DNS → TCP inteira num boot.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

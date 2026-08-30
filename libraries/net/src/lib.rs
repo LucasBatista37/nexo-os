@@ -510,6 +510,143 @@ pub fn dns_parse(frame: &[u8], dns_ip: Ipv4Addr, src_port: u16, id: u16) -> Opti
     Some(ans)
 }
 
+/// Protocolo TCP.
+pub const IPPROTO_TCP: u8 = 6;
+/// Flag SYN.
+pub const TCP_SYN: u8 = 0x02;
+/// Flag ACK.
+pub const TCP_ACK: u8 = 0x10;
+/// Flag PSH.
+pub const TCP_PSH: u8 = 0x08;
+/// Flag FIN.
+pub const TCP_FIN: u8 = 0x01;
+/// Flag RST.
+pub const TCP_RST: u8 = 0x04;
+
+/// Checksum TCP (pseudo-cabeçalho IPv4 + segmento).
+fn tcp_checksum(src: Ipv4Addr, dst: Ipv4Addr, segment: &[u8]) -> u16 {
+    let mut pseudo = [0u8; 12];
+    pseudo[0..4].copy_from_slice(&src);
+    pseudo[4..8].copy_from_slice(&dst);
+    pseudo[9] = IPPROTO_TCP;
+    pseudo[10..12].copy_from_slice(&(segment.len() as u16).to_be_bytes());
+    let mut sum = 0u32;
+    for chunk in [&pseudo[..], segment] {
+        let (pairs, rest) = chunk.as_chunks::<2>();
+        for c in pairs {
+            sum += u16::from_be_bytes(*c) as u32;
+        }
+        if let [last] = rest {
+            sum += (*last as u32) << 8;
+        }
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
+/// Monta um segmento TCP completo (Ethernet + IPv4 + TCP, sem opções); devolve o tamanho do quadro.
+#[allow(clippy::too_many_arguments)]
+pub fn tcp_write(
+    frame: &mut [u8],
+    src_mac: Mac,
+    dst_mac: Mac,
+    src_ip: Ipv4Addr,
+    dst_ip: Ipv4Addr,
+    src_port: u16,
+    dst_port: u16,
+    seq: u32,
+    ack: u32,
+    flags: u8,
+    window: u16,
+    payload: &[u8],
+) -> usize {
+    let o = eth_write(frame, dst_mac, src_mac, ETHERTYPE_IPV4);
+    let seg_len = 20 + payload.len();
+    let po = ipv4_write(
+        frame,
+        o,
+        src_ip,
+        dst_ip,
+        IPPROTO_TCP,
+        seg_len,
+        64,
+        seq as u16,
+    );
+    {
+        let t = &mut frame[po..po + 20];
+        t[0..2].copy_from_slice(&src_port.to_be_bytes());
+        t[2..4].copy_from_slice(&dst_port.to_be_bytes());
+        t[4..8].copy_from_slice(&seq.to_be_bytes());
+        t[8..12].copy_from_slice(&ack.to_be_bytes());
+        t[12] = 5 << 4; // data offset = 5 palavras
+        t[13] = flags;
+        t[14..16].copy_from_slice(&window.to_be_bytes());
+        t[16..18].copy_from_slice(&0u16.to_be_bytes());
+        t[18..20].copy_from_slice(&0u16.to_be_bytes());
+    }
+    frame[po + 20..po + seg_len].copy_from_slice(payload);
+    let ck = tcp_checksum(src_ip, dst_ip, &frame[po..po + seg_len]);
+    frame[po + 16..po + 18].copy_from_slice(&ck.to_be_bytes());
+    po + seg_len
+}
+
+/// Segmento TCP decodificado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TcpSegment<'a> {
+    /// Porta de origem.
+    pub src_port: u16,
+    /// Porta de destino.
+    pub dst_port: u16,
+    /// Número de sequência.
+    pub seq: u32,
+    /// Número de confirmação.
+    pub ack: u32,
+    /// Flags.
+    pub flags: u8,
+    /// Janela.
+    pub window: u16,
+    /// Dados.
+    pub payload: &'a [u8],
+}
+
+/// Se `frame` é um segmento TCP de `from_ip` para a porta `dst_port`, decodifica-o
+/// (verifica o checksum com o pseudo-cabeçalho).
+pub fn tcp_parse(frame: &[u8], from_ip: Ipv4Addr, dst_port: u16) -> Option<TcpSegment<'_>> {
+    let (_, _, et, p) = eth_parse(frame)?;
+    if et != ETHERTYPE_IPV4 {
+        return None;
+    }
+    let ip = ipv4_parse(p)?;
+    if ip.proto != IPPROTO_TCP || ip.src != from_ip {
+        return None;
+    }
+    let t = ip.payload;
+    if t.len() < 20 {
+        return None;
+    }
+    let doff = ((t[12] >> 4) as usize) * 4;
+    if doff < 20 || doff > t.len() {
+        return None;
+    }
+    if be16(t, 2) != dst_port {
+        return None;
+    }
+    if tcp_checksum(ip.src, ip.dst, t) != 0 {
+        return None;
+    }
+    Some(TcpSegment {
+        src_port: be16(t, 0),
+        dst_port: be16(t, 2),
+        seq: u32::from_be_bytes([t[4], t[5], t[6], t[7]]),
+        ack: u32::from_be_bytes([t[8], t[9], t[10], t[11]]),
+        flags: t[13],
+        window: be16(t, 14),
+        payload: &t[doff..],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -698,6 +835,44 @@ mod tests {
     }
 
     #[test]
+    fn tcp_roundtrip_and_checksum() {
+        let mut f = [0u8; 256];
+        let n = tcp_write(
+            &mut f, MAC_A, MAC_B, IP_A, IP_B, 40001, 18080, 1000, 0, TCP_SYN, 8192, b"",
+        );
+        // o proprio parser valida o checksum (destino = porta do cliente na volta)
+        let seg = tcp_parse(&f[..n], IP_A, 18080).unwrap();
+        assert_eq!(seg.src_port, 40001);
+        assert_eq!(seg.seq, 1000);
+        assert_eq!(seg.flags, TCP_SYN);
+        assert!(seg.payload.is_empty());
+        // com payload
+        let n = tcp_write(
+            &mut f,
+            MAC_B,
+            MAC_A,
+            IP_B,
+            IP_A,
+            18080,
+            40001,
+            5000,
+            1001,
+            TCP_ACK | TCP_PSH,
+            8192,
+            b"nexo-tcp-ok",
+        );
+        let seg = tcp_parse(&f[..n], IP_B, 40001).unwrap();
+        assert_eq!(seg.ack, 1001);
+        assert_eq!(seg.payload, b"nexo-tcp-ok");
+        // checksum corrompido -> rejeita
+        let mut bad = f;
+        bad[n - 1] ^= 1;
+        assert!(tcp_parse(&bad[..n], IP_B, 40001).is_none());
+        // porta errada -> ignora
+        assert!(tcp_parse(&f[..n], IP_B, 40002).is_none());
+    }
+
+    #[test]
     fn fuzz_lite_parsers_never_panic() {
         let mut f = [0u8; 256];
         let n = icmp_echo_request(&mut f, MAC_A, MAC_B, IP_A, IP_B, 1, 1, &[7u8; 32]);
@@ -724,6 +899,7 @@ mod tests {
             let _ = icmp_echo_reply(s, IP_B, 1, 1);
             let _ = dhcp_parse(s, 1);
             let _ = dns_parse(s, [10, 0, 2, 3], 40000, 1);
+            let _ = tcp_parse(s, IP_B, 40001);
             if s.len() > ETH_HLEN + IPV4_HLEN {
                 let _ = udp_parse(&s[ETH_HLEN + IPV4_HLEN..]);
             }

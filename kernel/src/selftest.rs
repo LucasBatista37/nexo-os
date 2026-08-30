@@ -1684,8 +1684,15 @@ pub fn net_test_mode() {
     };
     let _drv = crate::process::spawn_named("netdev", 0, alloc::vec![g, channel_handle(a)])
         .expect("netdev");
-    let client =
-        crate::process::spawn_named("utest", 14, alloc::vec![channel_handle(b)]).expect("utest");
+    let tcp_port = nexo_boot_abi::cmdline_value(crate::boot::cmdline(), "tcp-port")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let client = crate::process::spawn_named(
+        "utest",
+        14 | (tcp_port << 8),
+        alloc::vec![channel_handle(b)],
+    )
+    .expect("utest");
     kinfo!("[NET] aguardando troca ARP com o gateway do slirp");
     let code = crate::process::wait_and_reap(&client);
     kinfo!("[NET] teste de rede terminou com {code}");
