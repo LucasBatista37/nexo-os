@@ -475,9 +475,9 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] implementar Ethernet e ARP/NDP conforme a fase IPv6 — *Ethernet e ARP (request/reply) em `nexo-netstack`, exercitados no cenário `net`; NDP vem com o IPv6*;
 - [-] implementar IPv4 — *cabeçalho + checksum com validação (`nexo-netstack`), usado no ping do cenário `net`; sem roteamento/fragmentação/pilha residente*;
 - [-] implementar ICMP — *echo request/reply completos no cenário `net` (ping real ao slirp); demais tipos pendentes*;
-- [ ] implementar UDP;
+- [-] implementar UDP — *montagem/leitura em `nexo-netstack` (o DHCP viaja por UDP no cenário `net`); sockets e entrega por porta pendentes*;
 - [ ] implementar TCP com suíte de testes e estados documentados;
-- [ ] implementar DHCP;
+- [-] implementar DHCP — *cliente completo (DISCOVER→OFFER→REQUEST→ACK com opções) obtém lease real do slirp no cenário `net`; renovação/temporizadores e serviço residente pendentes*;
 - [ ] implementar DNS com cache e validação de entradas;
 - [ ] criar API de sockets nativa;
 - [ ] criar compatibilidade POSIX de sockets;

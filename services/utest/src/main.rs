@@ -1187,6 +1187,27 @@ fn net_client() -> ! {
         mac[4],
         mac[5]
     );
+    // DHCP: DISCOVER -> OFFER -> REQUEST -> ACK contra o servidor do slirp.
+    let lease = dhcp_handshake(mac);
+    nexo_rt::log!(
+        "utest: dhcp ok — ip {}.{}.{}.{} mascara {}.{}.{}.{} gw {}.{}.{}.{} dns {}.{}.{}.{}",
+        lease.ip[0],
+        lease.ip[1],
+        lease.ip[2],
+        lease.ip[3],
+        lease.mask[0],
+        lease.mask[1],
+        lease.mask[2],
+        lease.mask[3],
+        lease.router[0],
+        lease.router[1],
+        lease.router[2],
+        lease.router[3],
+        lease.dns[0],
+        lease.dns[1],
+        lease.dns[2],
+        lease.dns[3]
+    );
     // ARP request: quem tem 10.0.2.2? (nosso IP: 10.0.2.15, padrao do slirp)
     let mut arp = SendRequest {
         frame: [0; 1514],
@@ -1202,7 +1223,7 @@ fn net_client() -> ! {
     f[19] = 4;
     f[20..22].copy_from_slice(&1u16.to_be_bytes()); // request
     f[22..28].copy_from_slice(&mac);
-    f[28..32].copy_from_slice(&[10, 0, 2, 15]);
+    f[28..32].copy_from_slice(&lease.ip);
     f[38..42].copy_from_slice(&[10, 0, 2, 2]);
     let m = arp.encode_msg(&mut msg).unwrap_or(0);
     if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
@@ -1235,12 +1256,12 @@ fn net_client() -> ! {
         if flen >= 42
             && frame[12..14] == 0x0806u16.to_be_bytes()
             && frame[20..22] == 2u16.to_be_bytes()
-            && frame[28..32] == [10, 0, 2, 2]
+            && frame[28..32] == lease.router
         {
             let mut gw = [0u8; 6];
             gw.copy_from_slice(&frame[22..28]);
             nexo_rt::log!(
-                "utest: net: ARP reply de 10.0.2.2 ({:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x})",
+                "utest: net: ARP reply do gateway ({:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x})",
                 gw[0],
                 gw[1],
                 gw[2],
@@ -1248,7 +1269,7 @@ fn net_client() -> ! {
                 gw[4],
                 gw[5]
             );
-            net_ping(mac, gw);
+            net_ping(mac, gw, lease.ip, lease.router);
         }
         if nexo_sys::time_now() - start > 20_000_000_000 {
             nexo_rt::log!("utest: net: sem ARP reply em 20 s");
@@ -1258,8 +1279,8 @@ fn net_client() -> ! {
     }
 }
 
-/// Ping ICMP ao gateway do slirp com a biblioteca `nexo-netstack`; sai com 0 no echo reply.
-fn net_ping(mac: [u8; 6], gw: [u8; 6]) -> ! {
+/// Ping ICMP ao gateway com a biblioteca `nexo-netstack`; sai com 0 no echo reply.
+fn net_ping(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], gw_ip: [u8; 4]) -> ! {
     use nexo_netstack as nsk;
     use nexo_proto::net::{RecvRequest, SendRequest, decode_recv_response, decode_send_response};
     let mut msg = [0u8; 4096];
@@ -1272,8 +1293,8 @@ fn net_ping(mac: [u8; 6], gw: [u8; 6]) -> ! {
         &mut send.frame,
         mac,
         gw,
-        [10, 0, 2, 15],
-        [10, 0, 2, 2],
+        my_ip,
+        gw_ip,
         0x4e58,
         1,
         b"nexo-ping",
@@ -1306,7 +1327,7 @@ fn net_ping(mac: [u8; 6], gw: [u8; 6]) -> ! {
             }
             Err(_) => nexo_sys::exit(262),
         };
-        if let Some((ttl, data)) = nsk::icmp_echo_reply(&frame[..flen], [10, 0, 2, 2], 0x4e58, 1) {
+        if let Some((ttl, data)) = nsk::icmp_echo_reply(&frame[..flen], gw_ip, 0x4e58, 1) {
             if data == b"nexo-ping" {
                 nexo_rt::log!(
                     "utest: net ok — echo reply de 10.0.2.2 (ttl={}, 9 bytes)",
@@ -1322,4 +1343,69 @@ fn net_ping(mac: [u8; 6], gw: [u8; 6]) -> ! {
         }
         nexo_sys::sleep_ns(20_000_000);
     }
+}
+
+/// DISCOVER → OFFER → REQUEST → ACK; devolve o lease confirmado.
+fn dhcp_handshake(mac: [u8; 6]) -> nexo_netstack::DhcpLease {
+    use nexo_netstack as nsk;
+    use nexo_proto::net::{RecvRequest, SendRequest, decode_recv_response, decode_send_response};
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    let xid = 0x4e58_0001u32;
+    let send_frame = |req: Option<([u8; 4], [u8; 4])>, msg: &mut [u8; 4096], hs: &mut [u32; 1]| {
+        let mut sr = SendRequest {
+            frame: [0; 1514],
+            frame_len: 0,
+        };
+        let n = nsk::dhcp_build(&mut sr.frame, mac, xid, req);
+        sr.frame_len = n as u32;
+        let m = sr.encode_msg(msg).unwrap_or(0);
+        if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(270);
+        }
+        match nexo_sys::channel_recv(0, msg, hs) {
+            Ok((n, _)) if decode_send_response(&msg[..n]).is_ok() => {}
+            _ => nexo_sys::exit(271),
+        }
+    };
+    let wait_kind = |want: u8, msg: &mut [u8; 4096], hs: &mut [u32; 1]| -> nsk::DhcpLease {
+        let start = nexo_sys::time_now();
+        loop {
+            let m = RecvRequest {}.encode_msg(msg).unwrap_or(0);
+            if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+                nexo_sys::exit(272);
+            }
+            let n = match nexo_sys::channel_recv(0, msg, hs) {
+                Ok((n, _)) => n,
+                _ => nexo_sys::exit(273),
+            };
+            let mut frame = [0u8; 1514];
+            let flen = match decode_recv_response(&msg[..n]) {
+                Ok(r) => {
+                    let l = r.frame().len();
+                    frame[..l].copy_from_slice(r.frame());
+                    l
+                }
+                Err(_) => nexo_sys::exit(274),
+            };
+            if let Some((kind, lease)) = nsk::dhcp_parse(&frame[..flen], xid)
+                && kind == want
+            {
+                return lease;
+            }
+            if nexo_sys::time_now() - start > 20_000_000_000 {
+                nexo_rt::log!("utest: dhcp: sem resposta tipo {} em 20 s", want);
+                nexo_sys::exit(275)
+            }
+            nexo_sys::sleep_ns(20_000_000);
+        }
+    };
+    send_frame(None, &mut msg, &mut hs);
+    let offer = wait_kind(2, &mut msg, &mut hs);
+    send_frame(Some((offer.ip, offer.server)), &mut msg, &mut hs);
+    let ack = wait_kind(5, &mut msg, &mut hs);
+    if ack.ip == [0, 0, 0, 0] || ack.router == [0, 0, 0, 0] {
+        nexo_sys::exit(276);
+    }
+    ack
 }

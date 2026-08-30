@@ -93,6 +93,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `libraries/net` (`nexo-netstack`): montagem e leitura de Ethernet, ARP (request/reply), IPv4 (cabeçalho + checksum RFC 1071, validação de versão/IHL/tamanho) e ICMP echo — `no_std`, sem alocação, `forbid(unsafe_code)`; testes de host com vetores conhecidos e fuzz-lite de 20 000 mutações.
 - Cenário `net` agora faz um **ping de verdade**: ARP para resolver o gateway do slirp e ICMP echo request/reply (ident/seq/checksum conferidos, ttl reportado).
 
+### Adicionado (Fase 4, bloco 3 — UDP e DHCP)
+- `nexo-netstack`: UDP (montagem/leitura com validação de tamanho) e cliente DHCP (DISCOVER/REQUEST com opções 53/50/54/55; parser de OFFER/ACK com xid, magic cookie e opções 1/3/6/54); testes de host e fuzz-lite ampliado.
+- Cenário `net` completo: **DHCP de verdade** contra o slirp (DISCOVER → OFFER → REQUEST → ACK; lease 10.0.2.15/24, gateway e DNS registrados no log) e o ARP + ping passam a usar o endereço do lease em vez de valores fixos.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

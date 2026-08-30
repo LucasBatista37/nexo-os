@@ -214,6 +214,169 @@ pub fn icmp_echo_reply(
     Some((ip.ttl, &icmp[8..]))
 }
 
+/// Porta do servidor DHCP.
+pub const DHCP_SERVER_PORT: u16 = 67;
+/// Porta do cliente DHCP.
+pub const DHCP_CLIENT_PORT: u16 = 68;
+
+/// Escreve um cabeçalho UDP (checksum 0 = ausente, permitido no IPv4); devolve o offset do payload.
+pub fn udp_write(
+    frame: &mut [u8],
+    ip_payload_off: usize,
+    src_port: u16,
+    dst_port: u16,
+    payload_len: usize,
+) -> usize {
+    let h = &mut frame[ip_payload_off..ip_payload_off + 8];
+    h[0..2].copy_from_slice(&src_port.to_be_bytes());
+    h[2..4].copy_from_slice(&dst_port.to_be_bytes());
+    h[4..6].copy_from_slice(&((8 + payload_len) as u16).to_be_bytes());
+    h[6..8].copy_from_slice(&0u16.to_be_bytes());
+    ip_payload_off + 8
+}
+
+/// Lê um cabeçalho UDP: (porta origem, porta destino, payload).
+pub fn udp_parse(p: &[u8]) -> Option<(u16, u16, &[u8])> {
+    if p.len() < 8 {
+        return None;
+    }
+    let len = be16(p, 4) as usize;
+    if len < 8 || len > p.len() {
+        return None;
+    }
+    Some((be16(p, 0), be16(p, 2), &p[8..len]))
+}
+
+/// Lease devolvido pelo DHCP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DhcpLease {
+    /// Endereço oferecido/confirmado.
+    pub ip: Ipv4Addr,
+    /// Servidor DHCP (opção 54).
+    pub server: Ipv4Addr,
+    /// Máscara (opção 1), se veio.
+    pub mask: Ipv4Addr,
+    /// Gateway (opção 3), se veio.
+    pub router: Ipv4Addr,
+    /// DNS (opção 6, primeiro endereço), se veio.
+    pub dns: Ipv4Addr,
+}
+
+/// Monta um DHCPDISCOVER (ou DHCPREQUEST, se `request_ip`/`server` vierem) em broadcast;
+/// devolve o tamanho do quadro.
+pub fn dhcp_build(
+    frame: &mut [u8],
+    src_mac: Mac,
+    xid: u32,
+    request: Option<(Ipv4Addr, Ipv4Addr)>,
+) -> usize {
+    let o = eth_write(frame, [0xff; 6], src_mac, ETHERTYPE_IPV4);
+    // BOOTP fixo (236 B) + magic (4) + opções (~18)
+    let mut opts = [0u8; 32];
+    let mut ol = 0usize;
+    opts[ol] = 53; // message type
+    opts[ol + 1] = 1;
+    opts[ol + 2] = if request.is_some() { 3 } else { 1 }; // REQUEST : DISCOVER
+    ol += 3;
+    if let Some((ip, server)) = request {
+        opts[ol] = 50; // requested IP
+        opts[ol + 1] = 4;
+        opts[ol + 2..ol + 6].copy_from_slice(&ip);
+        ol += 6;
+        opts[ol] = 54; // server id
+        opts[ol + 1] = 4;
+        opts[ol + 2..ol + 6].copy_from_slice(&server);
+        ol += 6;
+    }
+    opts[ol] = 55; // parameter request list: mask, router, dns
+    opts[ol + 1] = 3;
+    opts[ol + 2] = 1;
+    opts[ol + 3] = 3;
+    opts[ol + 4] = 6;
+    ol += 5;
+    opts[ol] = 255;
+    ol += 1;
+    let dhcp_len = 236 + 4 + ol;
+    let udp_len = 8 + dhcp_len;
+    let po = ipv4_write(
+        frame,
+        o,
+        [0, 0, 0, 0],
+        [255, 255, 255, 255],
+        IPPROTO_UDP,
+        udp_len,
+        64,
+        xid as u16,
+    );
+    let bo = udp_write(frame, po, DHCP_CLIENT_PORT, DHCP_SERVER_PORT, dhcp_len);
+    let b = &mut frame[bo..bo + dhcp_len];
+    b.fill(0);
+    b[0] = 1; // BOOTREQUEST
+    b[1] = 1; // Ethernet
+    b[2] = 6;
+    b[4..8].copy_from_slice(&xid.to_be_bytes());
+    b[10..12].copy_from_slice(&0x8000u16.to_be_bytes()); // broadcast
+    b[28..34].copy_from_slice(&src_mac);
+    b[236..240].copy_from_slice(&[99, 130, 83, 99]); // magic cookie
+    b[240..240 + ol].copy_from_slice(&opts[..ol]);
+    bo + dhcp_len
+}
+
+/// Se `frame` é um DHCPOFFER (2) ou DHCPACK (5) para o `xid`, devolve (tipo, lease).
+pub fn dhcp_parse(frame: &[u8], xid: u32) -> Option<(u8, DhcpLease)> {
+    let (_, _, et, p) = eth_parse(frame)?;
+    if et != ETHERTYPE_IPV4 {
+        return None;
+    }
+    let ip = ipv4_parse(p)?;
+    if ip.proto != IPPROTO_UDP {
+        return None;
+    }
+    let (sport, dport, b) = udp_parse(ip.payload)?;
+    if sport != DHCP_SERVER_PORT || dport != DHCP_CLIENT_PORT || b.len() < 240 {
+        return None;
+    }
+    if b[0] != 2 || u32::from_be_bytes([b[4], b[5], b[6], b[7]]) != xid {
+        return None;
+    }
+    if b[236..240] != [99, 130, 83, 99] {
+        return None;
+    }
+    let mut lease = DhcpLease::default();
+    lease.ip.copy_from_slice(&b[16..20]);
+    let mut kind = 0u8;
+    let mut i = 240usize;
+    while i + 1 < b.len() {
+        let code = b[i];
+        if code == 255 {
+            break;
+        }
+        if code == 0 {
+            i += 1;
+            continue;
+        }
+        let len = b[i + 1] as usize;
+        if i + 2 + len > b.len() {
+            return None;
+        }
+        let v = &b[i + 2..i + 2 + len];
+        match (code, len) {
+            (53, 1) => kind = v[0],
+            (54, 4) => lease.server.copy_from_slice(v),
+            (1, 4) => lease.mask.copy_from_slice(v),
+            (3, 4) => lease.router.copy_from_slice(v),
+            (6, l) if l >= 4 => lease.dns.copy_from_slice(&v[..4]),
+            _ => {}
+        }
+        i += 2 + len;
+    }
+    if kind == 2 || kind == 5 {
+        Some((kind, lease))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -292,6 +455,62 @@ mod tests {
     }
 
     #[test]
+    fn udp_roundtrip() {
+        let mut f = [0u8; 256];
+        let o = eth_write(&mut f, MAC_B, MAC_A, ETHERTYPE_IPV4);
+        let po = ipv4_write(&mut f, o, IP_A, IP_B, IPPROTO_UDP, 8 + 5, 64, 9);
+        let bo = udp_write(&mut f, po, 1234, 5678, 5);
+        f[bo..bo + 5].copy_from_slice(b"hello");
+        let ip = ipv4_parse(&f[o..bo + 5]).unwrap();
+        let (sp, dp, data) = udp_parse(ip.payload).unwrap();
+        assert_eq!((sp, dp, data), (1234, 5678, &b"hello"[..]));
+        assert!(udp_parse(&[0u8; 4]).is_none());
+    }
+
+    #[test]
+    fn dhcp_discover_offer() {
+        let mut f = [0u8; 640];
+        let n = dhcp_build(&mut f, MAC_A, 0x4e58_0001, None);
+        assert!(n > 240);
+        // constroi um OFFER correspondente: BOOTREPLY com yiaddr e opcoes
+        let mut off = [0u8; 640];
+        let oo = eth_write(&mut off, MAC_A, MAC_B, ETHERTYPE_IPV4);
+        let opts: &[u8] = &[
+            53, 1, 2, 54, 4, 10, 0, 2, 2, 1, 4, 255, 255, 255, 0, 3, 4, 10, 0, 2, 2, 6, 4, 10, 0,
+            2, 3, 255,
+        ];
+        let dhcp_len = 240 + opts.len();
+        let po = ipv4_write(
+            &mut off,
+            oo,
+            IP_B,
+            [255, 255, 255, 255],
+            IPPROTO_UDP,
+            8 + dhcp_len,
+            64,
+            1,
+        );
+        let bo = udp_write(&mut off, po, DHCP_SERVER_PORT, DHCP_CLIENT_PORT, dhcp_len);
+        off[bo] = 2; // BOOTREPLY
+        off[bo + 4..bo + 8].copy_from_slice(&0x4e58_0001u32.to_be_bytes());
+        off[bo + 16..bo + 20].copy_from_slice(&IP_A);
+        off[bo + 236..bo + 240].copy_from_slice(&[99, 130, 83, 99]);
+        off[bo + 240..bo + 240 + opts.len()].copy_from_slice(opts);
+        let (kind, lease) = dhcp_parse(&off[..bo + dhcp_len], 0x4e58_0001).unwrap();
+        assert_eq!(kind, 2);
+        assert_eq!(lease.ip, IP_A);
+        assert_eq!(lease.server, IP_B);
+        assert_eq!(lease.mask, [255, 255, 255, 0]);
+        assert_eq!(lease.router, IP_B);
+        assert_eq!(lease.dns, [10, 0, 2, 3]);
+        // xid errado -> ignora
+        assert!(dhcp_parse(&off[..bo + dhcp_len], 7).is_none());
+        // REQUEST inclui as opcoes 50/54
+        let rn = dhcp_build(&mut f, MAC_A, 2, Some((IP_A, IP_B)));
+        assert!(rn > n);
+    }
+
+    #[test]
     fn fuzz_lite_parsers_never_panic() {
         let mut f = [0u8; 256];
         let n = icmp_echo_request(&mut f, MAC_A, MAC_B, IP_A, IP_B, 1, 1, &[7u8; 32]);
@@ -316,6 +535,10 @@ mod tests {
                 let _ = ipv4_parse(&s[ETH_HLEN..]);
             }
             let _ = icmp_echo_reply(s, IP_B, 1, 1);
+            let _ = dhcp_parse(s, 1);
+            if s.len() > ETH_HLEN + IPV4_HLEN {
+                let _ = udp_parse(&s[ETH_HLEN + IPV4_HLEN..]);
+            }
         }
     }
 }

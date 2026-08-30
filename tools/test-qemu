@@ -427,7 +427,8 @@ def run_net_scenario(timeout: float) -> bool:
         log(f"FALHA: codigo de saida {rc}, esperado 33")
         ok = False
     for pat in [r"netdev: virtio-net bdf 0x[0-9a-f]+ mac 52:54:00:12:34:56 \(rx \d+, tx \d+, MSI-X\)",
-                r"utest: net: ARP reply de 10\.0\.2\.2",
+                r"utest: dhcp ok — ip 10\.0\.2\.15 mascara 255\.255\.255\.0 gw 10\.0\.2\.2 dns 10\.0\.2\.3",
+                r"utest: net: ARP reply do gateway",
                 r"utest: net ok — echo reply de 10\.0\.2\.2 \(ttl=\d+, 9 bytes\)",
                 r"\[NET\] teste de rede terminou com 0",
                 r"NEXO: boot completo"]:
