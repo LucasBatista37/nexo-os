@@ -100,4 +100,7 @@ Substitui um board externo até o repositório ter issues. Uma linha por item do
 | [-] | validar cópias usuário↔kernel | `copy_from_user` (faixa + bit USER); cópia para o usuário pendente |
 | [x] | loader ELF de usuário | `process::spawn_elf`; testes `user_*` |
 | [-] | runtime mínimo Rust e ABI C | `sdk/nexo-sys`; ABI C pendente |
-| [-] | testar isolamento e negação de capabilities | isolamento de memória/instruções e negação por direitos (`Denied`) testados no `init`; falta fuzzing |
+| [-] | testar isolamento e negação de capabilities | isolamento de memória/instruções e negação por direitos (`Denied`) testados no `utest`; falta fuzzing |
+| [x] | criar `init` e `service-manager` | `services/init`, `services/svcmgr`; teste `user_services` |
+| [x] | políticas de reinício e dependências | `svcmgr` reinicia `echo` até 3 vezes; cliente reconecta; dependências explícitas ainda não modeladas |
+| [x] | `ramfs/initramfs` para bring-up (§3.9) | `kernel/lib/initrd`, `tools/mkinitrd.py` |

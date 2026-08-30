@@ -1,0 +1,9 @@
+[package]
+name = "nexo-initrd"
+description = "Formato de initramfs do Nexo OS (arquivo simples com nomes e conteudos) — leitor sem alocacao"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

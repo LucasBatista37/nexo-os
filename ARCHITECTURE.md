@@ -106,6 +106,8 @@ Relógio: TSC calibrado (≈1 GHz no QEMU) → `monotonic_ns`; ticks (1000 Hz) a
 - Processo (`process.rs`): PML4 própria (metade do kernel copiada), ELF64 estático carregado com W^X e bit `USER` nas tabelas, pilha de 64 KiB com guard page, uma thread de kernel que entra em ring 3 por `iretq`; o escalonador troca `CR3` conforme a thread.
 - Faltas em ring 3 encerram só o processo; `wait` recolhe o código de saída e libera todos os quadros.
 - `services/init` é o primeiro programa (entregue pelo loader como initrd, ABI de boot v2); `sdk/nexo-sys` invoca a ABI v0 (`docs/spec/syscall-abi.md`).
+- Processos como objetos: `process_spawn` cria filhos a partir do initrd (`kernel/lib/initrd`, formato `NEXOIRD1` com membros nomeados) entregando handles iniciais; `process_wait` bloqueia (`park_with` na lista de espera do processo) e `process_info` consulta; ao terminar, o processo fecha seus handles, sai da tabela de vivos e acorda quem espera.
+- Serviços de usuário (`services/`): `init` → `svcmgr` (supervisiona `echo`, reinicia até 3 vezes, entrega um canal por conexão ao `echo-client`); `sdk/nexo-rt` traz `log!`, buffer de formatação e panic handler.
 - Objetos e IPC (`ipc.rs`): tabela de handles por processo (índice opaco + direitos que só diminuem); canais com duas extremidades e filas de mensagens (bytes + handles); `recv` bloqueia via `sched::park_with` (marca a thread bloqueada sob o lock do escalonador antes de soltar o lock do canal — sem wakeups perdidos) e `send`/fechamento acordam com `unpark`; handles enviados migram de tabela no `recv`.
 
 ## Componentes privilegiados (ADR-0002)

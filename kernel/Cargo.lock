@@ -30,6 +30,10 @@ name = "nexo-heap"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-initrd"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-kernel"
 version = "0.0.1"
 dependencies = [
@@ -39,6 +43,7 @@ dependencies = [
  "nexo-elf",
  "nexo-font",
  "nexo-heap",
+ "nexo-initrd",
  "nexo-mm",
  "nexo-symbols",
  "nexo-sync",

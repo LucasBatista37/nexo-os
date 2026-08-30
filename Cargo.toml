@@ -13,10 +13,12 @@ members = [
     "kernel/lib/symbols",
     "kernel/lib/acpi",
     "kernel/lib/elf",
+    "kernel/lib/initrd",
     "libraries/font",
     "sdk/nexo-sys",
+    "sdk/nexo-rt",
 ]
-exclude = ["kernel", "boot/loader", "services/init"]
+exclude = ["kernel", "boot/loader", "services"]
 
 [workspace.package]
 version = "0.0.1"

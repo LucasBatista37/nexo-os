@@ -1,0 +1,14 @@
+[package]
+name = "nexo-svcmgr"
+description = "Gerenciador de servicos: inicia, supervisiona e reinicia servicos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+nexo-sys.workspace = true
+nexo-rt = { workspace = true, features = ["panic-handler"] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

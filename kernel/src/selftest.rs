@@ -61,6 +61,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_isolation", test_user_isolation),
     ("user_syscall_error", test_user_syscall_error),
     ("user_ipc", test_user_ipc),
+    ("user_services", test_user_services),
     ("symbols", test_symbols),
 ];
 
@@ -851,22 +852,15 @@ fn test_threads_affinity() -> TestResult {
     Ok(())
 }
 
-fn init_elf() -> Result<&'static [u8], String> {
-    crate::boot::initrd().ok_or_else(|| String::from("initrd (init.elf) ausente"))
-}
-
-fn run_init(mode: u64) -> Result<i64, String> {
-    let elf = init_elf()?;
-    let p = crate::process::spawn_elf("init", elf, mode).map_err(String::from)?;
-    let pid = p.pid;
-    drop(p);
-    crate::process::wait(pid).ok_or_else(|| alloc::format!("wait({pid}) falhou"))
+fn run_utest(mode: u64) -> Result<i64, String> {
+    let p = crate::process::spawn_named("utest", mode, Vec::new()).map_err(String::from)?;
+    Ok(crate::process::wait_and_reap(&p))
 }
 
 fn test_user_process() -> TestResult {
     let logs0 = crate::process::user_log_count();
     let frames0 = phys::stats().free;
-    let code = run_init(0)?;
+    let code = run_utest(0)?;
     check!(code == 0, "init saiu com {code}");
     check!(
         crate::process::user_log_count() >= logs0 + 2,
@@ -874,7 +868,7 @@ fn test_user_process() -> TestResult {
     );
     let last = crate::x86::syscall::last_user_log();
     check!(
-        last.starts_with("init: ok pid="),
+        last.starts_with("utest: ok pid="),
         "ultima mensagem: {last:?}"
     );
     check!(
@@ -902,7 +896,7 @@ fn test_user_isolation() -> TestResult {
         (3, "instrucao privilegiada"),
         (4, "escrita em .rodata"),
     ] {
-        let code = run_init(mode)?;
+        let code = run_utest(mode)?;
         check!(
             code == nexo_syscall_abi::EXIT_KILLED,
             "{what}: processo saiu com {code} em vez de ser morto"
@@ -925,7 +919,7 @@ fn test_user_isolation() -> TestResult {
 }
 
 fn test_user_syscall_error() -> TestResult {
-    let code = run_init(2)?;
+    let code = run_utest(2)?;
     check!(
         code == nexo_syscall_abi::Status::NotSupported as u64 as i64,
         "status recebido pelo usuario: {code}"
@@ -935,7 +929,6 @@ fn test_user_syscall_error() -> TestResult {
 
 fn test_user_ipc() -> TestResult {
     use crate::ipc::{ChannelEnd, Handle, Object, Rights};
-    let elf = init_elf()?;
     let ends0 = crate::ipc::live_channel_ends();
     let sent0 = crate::ipc::messages_sent();
     let (a, b) = ChannelEnd::create_pair();
@@ -948,14 +941,12 @@ fn test_user_ipc() -> TestResult {
         object: Object::Channel(b),
         rights
     }];
-    let server =
-        crate::process::spawn_elf_with_handles("init", elf, 5, ha).map_err(String::from)?;
-    let client =
-        crate::process::spawn_elf_with_handles("init", elf, 6, hb).map_err(String::from)?;
-    let (sp, cp) = (server.pid, client.pid);
+    let server = crate::process::spawn_named("utest", 5, ha).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 6, hb).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let sc = crate::process::wait_and_reap(&server);
     drop((server, client));
-    let cc = crate::process::wait(cp).ok_or("wait cliente")?;
-    let sc = crate::process::wait(sp).ok_or("wait servidor")?;
+    sched::reap();
     check!(cc == 0, "cliente saiu com {cc}");
     check!(sc == 0, "servidor saiu com {sc}");
     let sent = crate::ipc::messages_sent() - sent0;
@@ -967,6 +958,57 @@ fn test_user_ipc() -> TestResult {
     );
     check!(crate::process::count() == 0, "processos sobrando");
     kprint!("({sent} mensagens) ");
+    Ok(())
+}
+
+fn test_user_services() -> TestResult {
+    // init -> svcmgr -> echo (cai de proposito) + echo-client: o servico e reiniciado sem reiniciar o kernel.
+    check!(
+        crate::initrd::count() >= 5,
+        "initrd com {} membros",
+        crate::initrd::count()
+    );
+    let live0 = crate::process::live_max();
+    let restarts0 = crate::x86::syscall::restart_log_count();
+    let spawned0 = crate::process::spawned_total();
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let p = crate::process::spawn_named("init", 0, Vec::new()).map_err(String::from)?;
+    let code = crate::process::wait_and_reap(&p);
+    drop(p);
+    sched::reap();
+    check!(code == 0, "init saiu com {code}");
+    let restarts = crate::x86::syscall::restart_log_count() - restarts0;
+    check!(restarts >= 1, "nenhum reinicio de servico registrado");
+    check!(
+        crate::process::live_max() >= 4,
+        "maximo de processos simultaneos: {}",
+        crate::process::live_max()
+    );
+    let spawned = crate::process::spawned_total() - spawned0;
+    check!(spawned >= 5, "processos criados: {spawned}");
+    check!(
+        crate::process::count() == 0,
+        "processos sobrando: {}",
+        crate::process::count()
+    );
+    sched::reap();
+    check!(
+        crate::ipc::live_channel_ends() == ends0,
+        "canais vazaram: {} -> {}",
+        ends0,
+        crate::ipc::live_channel_ends()
+    );
+    let frames1 = phys::stats().free;
+    check!(
+        frames1 + 32 >= frames0,
+        "quadros vazaram: {frames0} -> {frames1}"
+    );
+    let _ = live0;
+    kprint!(
+        "({spawned} processos, {restarts} reinicio(s), max {} simultaneos) ",
+        crate::process::live_max()
+    );
     Ok(())
 }
 

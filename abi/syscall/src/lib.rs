@@ -39,8 +39,14 @@ pub const SYS_CHANNEL_SEND: u64 = 11;
 pub const SYS_CHANNEL_RECV: u64 = 12;
 /// Informação do handle `a0`: `RDX` = `rights | (kind << 32)`.
 pub const SYS_HANDLE_INFO: u64 = 13;
+/// Cria um processo a partir do membro `a0[..a1]` do initrd com `RDI = a2` e `a4` handles lidos de `a3`; `RDX` = handle do processo.
+pub const SYS_PROCESS_SPAWN: u64 = 14;
+/// Aguarda o processo do handle `a0` terminar; `RDX` = código de saída (i64).
+pub const SYS_PROCESS_WAIT: u64 = 15;
+/// Informação do processo do handle `a0`: `RDX` = `pid | (1 << 63 se terminou)`.
+pub const SYS_PROCESS_INFO: u64 = 16;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 13;
+pub const SYS_MAX: u64 = 16;
 
 /// Tamanho máximo de uma mensagem de canal.
 pub const MSG_MAX: usize = 4096;
@@ -72,6 +78,12 @@ pub const RIGHTS_CHANNEL_DEFAULT: u32 = RIGHT_READ | RIGHT_WRITE | RIGHT_TRANSFE
 
 /// Tipo de objeto: extremidade de canal.
 pub const KIND_CHANNEL: u32 = 1;
+/// Tipo de objeto: processo.
+pub const KIND_PROCESS: u32 = 2;
+/// Direitos padrão de um handle de processo (`READ` = esperar/consultar).
+pub const RIGHTS_PROCESS_DEFAULT: u32 = RIGHT_READ | RIGHT_TRANSFER | RIGHT_DUPLICATE;
+/// Bit de "terminou" em `SYS_PROCESS_INFO`.
+pub const PROCESS_INFO_EXITED: u64 = 1 << 63;
 
 /// Tamanho máximo de uma mensagem de [`SYS_LOG`].
 pub const LOG_MAX: usize = 1024;
@@ -174,6 +186,9 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_CHANNEL_SEND => "channel_send",
         SYS_CHANNEL_RECV => "channel_recv",
         SYS_HANDLE_INFO => "handle_info",
+        SYS_PROCESS_SPAWN => "process_spawn",
+        SYS_PROCESS_WAIT => "process_wait",
+        SYS_PROCESS_INFO => "process_info",
         _ => "?",
     }
 }

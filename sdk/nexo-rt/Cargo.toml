@@ -1,0 +1,16 @@
+[package]
+name = "nexo-rt"
+description = "Runtime minimo para programas de usuario do Nexo OS: panic handler, formatacao sem alocacao, log"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexo-sys = { path = "../nexo-sys" }
+
+[features]
+# Define o #[panic_handler] (apenas em binarios no_std de usuario).
+panic-handler = []
+
+[lints]
+workspace = true

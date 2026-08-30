@@ -10,7 +10,7 @@
 | `\EFI\BOOT\BOOTX64.EFI` | loader (aplicação UEFI PE32+) |
 | `\nexo\kernel.elf` | kernel ELF64 estático (`ET_EXEC`, `EM_X86_64`), segmentos `PT_LOAD` alinhados a 4 KiB, sem segmento W+X, `p_vaddr ≥ 0xffff_ffff_8000_0000` |
 | `\nexo\boot.cfg` | texto UTF-8; a primeira linha não vazia e não iniciada por `#` é a linha de comando (≤ 256 bytes) |
-| `\nexo\init.elf` | (opcional, v2) initrd: por ora um único ELF64 estático de usuário (`services/init`) |
+| `\nexo\initrd` | (opcional, v2) initramfs `NEXOIRD1` (`kernel/lib/initrd`): membros nomeados, cada um um ELF64 estático de usuário (`services/*`) |
 
 ## 2. Estado da máquina na entrada do kernel
 

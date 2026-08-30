@@ -36,18 +36,18 @@ lint:
 	cargo fmt --all --check
 	cd kernel && cargo fmt --check
 	cd boot/loader && cargo fmt --check
-	cd services/init && cargo fmt --check
+	cd services && cargo fmt --all --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo clippy --workspace --lib --target x86_64-unknown-none -- -D warnings
 	cd kernel && cargo clippy --release -- -D warnings
 	cd boot/loader && cargo clippy --release -- -D warnings
-	cd services/init && cargo clippy --release -- -D warnings
+	cd services && cargo clippy --workspace --release -- -D warnings
 
 fmt:
 	cargo fmt --all
 	cd kernel && cargo fmt
 	cd boot/loader && cargo fmt
-	cd services/init && cargo fmt
+	cd services && cargo fmt --all
 
 reproducible:
 	tools/build-image --cmdline "" --out build/repro-a.img | tee build/repro-a.txt
@@ -63,4 +63,4 @@ stress: image
 	rc=$$?; if [ $$rc -eq 33 ]; then echo "[nexo] stress de $(DURATION)s: PASS"; else echo "[nexo] stress: FALHA (codigo $$rc)"; exit 1; fi
 
 clean:
-	rm -rf build target kernel/target boot/loader/target services/init/target
+	rm -rf build target kernel/target boot/loader/target services/target

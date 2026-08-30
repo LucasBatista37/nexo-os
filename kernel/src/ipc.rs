@@ -37,6 +37,8 @@ impl Rights {
 pub enum Object {
     /// Extremidade de canal.
     Channel(Arc<ChannelEnd>),
+    /// Processo.
+    Process(Arc<crate::process::Process>),
 }
 
 impl Object {
@@ -44,6 +46,7 @@ impl Object {
     pub fn kind(&self) -> u32 {
         match self {
             Object::Channel(_) => KIND_CHANNEL,
+            Object::Process(_) => KIND_PROCESS,
         }
     }
 }

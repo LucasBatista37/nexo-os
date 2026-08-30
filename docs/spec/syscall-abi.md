@@ -37,6 +37,9 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 11 | `channel_send` | h, ptr, len, handles_ptr, n | bytes enviados | `BadHandle`, `Denied` (sem `WRITE`/`TRANSFER`), `TooBig` (> 4096 B ou > 8 handles), `BadAddress`, `PeerClosed`, `QueueFull` (> 64 pendentes), `InvalidArgs` (enviar o próprio canal) |
 | 12 | `channel_recv` | h, buf, cap, handles_buf, hcap | `len \| (nhandles << 32)` | `BadHandle`, `Denied` (sem `READ`), `BadAddress` (buffers não graváveis), `PeerClosed` (par fechado e fila vazia), `TooBig` (mensagem descartada; `RDX` traz os tamanhos necessários) |
 | 13 | `handle_info` | h | `rights \| (kind << 32)` | `BadHandle` |
+| 14 | `process_spawn` | name_ptr, name_len (≤ 32), arg, handles_ptr, n | handle do processo filho | `NotFound` (membro ausente no initrd), `Denied` (handle sem `TRANSFER`), `TooBig`, `BadAddress` |
+| 15 | `process_wait` | h | código de saída (i64) | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs` (não é processo / é o próprio) — bloqueia |
+| 16 | `process_info` | h | `pid \| (1 << 63 se terminou)` | `BadHandle`, `InvalidArgs` |
 
 Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` bloqueia a thread até haver mensagem ou o par fechar.
 
@@ -48,7 +51,7 @@ Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` b
 
 - Handle = índice `u32` na tabela do processo (até 256); opaco e não forjável (o kernel valida índice, presença e direitos em toda syscall).
 - Direitos: `READ`=1, `WRITE`=2, `TRANSFER`=4, `DUPLICATE`=8, `SIGNAL`=16, `MAP`=32, `ADMIN`=64. Só diminuem: `handle_duplicate` aceita apenas subconjuntos.
-- Objetos v0: extremidade de canal (`kind` 1), criada com `READ|WRITE|TRANSFER|DUPLICATE`.
+- Objetos v0: extremidade de canal (`kind` 1), criada com `READ|WRITE|TRANSFER|DUPLICATE`; processo (`kind` 2), criado por `process_spawn` com `READ|TRANSFER|DUPLICATE` (`READ` = esperar/consultar). Os handles iniciais passados no spawn ocupam os índices 0.. na tabela do filho.
 - Handles enviados em uma mensagem saem da tabela do remetente e entram na do destinatário (índices novos) no `recv`; exigem `TRANSFER`.
 - Ao terminar, o processo fecha todos os handles; a última extremidade fechada de um canal libera o objeto; o par vê `PeerClosed`.
 
@@ -65,4 +68,5 @@ Todo ponteiro de usuário é validado antes do acesso: faixa `[ptr, ptr+len)` ab
 - Espaço de endereçamento por processo (PML4 própria; metade do kernel compartilhada), carregado de um ELF64 estático com segmentos W^X; pilha de 64 KiB em `0x0000_7fff_fff0_0000` (guard page abaixo).
 - Uma thread por processo; `RDI` na entrada carrega um argumento inteiro.
 - Falha em modo usuário (`#PF`, `#GP`, `#UD`…) encerra apenas o processo com código `-1` e motivo registrado no log; o kernel continua.
-- Handles com direitos e canais com transferência de handles existem (§3.1–3.2); memória compartilhada, jobs/domínios, eventos/espera múltipla e timers de usuário vêm nos próximos blocos.
+- Handles com direitos, canais com transferência de handles e processos como objetos (spawn por nome do initrd, wait, info) existem (§3.1–3.2, syscalls 14–16); memória compartilhada, jobs/domínios, eventos/espera múltipla e timers de usuário vêm nos próximos blocos.
+- Programas: o initrd (`kernel/lib/initrd`, formato `NEXOIRD1`, gerado por `tools/mkinitrd.py`) contém `init`, `svcmgr`, `echo`, `echo-client` e `utest`. `init` inicia `svcmgr`; `svcmgr` supervisiona `echo` (reinício até 3 vezes) e atende pedidos de conexão de `echo-client` entregando um canal por pedido.

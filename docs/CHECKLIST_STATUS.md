@@ -10,7 +10,7 @@ Marcações também aplicadas diretamente em `PLANO_MESTRE_SISTEMA_OPERACIONAL.m
 | **F0** | em um clone limpo, um único comando gera uma imagem que inicia em QEMU e o CI comprova a mensagem do kernel | **atendido** | clone novo em diretório temporário + `make ci` → exit 0 em 2026-08-29; `tools/test-qemu` verifica `Nexo OS kernel 0.0.1-boot (x86_64) iniciando`, `[RESULT] PASS 15/15`, `NEXO: boot completo`, código de saída 33 (`docs/releases/0.0.1-boot.md`) |
 | 90 dias | fundação reproduzível, observável e testada; sem passos manuais; falhas diagnosticáveis | **atendido** | `make reproducible` OK; panic/exceções com backtrace simbolizado (`build/logs/{panic,fault,overflow}.log`) |
 | **F1** | 24 h de stress em QEMU, múltiplas CPUs, memória virtual isolada, exceções tratadas, zero falha não explicada | **em andamento** | código da Fase 1 em `main`; cenário `stress` de 15 s verde no CI; **30 min com 4 CPUs sem erros** (`docs/progress/2026-08-30-stress-30min.md`: 3,46 M trocas, 265 k threads, contador com lock exato, sem vazamentos); a execução de 24 h (`make stress DURATION=86400`) ainda não foi feita |
-| **F2** | três processos isolados simultâneos, servidor reiniciável, acessos sem capability falham de forma testada | **em andamento** | blocos 1–2: ring 3, syscalls v0, processos isolados, handles com direitos, canais IPC com transferência de handles, negação por direitos testada (`user_ipc`); faltam `init`/`service-manager`, reinício de serviço, protocolo tipado e fuzzing |
+| **F2** | três processos isolados simultâneos, servidor reiniciável, acessos sem capability falham de forma testada | **quase atendido** | blocos 1–3: ring 3, syscalls v0, processos isolados, handles com direitos, canais IPC, `init`/`svcmgr`/`echo`/`echo-client` em ring 3 com **4 processos simultâneos** e **serviço reiniciado 2× sem reiniciar o kernel** (`user_services`), negação por direitos testada; faltam protocolo tipado/gerador, fuzzing de IPC/syscalls, shell de diagnóstico e a release `0.2-userspace` |
 | F3..F10 | — | não iniciados | Plano Mestre §5 |
 
 ## §4.3 Documentos obrigatórios — 12/12
@@ -53,7 +53,7 @@ Todos os itens das semanas 1–12 implementados e verificados (`docs/board.md` l
 
 Pendentes: espaços de endereçamento de usuário (Fase 2), execução do stress de 24 h e a release `0.1-kernel`. Evidência parcial do gate: stress de 30 min com 4 CPUs sem erros (ver `docs/progress/`).
 
-## §5 Fase 2 — 5 `[x]`, 5 `[-]` (ver `docs/board.md`)
+## §5 Fase 2 — 7 `[x]`, 5 `[-]` (ver `docs/board.md`)
 
 ## §6 Frentes permanentes — o que já existe
 

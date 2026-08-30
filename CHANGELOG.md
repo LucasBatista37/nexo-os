@@ -14,6 +14,8 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Auto-testes `user_process`, `user_isolation` (leitura do kernel, `cli`, escrita em `.rodata` → processo morto, kernel íntegro, sem vazamento de quadros) e `user_syscall_error`.
 - **Handles e canais (bloco 2):** tabela de handles por processo com direitos que só diminuem (`handle_close/duplicate/info`), canais bidirecionais com filas por extremidade, transferência de handles em mensagens, bloqueio em `recv` (`park/unpark` no escalonador), `PeerClosed` ao fechar; syscalls 8–13. `init` em modos servidor/cliente testa ping/pong, transferência de canal, direitos reduzidos (`Denied`), handles inválidos (`BadHandle`) e limites (`TooBig`); teste `user_ipc` verifica ausência de vazamento de objetos. 31 testes no boot.
 
+- **init + service-manager (bloco 3):** initramfs próprio (`NEXOIRD1`, `kernel/lib/initrd`, `tools/mkinitrd.py`) com cinco programas; processos como objetos com handle (`process_spawn` por nome do initrd com handles iniciais, `process_wait`, `process_info`; syscalls 14–16); `sdk/nexo-rt` (formatação sem alocação, `log!`, panic handler); `services/init` inicia `services/svcmgr`, que supervisiona `services/echo` (cai de propósito após 3 pedidos) e reinicia-o até 3 vezes enquanto `services/echo-client` reconecta — servidor reiniciado sem reiniciar o kernel, 4 processos simultâneos; teste `user_services`. 32 testes no boot.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

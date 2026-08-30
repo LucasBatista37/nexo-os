@@ -1,6 +1,7 @@
 //! Despacho de syscalls (ABI v0) e cópia segura a partir do espaço do usuário.
 
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
 use nexo_arch_x86_64::cpu;
@@ -15,6 +16,12 @@ use crate::sched;
 use crate::sync::IrqLock;
 
 static LAST_LOG: IrqLock<String> = IrqLock::new(String::new());
+static RESTART_LOGS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Linhas de log de usuário que mencionam um reinício de serviço.
+pub fn restart_log_count() -> u64 {
+    RESTART_LOGS.load(Ordering::Relaxed)
+}
 
 /// Última mensagem de `SYS_LOG` (para testes).
 pub fn last_user_log() -> String {
@@ -90,7 +97,9 @@ fn sys_channel_send(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     if !handle.rights.contains(RIGHT_WRITE) {
         return (Status::Denied, 0);
     }
-    let Object::Channel(end) = &handle.object;
+    let Object::Channel(end) = &handle.object else {
+        return (Status::InvalidArgs, 0);
+    };
     let data = match copy_from_user(ptr, len) {
         Ok(d) => d,
         Err(e) => return (e, 0),
@@ -147,7 +156,9 @@ fn sys_channel_recv(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     if let Err(e) = check_user_writable(hbuf, (hcap * 4) as u64) {
         return (e, 0);
     }
-    let Object::Channel(end) = &handle.object;
+    let Object::Channel(end) = &handle.object else {
+        return (Status::InvalidArgs, 0);
+    };
     let msg = match end.recv() {
         Ok(m) => m,
         Err(e) => return (e, 0),
@@ -179,6 +190,60 @@ fn sys_channel_recv(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     )
 }
 
+fn sys_process_spawn(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
+    let (name_ptr, name_len, arg, hptr, nh) = (f.rdi, f.rsi, f.rdx, f.r10, f.r8 as usize);
+    if name_len > nexo_initrd::NAME_MAX as u64 || nh > MSG_HANDLES_MAX {
+        return (Status::TooBig, 0);
+    }
+    let name_bytes = match copy_from_user(name_ptr, name_len) {
+        Ok(b) => b,
+        Err(e) => return (e, 0),
+    };
+    let Ok(name) = core::str::from_utf8(&name_bytes) else {
+        return (Status::InvalidArgs, 0);
+    };
+    let raw_handles = match copy_from_user(hptr, (nh * 4) as u64) {
+        Ok(d) => d,
+        Err(e) => return (e, 0),
+    };
+    let ids: Vec<u32> = raw_handles
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
+        .collect();
+    let mut moved = Vec::with_capacity(ids.len());
+    {
+        let mut table = p.handles.lock();
+        for id in &ids {
+            match table.get(*id) {
+                Ok(hh) if hh.rights.contains(RIGHT_TRANSFER) => {}
+                Ok(_) => return (Status::Denied, 0),
+                Err(e) => return (e, 0),
+            }
+        }
+        for id in &ids {
+            moved.push(table.take(*id).expect("verificado acima"));
+        }
+    }
+    match process::spawn_named(name, arg, moved) {
+        Ok(child) => {
+            let h = Handle {
+                object: Object::Process(child),
+                rights: Rights(RIGHTS_PROCESS_DEFAULT),
+            };
+            match p.handles.lock().insert(h) {
+                Ok(i) => (Status::Ok, i as u64),
+                Err(e) => (e, 0),
+            }
+        }
+        Err(e) => {
+            kwarn!("process_spawn({name}) pelo pid {}: {e}", p.pid);
+            (Status::NotFound, 0)
+        }
+    }
+}
+
 fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
     let Some(p) = process::current() else {
         return (Status::Denied, 0);
@@ -200,6 +265,9 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
                 Ok(bytes) => match core::str::from_utf8(&bytes) {
                     Ok(s) => {
                         kinfo!("[pid {} {}] {}", p.pid, p.name, s);
+                        if s.contains("reiniciando") {
+                            RESTART_LOGS.fetch_add(1, Ordering::Relaxed);
+                        }
                         *LAST_LOG.lock() = String::from(s);
                         process::note_user_log();
                         (Status::Ok, bytes.len() as u64)
@@ -225,6 +293,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             1 => (Status::Ok, crate::time::uptime_ms()),
             2 => (Status::Ok, p.syscalls.load(Ordering::Relaxed)),
             3 => (Status::Ok, p.handles.lock().len() as u64),
+            4 => (Status::Ok, process::count() as u64),
             _ => (Status::InvalidArgs, 0),
         },
         SYS_HANDLE_CLOSE => match p.handles.lock().take(f.rdi as u32) {
@@ -280,6 +349,42 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         }
         SYS_CHANNEL_SEND => sys_channel_send(&p, f),
         SYS_CHANNEL_RECV => sys_channel_recv(&p, f),
+        SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
+        SYS_PROCESS_WAIT => {
+            let h = p.handles.lock().get(f.rdi as u32);
+            match h {
+                Ok(Handle {
+                    object: Object::Process(target),
+                    rights,
+                }) => {
+                    if !rights.contains(RIGHT_READ) {
+                        return (Status::Denied, 0);
+                    }
+                    if Arc::ptr_eq(&target, &p) {
+                        return (Status::InvalidArgs, 0);
+                    }
+                    let code = process::wait_process(&target);
+                    (Status::Ok, code as u64)
+                }
+                Ok(_) => (Status::InvalidArgs, 0),
+                Err(e) => (e, 0),
+            }
+        }
+        SYS_PROCESS_INFO => match p.handles.lock().get(f.rdi as u32) {
+            Ok(Handle {
+                object: Object::Process(target),
+                ..
+            }) => {
+                let exited = if target.exited.load(Ordering::Acquire) {
+                    PROCESS_INFO_EXITED
+                } else {
+                    0
+                };
+                (Status::Ok, target.pid | exited)
+            }
+            Ok(_) => (Status::InvalidArgs, 0),
+            Err(e) => (e, 0),
+        },
         _ => {
             kdebug!("syscall desconhecida {} do pid {}", n, p.pid);
             (Status::NotSupported, 0)

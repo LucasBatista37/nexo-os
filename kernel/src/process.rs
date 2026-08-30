@@ -145,11 +145,37 @@ pub struct Process {
     pub kill_reason: IrqLock<Option<&'static str>>,
     /// Handles do processo.
     pub handles: IrqLock<crate::ipc::HandleTable>,
+    /// Threads bloqueadas em `wait` sobre este processo.
+    pub exit_waiters: IrqLock<Vec<crate::sched::ThreadId>>,
 }
 
 static TABLE: IrqLock<Vec<Arc<Process>>> = IrqLock::new(Vec::new());
 static NEXT_PID: AtomicU64 = AtomicU64::new(1);
 static USER_LOGS: AtomicU64 = AtomicU64::new(0);
+static LIVE_MAX: AtomicUsize = AtomicUsize::new(0);
+static SPAWNED: AtomicU64 = AtomicU64::new(0);
+
+/// Máximo de processos vivos simultaneamente desde o boot.
+pub fn live_max() -> usize {
+    LIVE_MAX.load(Ordering::Relaxed)
+}
+
+/// Processos criados desde o boot.
+pub fn spawned_total() -> u64 {
+    SPAWNED.load(Ordering::Relaxed)
+}
+
+/// Cria um processo a partir do membro `name` do initrd.
+pub fn spawn_named(
+    name: &str,
+    arg: u64,
+    handles: Vec<crate::ipc::Handle>,
+) -> Result<Arc<Process>, &'static str> {
+    let elf = crate::initrd::find(name).ok_or("programa nao encontrado no initrd")?;
+    // O nome precisa viver para sempre (é `&'static` na thread): usa a cópia do initrd.
+    let static_name: &'static str = crate::initrd_name(name).unwrap_or("?");
+    spawn_elf_with_handles(static_name, elf, arg, handles)
+}
 
 struct UserStart {
     entry: u64,
@@ -167,16 +193,7 @@ fn user_thread_main(ptr: usize) {
     unsafe { nexo_arch_x86_64::syscall::enter_user(entry, sp, arg) }
 }
 
-/// Cria um processo a partir de um ELF estático e o coloca para executar com `RDI = arg`.
-pub fn spawn_elf(
-    name: &'static str,
-    elf_bytes: &[u8],
-    arg: u64,
-) -> Result<Arc<Process>, &'static str> {
-    spawn_elf_with_handles(name, elf_bytes, arg, Vec::new())
-}
-
-/// Como [`spawn_elf`], entregando `handles` nos primeiros índices da tabela.
+/// Cria um processo a partir de um ELF estático (`RDI = arg`), entregando `handles` nos primeiros índices da tabela.
 pub fn spawn_elf_with_handles(
     name: &'static str,
     elf_bytes: &[u8],
@@ -238,6 +255,7 @@ pub fn spawn_elf_with_handles(
         syscalls: AtomicU64::new(0),
         kill_reason: IrqLock::new(None),
         handles: IrqLock::new(crate::ipc::HandleTable::new()),
+        exit_waiters: IrqLock::new(Vec::new()),
     });
     {
         let mut table = process.handles.lock();
@@ -245,7 +263,12 @@ pub fn spawn_elf_with_handles(
             table.insert(h).map_err(|_| "tabela de handles cheia")?;
         }
     }
-    TABLE.lock().push(process.clone());
+    {
+        let mut t = TABLE.lock();
+        t.push(process.clone());
+        LIVE_MAX.fetch_max(t.len(), Ordering::Relaxed);
+    }
+    SPAWNED.fetch_add(1, Ordering::Relaxed);
     let start = alloc::boxed::Box::new(UserStart {
         entry: elf.entry,
         user_sp: USER_STACK_TOP - 8,
@@ -284,6 +307,11 @@ pub fn exit_current(code: i64, reason: Option<&'static str>) -> ! {
         // Fecha os handles já aqui: pares de canal veem PeerClosed sem esperar o reap.
         let table = core::mem::take(&mut *p.handles.lock());
         drop(table);
+        TABLE.lock().retain(|q| q.pid != p.pid);
+        let waiters = core::mem::take(&mut *p.exit_waiters.lock());
+        for w in waiters {
+            sched::unpark(w);
+        }
         if reason.is_some() {
             kwarn!(
                 "process: pid {} '{}' encerrado pelo kernel: {}",
@@ -303,18 +331,33 @@ pub fn kill_current(reason: &'static str) -> ! {
     exit_current(EXIT_KILLED, Some(reason))
 }
 
-/// Aguarda o processo `pid` terminar; devolve o código de saída e libera o processo.
-pub fn wait(pid: Pid) -> Option<i64> {
-    let p = TABLE.lock().iter().find(|p| p.pid == pid).cloned()?;
+/// Bloqueia até `p` terminar; devolve o código de saída. Não recolhe threads.
+pub fn wait_process(p: &Arc<Process>) -> i64 {
+    loop {
+        let mut waiters = p.exit_waiters.lock();
+        if p.exited.load(Ordering::Acquire) {
+            break;
+        }
+        let Some(me) = sched::current().map(|t| t.id) else {
+            break;
+        };
+        waiters.push(me);
+        sched::park_with(waiters);
+    }
+    // Garante que a thread principal terminou de sair (pilha fora de uso).
     let tid = p.main_thread.load(Ordering::Acquire);
     sched::join(tid);
-    let code = p.exit_code.load(Ordering::Acquire);
-    TABLE.lock().retain(|q| q.pid != pid);
-    sched::reap();
-    Some(code)
+    p.exit_code.load(Ordering::Acquire)
 }
 
-/// Processos vivos.
+/// Aguarda `p` terminar e recolhe a thread principal; devolve o código de saída.
+pub fn wait_and_reap(p: &Arc<Process>) -> i64 {
+    let code = wait_process(p);
+    sched::reap();
+    code
+}
+
+/// Processos vivos (ainda não terminados).
 pub fn count() -> usize {
     TABLE.lock().len()
 }

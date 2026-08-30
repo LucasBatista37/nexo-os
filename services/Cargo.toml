@@ -1,0 +1,25 @@
+# Workspace dos programas de usuario (alvo x86_64-unknown-none em ring 3, ver .cargo/config.toml).
+[workspace]
+resolver = "2"
+members = ["init", "svcmgr", "echo", "echo-client", "utest"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.98"
+
+[workspace.dependencies]
+nexo-sys = { path = "../sdk/nexo-sys" }
+nexo-rt = { path = "../sdk/nexo-rt" }
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+codegen-units = 1
+debug = false
+strip = "debuginfo"

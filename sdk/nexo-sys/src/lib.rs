@@ -211,3 +211,41 @@ pub fn channel_recv(
         Err(st)
     }
 }
+
+/// Cria um processo a partir do membro `name` do initrd, com argumento `arg` e `handles` iniciais
+/// (que saem da tabela do chamador). Devolve o handle do processo.
+pub fn process_spawn(name: &str, arg: u64, handles: &[Handle]) -> Result<Handle, Status> {
+    // SAFETY: ponteiros e tamanhos vêm de slices válidas.
+    let (st, v) = unsafe {
+        raw5(
+            abi::SYS_PROCESS_SPAWN,
+            name.as_ptr() as u64,
+            name.len() as u64,
+            arg,
+            handles.as_ptr() as u64,
+            handles.len() as u64,
+        )
+    };
+    if st.is_ok() { Ok(v as Handle) } else { Err(st) }
+}
+
+/// Aguarda o processo terminar; devolve o código de saída.
+pub fn process_wait(h: Handle) -> Result<i64, Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_PROCESS_WAIT, h as u64, 0, 0) };
+    if st.is_ok() { Ok(v as i64) } else { Err(st) }
+}
+
+/// `(pid, terminou)` do processo.
+pub fn process_info(h: Handle) -> Result<(u64, bool), Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_PROCESS_INFO, h as u64, 0, 0) };
+    if st.is_ok() {
+        Ok((
+            v & !abi::PROCESS_INFO_EXITED,
+            v & abi::PROCESS_INFO_EXITED != 0,
+        ))
+    } else {
+        Err(st)
+    }
+}

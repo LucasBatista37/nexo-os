@@ -16,6 +16,7 @@ mod acpi;
 mod boot;
 mod cell;
 mod console;
+mod initrd;
 mod ipc;
 mod mm;
 mod panic;
@@ -31,6 +32,13 @@ mod x86;
 
 use nexo_arch_x86_64::qemu;
 use nexo_boot_abi::{BootInfo, cmdline_value};
+
+/// Nome `'static` de um membro do initrd (o initrd vive para sempre).
+pub fn initrd_name(name: &str) -> Option<&'static str> {
+    let ird = crate::boot::initrd()?;
+    let parsed = nexo_initrd::Initrd::parse(ird).ok()?;
+    parsed.iter().find(|m| m.name == name).map(|m| m.name)
+}
 
 /// Versão do kernel (casa com a tag de release).
 pub const VERSION: &str = "0.0.1-boot";
@@ -66,6 +74,7 @@ fn kmain(bi: &'static BootInfo) -> ! {
     x86::smp::boot_aps();
     sched::init();
     timer::init();
+    initrd::init();
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());
 
     let cmdline = boot::cmdline();

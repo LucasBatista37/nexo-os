@@ -42,7 +42,7 @@ const MT_INITRD: MemoryType = MemoryType::custom(0x8000_0005);
 
 const KERNEL_PATH: &CStr16 = cstr16!("\\nexo\\kernel.elf");
 const CONFIG_PATH: &CStr16 = cstr16!("\\nexo\\boot.cfg");
-const INIT_PATH: &CStr16 = cstr16!("\\nexo\\init.elf");
+const INIT_PATH: &CStr16 = cstr16!("\\nexo\\initrd");
 const LOADER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 static SERIAL: SerialPort = SerialPort::new(SerialPort::COM1);
@@ -339,9 +339,9 @@ fn run() -> Result<(), &'static str> {
     let elf = ElfFile::parse(&kernel_bytes).map_err(|_| "kernel.elf invalido")?;
     let init_bytes = read_file(INIT_PATH).unwrap_or_default();
     if init_bytes.is_empty() {
-        info!("init.elf ausente: kernel sem espaco de usuario inicial");
+        info!("initrd ausente: kernel sem espaco de usuario inicial");
     } else {
-        info!("init.elf: {} bytes", init_bytes.len());
+        info!("initrd: {} bytes", init_bytes.len());
     }
 
     // Plataforma.
