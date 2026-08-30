@@ -70,6 +70,7 @@ SCENARIOS = {
             r"pci:   00:\d\d\.\d 1af4:10(01|42) classe 01\.00\.00 .*virtio",
             r"\[TEST\] pci \.\.\. ok",
             r"blockdev: virtio-blk 1af4:10(01|42) bdf 0x[0-9a-f]+ capacidade 32768 setores, fila \d+, MSI-X",
+            r"utest: bloco pipeline ok \(4 em voo\)",
             r"utest: bloco ok",
             r"irq: [1-9]\d* interrupcao\(oes\) MSI-X entregue\(s\) ao driver de bloco",
             r"\[TEST\] user_block \.\.\. ok",

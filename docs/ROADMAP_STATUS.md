@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `1eaa7e0`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `10e261e`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 145 · 🟡 29 · ⬜ 361 · ⛔ 0 → **30% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 146 · 🟡 28 · ⬜ 361 · ⛔ 0 → **30% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -11,7 +11,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 | Fase 0 — Fundação e preparação (meses 0–6) | ✅ atendido | 13 | 2 | 0 | 93% | 0 (concluída) | gate F0 atendido em clone limpo; release 0.0.1-boot publicada |
 | Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 17 | 2 | 0 | 95% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
 | Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 10 | 6 | 2 | 72% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
-| Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 16 | 4 | 1 | 86% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
+| Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 17 | 3 | 1 | 88% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 0 | 0 | 19 | 0% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
 | Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
@@ -113,7 +113,7 @@ Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem re
 | ✅ | fuzzar decodificador de IPC e syscalls | fuzz-lite determinístico dos parsers e dos decodificadores NXIP no host; fuzz de syscalls aleatório com sementes registradas, agendado toda semana no CI (`make fuzz`, workflow `fuzz`); cobertura guiada (cargo-fuzz) pendente |
 | ⬜ | publicar release `0.2-userspace` |  |
 
-### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) — 86% (16 ✅, 4 🟡, 1 ⬜)
+### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) — 88% (17 ✅, 3 🟡, 1 ⬜)
 
 Gate: 🟡 critérios atendidos; release pendente. arquivos criados/alterados/removidos sobre VirtIO-block persistem entre boots (NexoFS v0, `test-qemu --scenario storage`, 2026-08-30); driver de bloco morto sem afetar o kernel (`user_block_crash`); cortes de energia simulados no host em cada escrita — faltam VFS/namespace, cache de blocos, FAT do ESP, IOMMU, VirtIO input/rng/console e cortes no QEMU real
 
@@ -131,7 +131,7 @@ Gate: 🟡 critérios atendidos; release pendente. arquivos criados/alterados/re
 | ✅ | implementar drivers em processos isolados | driver de bloco em ring 3 com handle de dispositivo; queda do driver não afeta o kernel |
 | 🟡 | restringir MMIO, IRQ e DMA por capabilities | concessões por função PCI (`device_open`): config, `pci_enum` e MMIO limitados ao BDF; IRQ/DMA por handle; falta IOMMU para conter DMA |
 | 🟡 | criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro | abstração criada (`kernel/src/iommu.rs`: modo `Passthrough` explícito, detecção da tabela `DMAR`, aviso `IRRESTRITO (caminho inseguro)` no boot verificado pelo cenário `boot`; ADR-0015); tradução VT-d/AMD-Vi pendente |
-| 🟡 | implementar cache de blocos e fila assíncrona | cache de leitura write-through (8 blocos) no `fs`; fila assíncrona (pedidos em voo) pendente |
+| ✅ | implementar cache de blocos e fila assíncrona | cache de leitura write-through (8 blocos) no `fs`; `blockdev` com até 4 pedidos em voo na virtqueue e respostas em ordem (`channel_try_recv`, syscall 25); teste de pipelining no `utest` |
 | ✅ | definir VFS e namespace por sessão/processo | `services/vfs` (protocolo `nexo.fs` roteado; um vfs por cliente com máscara de montagens); teste `user_vfs` com dois namespaces isolados; protocolo tipado e montagem dinâmica pendentes |
 | ✅ | implementar `ramfs` | gravável em `/tmp` do vfs (16×16 KiB, volátil, por instância) + initramfs `NEXOIRD1` só leitura |
 | ✅ | implementar FAT somente para EFI | `libraries/fat` (FAT12/16/32 só leitura + GPT) e `services/espfs`; teste `user_devmgr` lê `BOOTX64.EFI` e `kernel.elf` da ESP real |

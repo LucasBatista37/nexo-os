@@ -47,13 +47,14 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 21 | `dma_alloc` | dev, out (`DmaBuffer`) | endereço virtual da página (4 KiB zerada, contígua, mapeada `RW`) | `BadHandle`, `Denied` (sem `MAP`), `NoMemory`, `BadAddress` |
 | 22 | `irq_alloc` | dev, out (`IrqInfo`) | vetor (0x50–0x6f) com endereço/dados MSI para a BSP | `BadHandle`, `Denied` (sem `SIGNAL`), `NoMemory` (pool esgotado), `BadAddress` |
 | 23 | `irq_wait` | dev, vetor, visto | contagem atual de disparos (bloqueia até `> visto`) | `BadHandle`, `Denied` (sem `SIGNAL`), `InvalidArgs` |
+| 25 | `channel_try_recv` | como `channel_recv`, mas devolve `WouldBlock` (9) em vez de bloquear quando não há mensagem e o par está aberto | idem `channel_recv` |
 | 24 | `device_open` | dev (raiz, `ADMIN`), bdf | handle de concessão restrita à função `bdf` com `RIGHTS_DEVICE_DEFAULT` (sem `ADMIN`) | `BadHandle`, `Denied` (sem `ADMIN` ou `bdf` fora do escopo), `NotFound` (função não enumerada), `NoMemory` (tabela cheia) |
 
 Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` bloqueia a thread até haver mensagem ou o par fechar.
 
 ## 3. Status
 
-`Ok`=0, `InvalidArgs`=1, `BadAddress`=2, `NotSupported`=3, `NoMemory`=4, `NotFound`=5, `Denied`=6, `PeerClosed`=7, `BadHandle`=8, `WouldBlock`=9 (reservado), `TooBig`=10, `QueueFull`=11.
+`Ok`=0, `InvalidArgs`=1, `BadAddress`=2, `NotSupported`=3, `NoMemory`=4, `NotFound`=5, `Denied`=6, `PeerClosed`=7, `BadHandle`=8, `WouldBlock`=9 (`channel_try_recv`), `TooBig`=10, `QueueFull`=11.
 
 ## 3.1 Handles e direitos (ADR-0004)
 

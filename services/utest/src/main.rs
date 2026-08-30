@@ -421,7 +421,39 @@ fn block_client() -> ! {
         }
         _ => nexo_sys::exit(120),
     }
-    // 4. Pedido invalido (alem da capacidade) deve ser recusado (erro tipado 2), nao derrubar o driver.
+    // 4. Pipelining: 4 leituras encadeadas sem esperar respostas; chegam na ordem e corretas.
+    for i in 0..4u64 {
+        let m = ReadRequest {
+            sector: base + i,
+            count: 1,
+        }
+        .encode_msg(&mut msg)
+        .unwrap_or(0);
+        if nexo_sys::channel_send(ch, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(122);
+        }
+    }
+    for i in 0..4usize {
+        let n = match nexo_sys::channel_recv(ch, &mut msg, &mut hs) {
+            Ok((n, _)) => n,
+            Err(_) => nexo_sys::exit(123),
+        };
+        match decode_read_response(&msg[..n]) {
+            Ok(resp) if resp.data().len() == 512 => {
+                // setores base..base+3 tem o padrao (i^0x5a^(setor)) escrito no passo 1
+                for (j, &b) in resp.data().iter().enumerate() {
+                    let full = i * 512 + j;
+                    if b != (full as u8) ^ 0x5a ^ ((full / 512) as u8) {
+                        nexo_rt::log!("utest: pipeline: resposta {} fora de ordem/corrompida", i);
+                        nexo_sys::exit(124);
+                    }
+                }
+            }
+            _ => nexo_sys::exit(125),
+        }
+    }
+    nexo_sys::log("utest: bloco pipeline ok (4 em voo)");
+    // 5. Pedido invalido (alem da capacidade) deve ser recusado (erro tipado 2), nao derrubar o driver.
     let m = ReadRequest {
         sector: u64::MAX / 2,
         count: 1,

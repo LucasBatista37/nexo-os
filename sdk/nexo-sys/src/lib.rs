@@ -329,6 +329,30 @@ pub fn irq_alloc(dev: Handle) -> Result<abi::IrqInfo, Status> {
     if st.is_ok() { Ok(i) } else { Err(st) }
 }
 
+/// Como [`channel_recv`], mas devolve `Err(WouldBlock)` em vez de bloquear quando não há mensagem.
+pub fn channel_try_recv(
+    h: Handle,
+    buf: &mut [u8],
+    handles: &mut [Handle],
+) -> Result<(usize, usize), Status> {
+    // SAFETY: ponteiros e capacidades vêm de slices válidas e mutáveis.
+    let (st, v) = unsafe {
+        raw5(
+            abi::SYS_CHANNEL_TRY_RECV,
+            h as u64,
+            buf.as_mut_ptr() as u64,
+            buf.len() as u64,
+            handles.as_mut_ptr() as u64,
+            handles.len() as u64,
+        )
+    };
+    if st.is_ok() {
+        Ok(((v & 0xffff_ffff) as usize, (v >> 32) as usize))
+    } else {
+        Err(st)
+    }
+}
+
 /// Deriva uma concessão restrita à função PCI `bdf` (exige `ADMIN` na concessão raiz).
 pub fn device_open(root: Handle, bdf: u16) -> Result<Handle, Status> {
     // SAFETY: sem ponteiros.

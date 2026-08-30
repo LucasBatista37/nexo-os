@@ -158,7 +158,7 @@ fn sys_channel_send(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     }
 }
 
-fn sys_channel_recv(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
+fn sys_channel_recv(p: &process::Process, f: &TrapFrame, nonblock: bool) -> (Status, u64) {
     let (h, buf, cap, hbuf, hcap) = (f.rdi as u32, f.rsi, f.rdx, f.r10, f.r8 as usize);
     let handle = match p.handles.lock().get(h) {
         Ok(h) => h,
@@ -176,7 +176,7 @@ fn sys_channel_recv(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let Object::Channel(end) = &handle.object else {
         return (Status::InvalidArgs, 0);
     };
-    let msg = match end.recv() {
+    let msg = match if nonblock { end.try_recv() } else { end.recv() } {
         Ok(m) => m,
         Err(e) => return (e, 0),
     };
@@ -573,7 +573,8 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             }
         }
         SYS_CHANNEL_SEND => sys_channel_send(&p, f),
-        SYS_CHANNEL_RECV => sys_channel_recv(&p, f),
+        SYS_CHANNEL_RECV => sys_channel_recv(&p, f, false),
+        SYS_CHANNEL_TRY_RECV => sys_channel_recv(&p, f, true),
         SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
         SYS_PCI_ENUM | SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE | SYS_MMIO_MAP | SYS_DMA_ALLOC
         | SYS_IRQ_ALLOC | SYS_IRQ_WAIT | SYS_DEVICE_OPEN => sys_device(&p, f),

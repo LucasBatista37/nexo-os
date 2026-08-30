@@ -63,8 +63,11 @@ pub const SYS_IRQ_WAIT: u64 = 23;
 /// Deriva de uma concessão raiz (`ADMIN`) uma concessão restrita à função PCI `a1` (BDF compacto);
 /// `RDX` = novo handle com [`RIGHTS_DEVICE_DEFAULT`]. (`ADMIN`)
 pub const SYS_DEVICE_OPEN: u64 = 24;
+/// Como [`SYS_CHANNEL_RECV`], mas devolve [`Status::WouldBlock`] em vez de bloquear quando
+/// não há mensagem (e o par continua aberto).
+pub const SYS_CHANNEL_TRY_RECV: u64 = 25;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 24;
+pub const SYS_MAX: u64 = 25;
 
 /// Tipo de objeto: concessão de acesso a dispositivos.
 pub const KIND_DEVICE: u32 = 3;
@@ -308,6 +311,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_IRQ_ALLOC => "irq_alloc",
         SYS_IRQ_WAIT => "irq_wait",
         SYS_DEVICE_OPEN => "device_open",
+        SYS_CHANNEL_TRY_RECV => "channel_try_recv",
         _ => "?",
     }
 }

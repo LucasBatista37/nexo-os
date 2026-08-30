@@ -455,7 +455,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] implementar drivers em processos isolados — *driver de bloco em ring 3 com handle de dispositivo; queda do driver não afeta o kernel*;
 - [-] restringir MMIO, IRQ e DMA por capabilities — *concessões por função PCI (`device_open`): config, `pci_enum` e MMIO limitados ao BDF; IRQ/DMA por handle; falta IOMMU para conter DMA*;
 - [-] criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro — *abstração criada (`kernel/src/iommu.rs`: modo `Passthrough` explícito, detecção da tabela `DMAR`, aviso `IRRESTRITO (caminho inseguro)` no boot verificado pelo cenário `boot`; ADR-0015); tradução VT-d/AMD-Vi pendente*;
-- [-] implementar cache de blocos e fila assíncrona — *cache de leitura write-through (8 blocos) no `fs`; fila assíncrona (pedidos em voo) pendente*;
+- [x] implementar cache de blocos e fila assíncrona — *cache de leitura write-through (8 blocos) no `fs`; `blockdev` com até 4 pedidos em voo na virtqueue e respostas em ordem (`channel_try_recv`, syscall 25); teste de pipelining no `utest`*;
 - [x] definir VFS e namespace por sessão/processo — *`services/vfs` (protocolo `nexo.fs` roteado; um vfs por cliente com máscara de montagens); teste `user_vfs` com dois namespaces isolados; protocolo tipado e montagem dinâmica pendentes*;
 - [x] implementar `ramfs` — *gravável em `/tmp` do vfs (16×16 KiB, volátil, por instância) + initramfs `NEXOIRD1` só leitura*;
 - [x] implementar FAT somente para EFI — *`libraries/fat` (FAT12/16/32 só leitura + GPT) e `services/espfs`; teste `user_devmgr` lê `BOOTX64.EFI` e `kernel.elf` da ESP real*;

@@ -350,6 +350,18 @@ impl ChannelEnd {
     }
 
     /// Recebe (bloqueante). `Err(PeerClosed)` quando o par fechou e a fila está vazia.
+    /// Como [`ChannelEnd::recv`], mas devolve `WouldBlock` em vez de bloquear.
+    pub fn try_recv(&self) -> Result<Message, Status> {
+        let mut g = self.inner.lock();
+        if let Some(m) = g.queues[self.side].pop_front() {
+            return Ok(m);
+        }
+        if g.closed[1 - self.side] {
+            return Err(Status::PeerClosed);
+        }
+        Err(Status::WouldBlock)
+    }
+
     pub fn recv(&self) -> Result<Message, Status> {
         loop {
             let mut g = self.inner.lock();
