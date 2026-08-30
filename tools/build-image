@@ -12,6 +12,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nexo_common import (BUILD, KERNEL_DIR, KERNEL_ELF, LOADER_DIR, LOADER_EFI, ROOT, cargo_env, die,
                          llvm_tool, log, require, run, sha256)
+
+INIT_DIR = ROOT / "services" / "init"
+INIT_ELF = INIT_DIR / "target" / "x86_64-unknown-none" / "release" / "nexo-init"
 from mkgpt import build_gpt_image, normalize_fat_free_space, normalize_fat_timestamps
 
 ESP_SIZE_MIB = 64
@@ -33,9 +36,10 @@ def build_rust(debug: bool) -> None:
     flags = "[" + ", ".join(f'"{r}"' for r in remaps) + "]"
     run(["cargo", "build", *prof, "--config", f"target.x86_64-unknown-uefi.rustflags={flags}"], cwd=LOADER_DIR)
     run(["cargo", "build", *prof, "--config", f"target.x86_64-unknown-none.rustflags={flags}"], cwd=KERNEL_DIR)
+    run(["cargo", "build", *prof, "--config", f"target.x86_64-unknown-none.rustflags={flags}"], cwd=INIT_DIR)
 
 
-def make_esp(esp_img: Path, loader: Path, kernel: Path, cmdline: str) -> None:
+def make_esp(esp_img: Path, loader: Path, kernel: Path, cmdline: str, init: Path) -> None:
     mformat = require("mformat", "Instale mtools (macOS: brew install mtools; Debian: apt install mtools)")
     mmd = require("mmd", "Instale mtools")
     mcopy = require("mcopy", "Instale mtools")
@@ -54,6 +58,7 @@ def make_esp(esp_img: Path, loader: Path, kernel: Path, cmdline: str) -> None:
     files = {
         "BOOTX64.EFI": (loader, "::/EFI/BOOT/BOOTX64.EFI"),
         "kernel.elf": (kernel, "::/nexo/kernel.elf"),
+        "init.elf": (init, "::/nexo/init.elf"),
         "boot.cfg": (None, "::/nexo/boot.cfg"),
     }
     for name, (src, dest) in files.items():
@@ -81,7 +86,7 @@ def write_symbols(kernel: Path) -> Path:
     return out
 
 
-def strip_debug(kernel: Path) -> Path:
+def strip_debug(kernel: Path, out: Path = None) -> Path:
     """Cópia sem seções .debug_* (mantém .symtab para symbolication no kernel).
 
     O ELF completo fica em build/kernel.elf para `tools/symbolize`; a cópia na ESP
@@ -89,7 +94,7 @@ def strip_debug(kernel: Path) -> Path:
     do diretório onde o repositório foi clonado.
     """
     objcopy = llvm_tool("llvm-objcopy")
-    out = BUILD / "kernel-stripped.elf"
+    out = out or BUILD / "kernel-stripped.elf"
     run([objcopy, "--strip-debug", kernel, out])
     return out
 
@@ -107,7 +112,8 @@ def main() -> None:
         build_rust(a.debug)
     loader = LOADER_EFI if not a.debug else Path(str(LOADER_EFI).replace("/release/", "/debug/"))
     kernel = KERNEL_ELF if not a.debug else Path(str(KERNEL_ELF).replace("/release/", "/debug/"))
-    for p in (loader, kernel):
+    init = INIT_ELF if not a.debug else Path(str(INIT_ELF).replace("/release/", "/debug/"))
+    for p in (loader, kernel, init):
         if not p.exists():
             die(f"binario ausente: {p}")
 
@@ -115,14 +121,17 @@ def main() -> None:
     shutil.copy2(loader, BUILD / "BOOTX64.EFI")
     sym = write_symbols(kernel)
     kernel_esp = strip_debug(kernel)
+    init_esp = strip_debug(init, BUILD / "init-stripped.elf")
+    shutil.copy2(init, BUILD / "init.elf")
 
     esp = BUILD / "esp.img"
-    make_esp(esp, loader, kernel_esp, a.cmdline)
+    make_esp(esp, loader, kernel_esp, a.cmdline, init_esp)
     out = Path(a.out)
     build_gpt_image(esp, out)
     log(f"imagem: {out} ({out.stat().st_size // (1024*1024)} MiB) sha256={sha256(out)}")
     log(f"kernel: {kernel.stat().st_size} bytes sha256={sha256(kernel)} (na ESP sem debuginfo: {kernel_esp.stat().st_size} bytes sha256={sha256(kernel_esp)})")
     log(f"loader: {loader.stat().st_size} bytes sha256={sha256(loader)}")
+    log(f"init: {init.stat().st_size} bytes sha256={sha256(init)} (na ESP: {init_esp.stat().st_size} bytes)")
     log(f"simbolos: {sym}")
 
 

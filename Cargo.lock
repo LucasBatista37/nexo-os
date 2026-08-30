@@ -18,6 +18,10 @@ name = "nexo-boot-abi"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-elf"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-font"
 version = "0.0.1"
 
@@ -38,4 +42,15 @@ version = "0.0.1"
 
 [[package]]
 name = "nexo-sync"
+version = "0.0.1"
+
+[[package]]
+name = "nexo-sys"
+version = "0.0.1"
+dependencies = [
+ "nexo-syscall-abi",
+]
+
+[[package]]
+name = "nexo-syscall-abi"
 version = "0.0.1"

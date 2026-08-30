@@ -90,6 +90,9 @@ pub fn exception_count() -> u64 {
 
 fn handle_trap(frame: &mut TrapFrame) {
     let vector = frame.vector as u8;
+    if vector < 32 && frame.cs & 3 == 3 {
+        user_fault(frame);
+    }
     match vector {
         3 => {
             BREAKPOINTS.fetch_add(1, Ordering::Relaxed);
@@ -148,6 +151,31 @@ fn handle_trap(frame: &mut TrapFrame) {
         }
         _ => fatal(frame, "excecao nao tratada"),
     }
+}
+
+/// Exceção com origem em ring 3: encerra o processo, não o kernel.
+fn user_fault(frame: &mut TrapFrame) -> ! {
+    EXCEPTIONS.fetch_add(1, Ordering::Relaxed);
+    let vector = frame.vector as u8;
+    let (pid, name) = crate::process::current().map_or((0, "?"), |p| (p.pid, p.name));
+    kwarn!(
+        "trap: pid {} '{}' {} (#{}) em rip={:#x} rsp={:#x} err={:#x} cr2={:#x}",
+        pid,
+        name,
+        exception_name(vector),
+        vector,
+        frame.rip,
+        frame.rsp,
+        frame.error_code,
+        cpu::read_cr2()
+    );
+    let reason = match vector {
+        13 => "protecao geral em modo usuario",
+        14 => "falta de pagina em modo usuario",
+        6 => "instrucao invalida em modo usuario",
+        _ => "excecao em modo usuario",
+    };
+    crate::process::kill_current(reason)
 }
 
 fn page_fault(frame: &mut TrapFrame) {

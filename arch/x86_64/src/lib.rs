@@ -32,4 +32,6 @@ pub mod context;
 #[cfg(all(target_arch = "x86_64", target_os = "none"))]
 pub mod smp;
 #[cfg(all(target_arch = "x86_64", target_os = "none"))]
+pub mod syscall;
+#[cfg(all(target_arch = "x86_64", target_os = "none"))]
 pub mod trap;

@@ -36,15 +36,18 @@ lint:
 	cargo fmt --all --check
 	cd kernel && cargo fmt --check
 	cd boot/loader && cargo fmt --check
+	cd services/init && cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo clippy --workspace --lib --target x86_64-unknown-none -- -D warnings
 	cd kernel && cargo clippy --release -- -D warnings
 	cd boot/loader && cargo clippy --release -- -D warnings
+	cd services/init && cargo clippy --release -- -D warnings
 
 fmt:
 	cargo fmt --all
 	cd kernel && cargo fmt
 	cd boot/loader && cargo fmt
+	cd services/init && cargo fmt
 
 reproducible:
 	tools/build-image --cmdline "" --out build/repro-a.img | tee build/repro-a.txt
@@ -56,7 +59,7 @@ ci: lint test-host image test-qemu reproducible
 stress: image
 	tools/build-image --no-build --cmdline "selftest=0 stress=$(DURATION) exit" --out build/nexo-stress-long.img
 	mkdir -p build/logs
-	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress.log
+	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress-long.log
 
 clean:
-	rm -rf build target kernel/target boot/loader/target
+	rm -rf build target kernel/target boot/loader/target services/init/target

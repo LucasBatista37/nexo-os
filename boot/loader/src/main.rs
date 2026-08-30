@@ -13,8 +13,6 @@
 
 extern crate alloc;
 
-mod elf;
-
 use alloc::vec::Vec;
 use core::fmt::Write;
 use log::{error, info, warn};
@@ -26,6 +24,7 @@ use nexo_boot_abi::{
     KERNEL_VIRT_BASE, MAX_MEMORY_REGIONS, MemoryKind, MemoryRegion, PHYS_MAP_MIN_SIZE,
     PHYS_MAP_OFFSET, PixelFormat,
 };
+use nexo_elf::ElfFile;
 use nexo_mm::{FrameAllocator, PAGE_SIZE, PhysAddr, PhysToVirt, VirtAddr, align_down, align_up};
 use uefi::boot::{self, AllocateType, MemoryType, OpenProtocolAttributes, OpenProtocolParams};
 use uefi::mem::memory_map::MemoryMap;
@@ -39,9 +38,11 @@ const MT_PAGE_TABLES: MemoryType = MemoryType::custom(0x8000_0001);
 const MT_KERNEL_STACK: MemoryType = MemoryType::custom(0x8000_0002);
 const MT_BOOT_INFO: MemoryType = MemoryType::custom(0x8000_0003);
 const MT_KERNEL_FILE: MemoryType = MemoryType::custom(0x8000_0004);
+const MT_INITRD: MemoryType = MemoryType::custom(0x8000_0005);
 
 const KERNEL_PATH: &CStr16 = cstr16!("\\nexo\\kernel.elf");
 const CONFIG_PATH: &CStr16 = cstr16!("\\nexo\\boot.cfg");
+const INIT_PATH: &CStr16 = cstr16!("\\nexo\\init.elf");
 const LOADER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 static SERIAL: SerialPort = SerialPort::new(SerialPort::COM1);
@@ -202,6 +203,7 @@ fn kind_for(ty: MemoryType) -> MemoryKind {
         MT_KERNEL_STACK => MemoryKind::KernelStack,
         MT_BOOT_INFO => MemoryKind::BootInfo,
         MT_KERNEL_FILE => MemoryKind::KernelFile,
+        MT_INITRD => MemoryKind::Initrd,
         _ => MemoryKind::Reserved,
     }
 }
@@ -223,27 +225,26 @@ struct LoadedKernel {
 }
 
 fn load_kernel(
-    elf: &elf::ElfFile<'_>,
+    elf: &ElfFile<'_>,
     mapper: &mut Mapper<Identity>,
     alloc: &mut UefiFrameAllocator,
 ) -> Result<LoadedKernel, &'static str> {
     let mut phys_base = u64::MAX;
     let mut size = 0u64;
-    for ph in elf
-        .program_headers()
-        .filter(|p| p.p_type == elf::PT_LOAD && p.p_memsz > 0)
-    {
+    for ph in elf.load_segments() {
         if ph.p_vaddr < KERNEL_VIRT_BASE {
             return Err("segmento abaixo de KERNEL_VIRT_BASE");
         }
-        if ph.p_filesz > ph.p_memsz {
-            return Err("p_filesz > p_memsz");
+        if ph.writable() && ph.executable() {
+            return Err("segmento W+X viola W^X");
         }
+        let data = elf
+            .segment_data(&ph)
+            .map_err(|_| "segmento fora do arquivo")?;
         let vstart = align_down(ph.p_vaddr, PAGE_SIZE);
         let vend = align_up(ph.p_vaddr + ph.p_memsz, PAGE_SIZE);
         let pages = ((vend - vstart) / PAGE_SIZE) as usize;
         let phys = alloc_pages(MT_KERNEL_IMAGE, pages).map_err(|_| "sem memoria para segmento")?;
-        let data = elf.segment_data(&ph)?;
         // SAFETY: destino tem `pages` páginas zeradas; deslocamento dentro do segmento.
         unsafe {
             core::ptr::copy_nonoverlapping(
@@ -253,39 +254,23 @@ fn load_kernel(
             );
         }
         let mut flags = PageFlags::PRESENT;
-        if ph.p_flags & elf::PF_W != 0 {
+        if ph.writable() {
             flags |= PageFlags::WRITABLE;
         }
-        if ph.p_flags & elf::PF_X == 0 {
+        if !ph.executable() {
             flags |= PageFlags::NO_EXECUTE;
-        }
-        if ph.p_flags & (elf::PF_W | elf::PF_X) == (elf::PF_W | elf::PF_X) {
-            return Err("segmento W+X viola W^X");
         }
         mapper
             .map_range_4k(VirtAddr::new(vstart), phys, vend - vstart, flags, alloc)
             .map_err(|_| "falha ao mapear segmento (segmentos sobrepostos?)")?;
         sprintln!(
-            "segmento {:#x}..{:#x} -> fis {:#x} ({} paginas, {}{}{})",
+            "segmento {:#x}..{:#x} -> fis {:#x} ({} paginas, r{}{})",
             vstart,
             vend,
             phys.as_u64(),
             pages,
-            if ph.p_flags & elf::PF_R != 0 {
-                "r"
-            } else {
-                "-"
-            },
-            if ph.p_flags & elf::PF_W != 0 {
-                "w"
-            } else {
-                "-"
-            },
-            if ph.p_flags & elf::PF_X != 0 {
-                "x"
-            } else {
-                "-"
-            },
+            if ph.writable() { "w" } else { "-" },
+            if ph.executable() { "x" } else { "-" },
         );
         phys_base = phys_base.min(phys.as_u64());
         size += vend - vstart;
@@ -298,6 +283,15 @@ fn load_kernel(
         phys_base,
         size,
     })
+}
+
+/// Copia `data` para páginas do tipo `ty`. Devolve o endereço físico.
+fn copy_to_pages(ty: MemoryType, data: &[u8]) -> uefi::Result<PhysAddr> {
+    let pages = data.len().div_ceil(PAGE_SIZE as usize).max(1);
+    let phys = alloc_pages(ty, pages)?;
+    // SAFETY: destino tem `pages` páginas zeradas.
+    unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), phys.as_u64() as *mut u8, data.len()) };
+    Ok(phys)
 }
 
 /// Salta para o kernel com a nova PML4, pilha e `RDI = boot_info`.
@@ -342,7 +336,13 @@ fn run() -> Result<(), &'static str> {
     let cfg = read_file(CONFIG_PATH).unwrap_or_default();
     let cmdline = parse_cmdline(&cfg);
     info!("cmdline: \"{cmdline}\"");
-    let elf = elf::ElfFile::parse(&kernel_bytes)?;
+    let elf = ElfFile::parse(&kernel_bytes).map_err(|_| "kernel.elf invalido")?;
+    let init_bytes = read_file(INIT_PATH).unwrap_or_default();
+    if init_bytes.is_empty() {
+        info!("init.elf ausente: kernel sem espaco de usuario inicial");
+    } else {
+        info!("init.elf: {} bytes", init_bytes.len());
+    }
 
     // Plataforma.
     let fb = framebuffer_info();
@@ -443,18 +443,14 @@ fn run() -> Result<(), &'static str> {
         )
         .map_err(|_| "falha ao mapear pilha")?;
 
-    // Cópia do ELF para símbolos.
-    let file_pages = kernel_bytes.len().div_ceil(PAGE_SIZE as usize);
-    let file_phys =
-        alloc_pages(MT_KERNEL_FILE, file_pages).map_err(|_| "sem memoria para copia do ELF")?;
-    // SAFETY: destino tem `file_pages` páginas.
-    unsafe {
-        core::ptr::copy_nonoverlapping(
-            kernel_bytes.as_ptr(),
-            file_phys.as_u64() as *mut u8,
-            kernel_bytes.len(),
-        );
-    }
+    // Cópia do ELF para símbolos e initrd (init.elf).
+    let file_phys = copy_to_pages(MT_KERNEL_FILE, &kernel_bytes)
+        .map_err(|_| "sem memoria para copia do ELF")?;
+    let initrd_phys = if init_bytes.is_empty() {
+        PhysAddr::new(0)
+    } else {
+        copy_to_pages(MT_INITRD, &init_bytes).map_err(|_| "sem memoria para o initrd")?
+    };
 
     // BootInfo + vetor de regiões (4 páginas: 1 + 3).
     let regions_bytes = MAX_MEMORY_REGIONS * core::mem::size_of::<MemoryRegion>();
@@ -470,6 +466,8 @@ fn run() -> Result<(), &'static str> {
     bi.kernel_size = kernel.size;
     bi.kernel_file_addr = file_phys.as_u64();
     bi.kernel_file_len = kernel_bytes.len() as u64;
+    bi.initrd_addr = initrd_phys.as_u64();
+    bi.initrd_len = init_bytes.len() as u64;
     bi.page_table_root = root.as_u64();
     bi.rsdp_addr = rsdp;
     bi.framebuffer = fb;

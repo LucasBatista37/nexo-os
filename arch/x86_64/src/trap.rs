@@ -93,6 +93,11 @@ core::arch::global_asm!(
         push r13
         push r14
         push r15
+        mov rax, qword ptr [rsp + 144]
+        test rax, 3
+        jz 1f
+        swapgs
+    1:
         cld
         mov rdi, rsp
         call nexo_trap_dispatch
@@ -112,6 +117,10 @@ core::arch::global_asm!(
         pop rbx
         pop rax
         add rsp, 16
+        test qword ptr [rsp + 8], 3
+        jz 2f
+        swapgs
+    2:
         iretq
 
     .set nexo_i, 0

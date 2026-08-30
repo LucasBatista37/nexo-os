@@ -35,6 +35,11 @@ pub fn init(bi: &'static BootInfo) {
         bi.rsdp_addr
     );
     let fb = &bi.framebuffer;
+    kinfo!(
+        "boot: initrd {} bytes em {:#x}",
+        bi.initrd_len,
+        bi.initrd_addr
+    );
     if fb.is_present() {
         kinfo!(
             "boot: framebuffer {}x{} stride {} {:?} em {:#x} ({} KiB)",
@@ -62,6 +67,17 @@ pub fn memory_map() -> &'static [MemoryRegion] {
     // SAFETY: o loader gravou `memory_map_len` regiões nesse endereço, em
     // páginas reservadas (BootInfo) que nunca são reutilizadas.
     unsafe { core::slice::from_raw_parts(ptr, bi.memory_map_len as usize) }
+}
+
+/// Conteúdo do initrd (por ora o ELF do `init`), se o loader o entregou.
+pub fn initrd() -> Option<&'static [u8]> {
+    let bi = info();
+    if bi.initrd_addr == 0 || bi.initrd_len == 0 {
+        return None;
+    }
+    let ptr = crate::mm::virt::phys_to_virt(PhysAddr::new(bi.initrd_addr)).as_ptr();
+    // SAFETY: páginas do tipo Initrd, reservadas e imutáveis.
+    Some(unsafe { core::slice::from_raw_parts(ptr, bi.initrd_len as usize) })
 }
 
 /// Linha de comando.

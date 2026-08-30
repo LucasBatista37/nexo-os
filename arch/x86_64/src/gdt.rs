@@ -4,8 +4,16 @@
 pub const KERNEL_CODE_SELECTOR: u16 = 0x08;
 /// Seletor de dados do kernel.
 pub const KERNEL_DATA_SELECTOR: u16 = 0x10;
+/// Seletor de código de 32 bits do usuário (só existe para o layout de `sysret`).
+pub const USER_CODE32_SELECTOR: u16 = 0x18;
+/// Seletor de dados do usuário (RPL 3).
+pub const USER_DATA_SELECTOR: u16 = 0x20 | 3;
+/// Seletor de código de 64 bits do usuário (RPL 3).
+pub const USER_CODE_SELECTOR: u16 = 0x28 | 3;
 /// Seletor do TSS.
-pub const TSS_SELECTOR: u16 = 0x18;
+pub const TSS_SELECTOR: u16 = 0x30;
+/// Base de seletores para `STAR[63:48]`: `sysret` usa `base+16` como CS e `base+8` como SS.
+pub const SYSRET_SELECTOR_BASE: u16 = 0x18;
 
 /// Operando de `lgdt`/`lidt`.
 #[repr(C, packed)]
@@ -56,6 +64,9 @@ impl Default for TaskStateSegment {
 
 const CODE_64: u64 = 0x00af_9a00_0000_0000; // P, DPL0, S, code RX, L
 const DATA_64: u64 = 0x00cf_9200_0000_0000; // P, DPL0, S, data RW
+const USER_CODE_32: u64 = 0x00cf_fa00_0000_ffff; // P, DPL3, S, code RX, D
+const USER_DATA_64: u64 = 0x00cf_f200_0000_ffff; // P, DPL3, S, data RW
+const USER_CODE_64: u64 = 0x00af_fa00_0000_ffff; // P, DPL3, S, code RX, L
 
 /// Tabela global de descritores.
 pub struct GlobalDescriptorTable {
@@ -87,6 +98,15 @@ impl GlobalDescriptorTable {
     /// Adiciona o segmento de dados do kernel.
     pub const fn add_kernel_data(&mut self) -> u16 {
         self.push(DATA_64)
+    }
+
+    /// Adiciona os segmentos de usuário na ordem exigida por `sysret`
+    /// (código 32, dados, código 64). Devolve `(dados|3, código|3)`.
+    pub const fn add_user_segments(&mut self) -> (u16, u16) {
+        self.push(USER_CODE_32);
+        let data = self.push(USER_DATA_64) | 3;
+        let code = self.push(USER_CODE_64) | 3;
+        (data, code)
     }
 
     /// Adiciona um descritor de TSS (ocupa duas entradas).
@@ -175,14 +195,21 @@ mod tests {
         let mut g = GlobalDescriptorTable::new();
         assert_eq!(g.add_kernel_code(), KERNEL_CODE_SELECTOR);
         assert_eq!(g.add_kernel_data(), KERNEL_DATA_SELECTOR);
+        assert_eq!(
+            g.add_user_segments(),
+            (USER_DATA_SELECTOR, USER_CODE_SELECTOR)
+        );
         static TSS: TaskStateSegment = TaskStateSegment::new();
         assert_eq!(g.add_tss(&TSS), TSS_SELECTOR);
-        assert_eq!(g.entries().len(), 5);
-        let low = g.entries()[3];
+        assert_eq!(g.entries().len(), 8);
+        assert_eq!(USER_DATA_SELECTOR, SYSRET_SELECTOR_BASE + 8 + 3);
+        assert_eq!(USER_CODE_SELECTOR, SYSRET_SELECTOR_BASE + 16 + 3);
+        assert_eq!(g.entries()[4] >> 45 & 3, 3, "DPL 3 nos dados do usuario");
+        let low = g.entries()[6];
         assert_eq!(low & 0xffff, 103); // limite
         assert_eq!((low >> 40) & 0xff, 0x89); // presente, TSS disponível
         let base = &TSS as *const _ as u64;
         assert_eq!((low >> 16) & 0xff_ffff, base & 0xff_ffff);
-        assert_eq!(g.entries()[4], base >> 32);
+        assert_eq!(g.entries()[7], base >> 32);
     }
 }

@@ -38,12 +38,17 @@ name = "nexo-boot-abi"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-elf"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-loader"
 version = "0.0.1"
 dependencies = [
  "log",
  "nexo-arch-x86_64",
  "nexo-boot-abi",
+ "nexo-elf",
  "nexo-mm",
  "uefi",
 ]

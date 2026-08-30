@@ -283,7 +283,13 @@ impl<T: PhysToVirt> Mapper<T> {
         virt: VirtAddr,
         target: u8,
         alloc: &mut dyn FrameAllocator,
+        user: bool,
     ) -> Result<PhysAddr, MapError> {
+        let inter = if user {
+            PageFlags::PRESENT | PageFlags::WRITABLE | PageFlags::USER
+        } else {
+            PageFlags::PRESENT | PageFlags::WRITABLE
+        };
         let mut table = self.root;
         let mut level = 4u8;
         while level > target {
@@ -299,11 +305,7 @@ impl<T: PhysToVirt> Mapper<T> {
                 let p = self.translate.phys_to_virt(frame);
                 // SAFETY: quadro recém-alocado, exclusivo, de 4 KiB.
                 unsafe { core::ptr::write_bytes(p, 0, PAGE_SIZE as usize) };
-                self.write(
-                    table,
-                    idx,
-                    PageTableEntry::new(frame, PageFlags::PRESENT | PageFlags::WRITABLE),
-                );
+                self.write(table, idx, PageTableEntry::new(frame, inter));
                 table = frame;
             }
             level -= 1;
@@ -340,7 +342,7 @@ impl<T: PhysToVirt> Mapper<T> {
         if !virt.is_aligned(PAGE_SIZE) || !phys.is_aligned(PAGE_SIZE) {
             return Err(MapError::Unaligned(virt));
         }
-        let table = self.walk_create(virt, 1, alloc)?;
+        let table = self.walk_create(virt, 1, alloc, flags.contains(PageFlags::USER))?;
         let idx = virt.table_index(1);
         if self.read(table, idx).is_present() {
             return Err(MapError::AlreadyMapped(virt));
@@ -364,7 +366,7 @@ impl<T: PhysToVirt> Mapper<T> {
         if !virt.is_aligned(PAGE_2M) || !phys.is_aligned(PAGE_2M) {
             return Err(MapError::Unaligned(virt));
         }
-        let table = self.walk_create(virt, 2, alloc)?;
+        let table = self.walk_create(virt, 2, alloc, flags.contains(PageFlags::USER))?;
         let idx = virt.table_index(2);
         if self.read(table, idx).is_present() {
             return Err(MapError::AlreadyMapped(virt));
@@ -588,6 +590,29 @@ mod tests {
         // SAFETY: idem.
         unsafe { m.set_pml4_entry(0, PageTableEntry::empty()) };
         assert!(m.translate(VirtAddr::new(0)).is_none());
+    }
+
+    #[test]
+    fn user_flag_propagates_to_tables() {
+        let (mut a, mut m) = setup(64);
+        let v = VirtAddr::new(0x40_0000);
+        m.map_4k(
+            v,
+            PhysAddr::new(0x9000),
+            PageFlags::PRESENT | PageFlags::USER,
+            &mut a,
+        )
+        .unwrap();
+        let e = m.pml4_entry(0);
+        assert!(
+            e.flags().contains(PageFlags::USER),
+            "PML4 sem USER: {:?}",
+            e.flags()
+        );
+        let k = VirtAddr::new(0xffff_ffff_8000_0000);
+        m.map_4k(k, PhysAddr::new(0xa000), PageFlags::KERNEL_RW, &mut a)
+            .unwrap();
+        assert!(!m.pml4_entry(511).flags().contains(PageFlags::USER));
     }
 
     #[test]

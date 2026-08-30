@@ -57,6 +57,9 @@ const TESTS: &[(&str, TestFn)] = &[
     ("threads_multi_cpu", test_threads_multi_cpu),
     ("timers", test_timers),
     ("threads_affinity", test_threads_affinity),
+    ("user_process", test_user_process),
+    ("user_isolation", test_user_isolation),
+    ("user_syscall_error", test_user_syscall_error),
     ("symbols", test_symbols),
 ];
 
@@ -65,13 +68,15 @@ pub fn run() -> bool {
     kprint!("[SELFTEST] iniciando {} testes\n", TESTS.len());
     let mut passed = 0;
     for (name, f) in TESTS {
-        kprint!("[TEST] {name} ... ");
+        kdebug!("selftest: iniciando {name}");
+        // O resultado sai em uma única linha ao final, para que logs do kernel
+        // emitidos durante o teste não quebrem o marcador lido pelo CI.
         match f() {
             Ok(()) => {
                 passed += 1;
-                kprint!("ok\n");
+                kprint!("[TEST] {name} ... ok\n");
             }
-            Err(e) => kprint!("FAIL: {e}\n"),
+            Err(e) => kprint!("[TEST] {name} ... FAIL: {e}\n"),
         }
     }
     report_memory();
@@ -842,6 +847,88 @@ fn test_threads_affinity() -> TestResult {
     );
     sched::reap();
     check!(crate::x86::percpu::current().index == 0, "principal migrou");
+    Ok(())
+}
+
+fn init_elf() -> Result<&'static [u8], String> {
+    crate::boot::initrd().ok_or_else(|| String::from("initrd (init.elf) ausente"))
+}
+
+fn run_init(mode: u64) -> Result<i64, String> {
+    let elf = init_elf()?;
+    let p = crate::process::spawn_elf("init", elf, mode).map_err(String::from)?;
+    let pid = p.pid;
+    drop(p);
+    crate::process::wait(pid).ok_or_else(|| alloc::format!("wait({pid}) falhou"))
+}
+
+fn test_user_process() -> TestResult {
+    let logs0 = crate::process::user_log_count();
+    let frames0 = phys::stats().free;
+    let code = run_init(0)?;
+    check!(code == 0, "init saiu com {code}");
+    check!(
+        crate::process::user_log_count() >= logs0 + 2,
+        "logs do usuario nao chegaram"
+    );
+    let last = crate::x86::syscall::last_user_log();
+    check!(
+        last.starts_with("init: ok pid="),
+        "ultima mensagem: {last:?}"
+    );
+    check!(
+        crate::process::count() == 0,
+        "processo nao foi removido da tabela"
+    );
+    let frames1 = phys::stats().free;
+    check!(
+        frames1 + 8 >= frames0,
+        "quadros do processo vazaram: {frames0} -> {frames1}"
+    );
+    check!(
+        cpu::read_cr3() & !0xfff == sched::kernel_pml4().as_u64(),
+        "CR3 nao voltou ao kernel"
+    );
+    kprint!("({last}) ");
+    Ok(())
+}
+
+fn test_user_isolation() -> TestResult {
+    let frames0 = phys::stats().free;
+    let exc0 = crate::x86::traps::exception_count();
+    for (mode, what) in [
+        (1u64, "leitura do kernel"),
+        (3, "instrucao privilegiada"),
+        (4, "escrita em .rodata"),
+    ] {
+        let code = run_init(mode)?;
+        check!(
+            code == nexo_syscall_abi::EXIT_KILLED,
+            "{what}: processo saiu com {code} em vez de ser morto"
+        );
+    }
+    check!(
+        crate::x86::traps::exception_count() >= exc0 + 3,
+        "excecoes de usuario nao contadas"
+    );
+    check!(crate::process::count() == 0, "processos sobrando");
+    let frames1 = phys::stats().free;
+    check!(
+        frames1 + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames1}"
+    );
+    // O kernel continua integro: uma sonda de kernel ainda funciona.
+    let r = probe(ProbeKind::Read, KERNEL_STACK_BASE + 8);
+    check!(!r.faulted, "kernel instavel apos matar processos");
+    Ok(())
+}
+
+fn test_user_syscall_error() -> TestResult {
+    let code = run_init(2)?;
+    check!(
+        code == nexo_syscall_abi::Status::NotSupported as u64 as i64,
+        "status recebido pelo usuario: {code}"
+    );
     Ok(())
 }
 

@@ -86,4 +86,18 @@ Substitui um board externo até o repositório ter issues. Uma linha por item do
 | [x] | testes de concorrência e stress | `stress.rs`; cenário `stress`; `make stress` |
 | [x] | limitar e registrar `unsafe` | `docs/unsafe-inventory.md` |
 | [x] | symbolication e dump mínimo | herdado; registradores + backtrace por CPU |
-| [-] | publicar `0.1-kernel` | **Gate F1** exige 24 h de stress sem falha: `make stress DURATION=86400 SMP=4` |
+| [-] | publicar `0.1-kernel` | **Gate F1** exige 24 h de stress sem falha: `make stress DURATION=86400 SMP=4`; evidência parcial: 30 min com 4 CPUs sem erros |
+
+## Marco: `0.2-userspace` (Fase 2) — iniciado
+
+| | Item | Evidência |
+|---|---|---|
+| [x] | entrar em ring 3 e retornar por syscall | `arch/x86_64/src/syscall.rs`, `kernel/src/x86/syscall.rs`; `services/init` |
+| [x] | ABI de syscall e convenções de erro | `abi/syscall`, `docs/spec/syscall-abi.md` |
+| [-] | processos, threads de usuário, jobs/domínios | `process.rs`: espaço próprio + 1 thread; jobs pendentes |
+| [ ] | handles, tabela por processo, direitos | próximo bloco (ADR-0004) |
+| [ ] | canais IPC, espera múltipla, eventos, timers | ADR-0005 |
+| [-] | validar cópias usuário↔kernel | `copy_from_user` (faixa + bit USER); cópia para o usuário pendente |
+| [x] | loader ELF de usuário | `process::spawn_elf`; testes `user_*` |
+| [-] | runtime mínimo Rust e ABI C | `sdk/nexo-sys`; ABI C pendente |
+| [-] | testar isolamento e negação de capabilities | isolamento de memória/instruções testado; capabilities pendentes |

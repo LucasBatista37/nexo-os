@@ -18,6 +18,7 @@ mod cell;
 mod console;
 mod mm;
 mod panic;
+mod process;
 mod sched;
 mod selftest;
 mod stress;

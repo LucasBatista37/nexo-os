@@ -31,6 +31,7 @@ pub fn init() {
         let gdt = &mut *GDT.as_ptr();
         gdt.add_kernel_code();
         gdt.add_kernel_data();
+        gdt.add_user_segments();
         let sel = gdt.add_tss(&*TSS.as_ptr());
         (sel, &*GDT.as_ptr())
     };

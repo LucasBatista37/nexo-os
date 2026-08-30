@@ -418,22 +418,22 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 **Resultado:** aplicações sem privilégio executam isoladas e conversam por protocolos tipados.
 
-- [ ] entrar em ring 3 e retornar por syscall;
-- [ ] definir ABI de syscall e convenções de erro;
-- [ ] implementar processos, threads de usuário e jobs/domínios;
+- [x] entrar em ring 3 e retornar por syscall — *GDT de usuário, `syscall`/`sysret`, `swapgs`; `services/init` roda em ring 3*;
+- [x] definir ABI de syscall e convenções de erro — *ABI v0 em `abi/syscall` + `docs/spec/syscall-abi.md`*;
+- [-] implementar processos, threads de usuário e jobs/domínios — *processos com espaço próprio e uma thread; jobs/domínios pendentes*;
 - [ ] implementar handles e tabela por processo;
 - [ ] implementar direitos: ler, escrever, sinalizar, mapear, transferir e administrar;
 - [ ] implementar canais IPC e transferência de handles;
 - [ ] implementar espera múltipla, eventos e timers;
-- [ ] validar cópias entre usuário e kernel;
+- [-] validar cópias entre usuário e kernel — *ponteiros validados por faixa e bit USER antes de copiar (`copy_from_user`); cópia para o usuário ainda não existe*;
 - [ ] criar formato de protocolo tipado e gerador de código;
 - [ ] definir regras de compatibilidade do IPC;
 - [ ] criar `init` e `service-manager`;
 - [ ] criar políticas de reinício e dependências;
-- [ ] criar loader ELF de usuário;
-- [ ] criar runtime mínimo Rust e ABI C;
+- [x] criar loader ELF de usuário — *`process::spawn_elf` (W^X, USER, pilha com guarda)*;
+- [-] criar runtime mínimo Rust e ABI C — *`sdk/nexo-sys` (Rust, sem alocação); ABI C pendente*;
 - [ ] criar shell de diagnóstico no espaço de usuário;
-- [ ] testar isolamento e negação de capabilities;
+- [-] testar isolamento e negação de capabilities — *isolamento de memória e instruções privilegiadas testado; capabilities ainda não existem*;
 - [ ] fuzzar decodificador de IPC e syscalls;
 - [ ] publicar release `0.2-userspace`.
 
@@ -678,8 +678,8 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [x] SMP e afinidade — *4 CPUs no QEMU; afinidade por máscara (`spawn_on`, `set_affinity`)*;
 - [-] preempção e prioridades — *preempção sim; prioridades não*;
 - [-] temporizadores de alta resolução — *TSC em ns; timers despachados com resolução de 1 ms (tick)*;
-- [ ] isolamento usuário/kernel;
-- [ ] syscalls versionadas;
+- [x] isolamento usuário/kernel — *ring 3 com espaços próprios; faltas de usuário não afetam o kernel*;
+- [-] syscalls versionadas — *v0 instável com `SYS_ABI_VERSION`*;
 - [ ] IPC com transferência de capabilities;
 - [ ] contabilidade e limites de recursos;
 - [-] panic, dump e symbolication — *panic/backtrace/símbolos prontos; dump completo pendente*;

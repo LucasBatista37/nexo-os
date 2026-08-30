@@ -1,0 +1,9 @@
+[package]
+name = "nexo-syscall-abi"
+description = "ABI de chamadas de sistema do Nexo OS (numeros, status, convencoes) — versao 0, instavel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

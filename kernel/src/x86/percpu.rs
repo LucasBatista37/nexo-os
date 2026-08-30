@@ -3,6 +3,7 @@
 
 use crate::sync::IrqLock;
 use alloc::boxed::Box;
+use core::cell::UnsafeCell;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use nexo_arch_x86_64::cpu;
 use nexo_arch_x86_64::gdt::{GlobalDescriptorTable, TaskStateSegment, load_tss};
@@ -14,10 +15,13 @@ const DF_STACK_SIZE: usize = 16 * 1024;
 #[repr(C, align(16))]
 struct Stack([u8; DF_STACK_SIZE]);
 
-/// Estrutura por CPU. `self_ptr` **deve** ser o primeiro campo (`gs:[0]`).
+/// Estrutura por CPU. Os três primeiros campos são acessados por assembly
+/// (`gs:[0]` self, `gs:[8]` pilha de kernel da thread atual, `gs:[16]` RSP de usuário).
 #[repr(C)]
 pub struct PerCpu {
     self_ptr: *const PerCpu,
+    syscall_kernel_rsp: UnsafeCell<u64>,
+    syscall_user_rsp: UnsafeCell<u64>,
     /// Índice lógico (0 = BSP).
     pub index: usize,
     /// APIC ID.
@@ -37,9 +41,19 @@ pub struct PerCpu {
     /// Thread idle desta CPU.
     pub idle_thread: AtomicPtr<()>,
     gdt: GlobalDescriptorTable,
-    tss: TaskStateSegment,
+    tss: UnsafeCell<TaskStateSegment>,
     df_stack: Box<Stack>,
 }
+
+const _: () = {
+    assert!(
+        core::mem::offset_of!(PerCpu, syscall_kernel_rsp)
+            == nexo_arch_x86_64::syscall::GS_KERNEL_RSP
+    );
+    assert!(
+        core::mem::offset_of!(PerCpu, syscall_user_rsp) == nexo_arch_x86_64::syscall::GS_USER_RSP
+    );
+};
 
 // SAFETY: cada CPU só acessa a própria estrutura de forma mutável durante a
 // inicialização; depois disso apenas campos atômicos são alterados.
@@ -61,6 +75,8 @@ impl PerCpu {
     ) -> &'static PerCpu {
         let cpu: &'static mut PerCpu = Box::leak(Box::new(PerCpu {
             self_ptr: core::ptr::null(),
+            syscall_kernel_rsp: UnsafeCell::new(stack_base + stack_size),
+            syscall_user_rsp: UnsafeCell::new(0),
             index,
             apic_id,
             online: AtomicBool::new(false),
@@ -71,15 +87,21 @@ impl PerCpu {
             current_thread: AtomicPtr::new(core::ptr::null_mut()),
             idle_thread: AtomicPtr::new(core::ptr::null_mut()),
             gdt: GlobalDescriptorTable::new(),
-            tss: TaskStateSegment::new(),
+            tss: UnsafeCell::new(TaskStateSegment::new()),
             df_stack: Box::new(Stack([0; DF_STACK_SIZE])),
         }));
         cpu.self_ptr = cpu as *const PerCpu;
-        cpu.tss.interrupt_stack_table[0] = cpu.df_stack_bounds().1;
-        cpu.tss.privilege_stack_table[0] = stack_base + stack_size;
+        let df_top = cpu.df_stack_bounds().1;
+        {
+            let tss = cpu.tss.get_mut();
+            tss.interrupt_stack_table[0] = df_top;
+            tss.privilege_stack_table[0] = stack_base + stack_size;
+        }
         cpu.gdt.add_kernel_code();
         cpu.gdt.add_kernel_data();
-        let tss: &'static TaskStateSegment = &cpu.tss;
+        cpu.gdt.add_user_segments();
+        // SAFETY: `tss` vive dentro da estrutura vazada ('static) e não se move.
+        let tss: &'static TaskStateSegment = unsafe { &*cpu.tss.get() };
         cpu.gdt.add_tss(tss);
         let mut table = CPUS.lock();
         table[index] = Some(cpu);
@@ -102,6 +124,18 @@ impl PerCpu {
             self.gdt.load();
             load_tss(nexo_arch_x86_64::gdt::TSS_SELECTOR);
             cpu::write_gs_base(self as *const PerCpu as u64);
+            nexo_arch_x86_64::syscall::init_msrs();
+        }
+    }
+
+    /// Define a pilha de kernel usada por interrupções vindas do usuário (TSS.RSP0)
+    /// e por `syscall` (`gs:[8]`). Chamado a cada troca de contexto nesta CPU.
+    pub fn set_kernel_stack(&self, top: u64) {
+        // SAFETY: campos lidos apenas pela CPU dona (hardware) em transições de privilégio.
+        unsafe {
+            self.syscall_kernel_rsp.get().write_volatile(top);
+            let tss = self.tss.get();
+            core::ptr::addr_of_mut!((*tss).privilege_stack_table[0]).write_unaligned(top);
         }
     }
 

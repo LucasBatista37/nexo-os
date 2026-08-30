@@ -1,0 +1,28 @@
+[package]
+name = "nexo-init"
+description = "Primeiro programa de usuario do Nexo OS (ring 3): exercita a ABI de syscalls e o isolamento"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.98"
+build = "build.rs"
+
+# Workspace proprio: alvo x86_64-unknown-none em modo usuario (ver .cargo/config.toml).
+[workspace]
+
+[dependencies]
+nexo-sys = { path = "../../sdk/nexo-sys" }
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+codegen-units = 1
+debug = false
+strip = "debuginfo"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

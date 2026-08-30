@@ -132,7 +132,8 @@ pub fn summarize(map: &[MemoryRegion]) -> MapSummary {
             | MemoryKind::KernelPageTables
             | MemoryKind::KernelStack
             | MemoryKind::BootInfo
-            | MemoryKind::KernelFile => {
+            | MemoryKind::KernelFile
+            | MemoryKind::Initrd => {
                 s.kernel_bytes += len;
                 s.max_usable_addr = s.max_usable_addr.max(r.end);
             }

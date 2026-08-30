@@ -5,15 +5,18 @@
 resolver = "2"
 members = [
     "abi/boot",
+    "abi/syscall",
     "arch/x86_64",
     "kernel/lib/mm",
     "kernel/lib/heap",
     "kernel/lib/sync",
     "kernel/lib/symbols",
     "kernel/lib/acpi",
+    "kernel/lib/elf",
     "libraries/font",
+    "sdk/nexo-sys",
 ]
-exclude = ["kernel", "boot/loader"]
+exclude = ["kernel", "boot/loader", "services/init"]
 
 [workspace.package]
 version = "0.0.1"

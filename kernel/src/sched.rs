@@ -72,6 +72,8 @@ pub struct Thread {
     pub last_cpu: AtomicUsize,
     /// Máscara de CPUs permitidas (bit i = CPU i).
     pub affinity: AtomicU64,
+    /// Processo dono (threads de kernel: `None`).
+    pub process: Option<Arc<crate::process::Process>>,
     stack: Option<stack::Slot>,
     entry: UnsafeCell<Option<Entry>>,
     inner: UnsafeCell<Inner>,
@@ -178,6 +180,24 @@ pub fn switches() -> u64 {
     stats().switches
 }
 
+static KERNEL_PML4: AtomicU64 = AtomicU64::new(0);
+
+/// PML4 do kernel (capturada em `init`).
+pub fn kernel_pml4() -> nexo_mm::PhysAddr {
+    nexo_mm::PhysAddr::new(KERNEL_PML4.load(Ordering::Relaxed))
+}
+
+impl Thread {
+    /// Topo da pilha de kernel desta thread (para TSS.RSP0/syscall).
+    fn kernel_stack_top(&self, cpu_data: &PerCpu) -> u64 {
+        match &self.stack {
+            Some(s) => s.top,
+            None if self.is_idle => cpu_data.stack_base + cpu_data.stack_size,
+            None => nexo_boot_abi::KERNEL_STACK_TOP,
+        }
+    }
+}
+
 fn new_thread(
     name: &'static str,
     is_idle: bool,
@@ -192,6 +212,7 @@ fn new_thread(
         runs: AtomicU64::new(0),
         last_cpu: AtomicUsize::new(usize::MAX),
         affinity: AtomicU64::new(u64::MAX),
+        process: None,
         stack,
         entry: UnsafeCell::new(entry),
         inner: UnsafeCell::new(Inner {
@@ -208,6 +229,7 @@ fn set_current(cpu_data: &PerCpu, t: &Arc<Thread>) {
     cpu_data
         .current_thread
         .store(Arc::as_ptr(t) as *mut (), Ordering::Release);
+    cpu_data.set_kernel_stack(t.kernel_stack_top(cpu_data));
     t.last_cpu.store(cpu_data.index, Ordering::Relaxed);
     t.runs.fetch_add(1, Ordering::Relaxed);
 }
@@ -245,6 +267,7 @@ pub fn current_name() -> &'static str {
 
 /// Registra a thread principal (contexto de boot da BSP) e a idle da BSP; ativa o escalonador.
 pub fn init() {
+    KERNEL_PML4.store(cpu::read_cr3() & 0x000f_ffff_ffff_f000, Ordering::Relaxed);
     let cpu_data = percpu::current();
     let main = new_thread("main", false, None, None);
     // A thread principal fica na BSP: mantém determinísticos os testes e o tick global.
@@ -341,8 +364,31 @@ pub fn spawn(name: &'static str, f: fn(usize), arg: usize) -> ThreadId {
 
 /// Cria uma thread restrita às CPUs de `mask` (a afinidade vale desde o primeiro escalonamento).
 pub fn spawn_with_affinity(name: &'static str, f: fn(usize), arg: usize, mask: u64) -> ThreadId {
+    spawn_full(name, f, arg, mask, None)
+}
+
+/// Cria a thread principal de um processo (executa em seu espaço de endereçamento).
+pub fn spawn_process_thread(
+    name: &'static str,
+    f: fn(usize),
+    arg: usize,
+    process: Arc<crate::process::Process>,
+) -> ThreadId {
+    spawn_full(name, f, arg, u64::MAX, Some(process))
+}
+
+fn spawn_full(
+    name: &'static str,
+    f: fn(usize),
+    arg: usize,
+    mask: u64,
+    process: Option<Arc<crate::process::Process>>,
+) -> ThreadId {
     let slot = stack::alloc().expect("sem slot de pilha");
-    let t = new_thread(name, false, Some(slot), Some((f, arg)));
+    let mut t = new_thread(name, false, Some(slot), Some((f, arg)));
+    if let Some(p) = process {
+        Arc::get_mut(&mut t).expect("thread recem-criada").process = Some(p);
+    }
     t.affinity
         .store(if mask == 0 { u64::MAX } else { mask }, Ordering::Relaxed);
     // SAFETY: pilha recém-mapeada e exclusiva.
@@ -416,6 +462,15 @@ fn schedule_locked(g: nexo_sync::SpinLockGuard<'static, Sched>, new_state: State
     g.prev_for_finish[ci] = Some(cur.clone());
     set_current(cpu_data, &next);
     g.switches += 1;
+    // Espaço de endereçamento: o do processo da próxima thread, ou o do kernel.
+    let target = next
+        .process
+        .as_ref()
+        .map_or(kernel_pml4().as_u64(), |p| p.space.root().as_u64());
+    if cpu::read_cr3() & 0x000f_ffff_ffff_f000 != target {
+        // SAFETY: a metade do kernel é idêntica em todas as PML4s; pilhas e código continuam mapeados.
+        unsafe { cpu::write_cr3(target) };
+    }
     // SAFETY: lock detido; `sp` só é tocado aqui e na troca.
     let prev_sp = unsafe { &raw mut cur.inner().sp };
     // SAFETY: lock detido; `next` não executa em nenhuma CPU neste instante.

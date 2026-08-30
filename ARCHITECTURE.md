@@ -98,6 +98,14 @@ Relógio: TSC calibrado (≈1 GHz no QEMU) → `monotonic_ns`; ticks (1000 Hz) a
 | área de teste | `0xffff_ffff_d000_0000` | auto-testes e stress (`d100_0000+`) |
 | MMIO | `0xffff_ffff_e000_0000` | LAPIC (`e000_0000`), I/O APICs (`e010_0000+`), sem cache |
 | trampolim SMP | `0x8000` (identidade, temporário) | só durante `boot_aps`; PML4[0] fica com tabelas vazias |
+| espaço do usuário | `0x0000_0000_0040_0000`.. (por processo) | ELF em `0x40_0000`; pilha `0x0000_7fff_fff0_0000 − 64 KiB` |
+
+## Modo usuário (Fase 2, bloco 1)
+
+- Segmentos de usuário na GDT (`0x23` dados, `0x2b` código); `STAR/LSTAR/SFMASK` por CPU; entrada `nexo_syscall_entry` troca para a pilha de kernel da thread (`gs:[8]`, atualizada a cada troca de contexto junto com `TSS.RSP0`), monta um `TrapFrame`, despacha (`kernel/src/x86/syscall.rs`) e retorna por `sysretq`; traps vindas de ring 3 fazem `swapgs`.
+- Processo (`process.rs`): PML4 própria (metade do kernel copiada), ELF64 estático carregado com W^X e bit `USER` nas tabelas, pilha de 64 KiB com guard page, uma thread de kernel que entra em ring 3 por `iretq`; o escalonador troca `CR3` conforme a thread.
+- Faltas em ring 3 encerram só o processo; `wait` recolhe o código de saída e libera todos os quadros.
+- `services/init` é o primeiro programa (entregue pelo loader como initrd, ABI de boot v2); `sdk/nexo-sys` invoca a ABI v0 (`docs/spec/syscall-abi.md`).
 
 ## Componentes privilegiados (ADR-0002)
 

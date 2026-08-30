@@ -19,7 +19,7 @@ use core::fmt;
 pub const BOOT_INFO_MAGIC: u64 = 0x544f_4f42_4f58_454e;
 
 /// Versão do contrato de boot. Incrementar em qualquer mudança incompatível.
-pub const BOOT_ABI_VERSION: u32 = 1;
+pub const BOOT_ABI_VERSION: u32 = 2;
 
 /// Tamanho de página base da arquitetura.
 pub const PAGE_SIZE: u64 = 4096;
@@ -86,6 +86,8 @@ pub enum MemoryKind {
     KernelFile = 12,
     /// Memória do framebuffer (quando presente no mapa).
     Framebuffer = 13,
+    /// Conteúdo inicial do espaço de usuário (por ora, o ELF do `init`).
+    Initrd = 14,
 }
 
 impl MemoryKind {
@@ -105,6 +107,7 @@ impl MemoryKind {
             11 => MemoryKind::BootInfo,
             12 => MemoryKind::KernelFile,
             13 => MemoryKind::Framebuffer,
+            14 => MemoryKind::Initrd,
             _ => MemoryKind::Unknown,
         }
     }
@@ -123,14 +126,15 @@ impl MemoryKind {
             MemoryKind::AcpiReclaimable => 3,
             MemoryKind::Framebuffer => 4,
             MemoryKind::KernelFile => 5,
-            MemoryKind::BootInfo => 6,
-            MemoryKind::KernelStack => 7,
-            MemoryKind::KernelPageTables => 8,
-            MemoryKind::KernelImage => 9,
-            MemoryKind::UefiRuntime => 10,
-            MemoryKind::AcpiNvs => 11,
-            MemoryKind::Mmio => 12,
-            MemoryKind::Reserved => 13,
+            MemoryKind::Initrd => 6,
+            MemoryKind::BootInfo => 7,
+            MemoryKind::KernelStack => 8,
+            MemoryKind::KernelPageTables => 9,
+            MemoryKind::KernelImage => 10,
+            MemoryKind::UefiRuntime => 11,
+            MemoryKind::AcpiNvs => 12,
+            MemoryKind::Mmio => 13,
+            MemoryKind::Reserved => 14,
         }
     }
 
@@ -151,6 +155,7 @@ impl MemoryKind {
             MemoryKind::BootInfo => "boot-info",
             MemoryKind::KernelFile => "kernel-file",
             MemoryKind::Framebuffer => "framebuffer",
+            MemoryKind::Initrd => "initrd",
         }
     }
 }
@@ -314,6 +319,11 @@ pub struct BootInfo {
     /// Tamanho em bytes do arquivo ELF.
     pub kernel_file_len: u64,
 
+    /// Endereço físico do initrd (0 se ausente). ABI v2.
+    pub initrd_addr: u64,
+    /// Tamanho em bytes do initrd. ABI v2.
+    pub initrd_len: u64,
+
     /// Base virtual da pilha inicial do kernel.
     pub stack_base: u64,
     /// Tamanho da pilha inicial.
@@ -382,6 +392,8 @@ impl BootInfo {
             kernel_size: 0,
             kernel_file_addr: 0,
             kernel_file_len: 0,
+            initrd_addr: 0,
+            initrd_len: 0,
             stack_base: KERNEL_STACK_BASE,
             stack_size: KERNEL_STACK_SIZE,
             page_table_root: 0,
@@ -481,7 +493,7 @@ mod tests {
         // Estes números fazem parte do contrato; mudar exige nova versão de ABI.
         assert_eq!(core::mem::size_of::<MemoryRegion>(), 24);
         assert_eq!(core::mem::size_of::<FramebufferInfo>(), 40);
-        assert_eq!(core::mem::size_of::<BootInfo>(), 424);
+        assert_eq!(core::mem::size_of::<BootInfo>(), 440);
         assert_eq!(core::mem::align_of::<BootInfo>(), 8);
     }
 
@@ -537,5 +549,7 @@ mod tests {
         assert!(MemoryKind::Reserved.priority() > MemoryKind::Usable.priority());
         assert!(MemoryKind::KernelImage.priority() > MemoryKind::LoaderReclaimable.priority());
         assert_eq!(MemoryKind::from_u32(99), MemoryKind::Unknown);
+        assert_eq!(MemoryKind::from_u32(14), MemoryKind::Initrd);
+        assert!(MemoryKind::Initrd.priority() > MemoryKind::KernelFile.priority());
     }
 }

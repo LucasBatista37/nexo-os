@@ -1,0 +1,9 @@
+[package]
+name = "nexo-elf"
+description = "Leitor minimo de ELF64 (cabecalho e program headers) usado pelo loader UEFI e pelo kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

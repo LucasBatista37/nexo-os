@@ -15,6 +15,7 @@ log = "0.4"
 nexo-boot-abi = { path = "../../abi/boot" }
 nexo-mm = { path = "../../kernel/lib/mm" }
 nexo-arch-x86_64 = { path = "../../arch/x86_64" }
+nexo-elf = { path = "../../kernel/lib/elf" }
 
 [profile.dev]
 panic = "abort"
