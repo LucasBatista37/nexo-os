@@ -25,6 +25,8 @@ use crate::x86::percpu::{self, PerCpu};
 
 /// Identificador de thread.
 pub type ThreadId = usize;
+/// Função de entrada e argumento de uma thread.
+pub type Entry = (fn(usize), usize);
 
 /// Quantum em ticks (1 ms cada).
 pub const QUANTUM_TICKS: u32 = 10;
@@ -69,7 +71,7 @@ pub struct Thread {
     /// Última CPU em que executou.
     pub last_cpu: AtomicUsize,
     stack: Option<stack::Slot>,
-    entry: UnsafeCell<Option<(fn(usize), usize)>>,
+    entry: UnsafeCell<Option<Entry>>,
     inner: UnsafeCell<Inner>,
 }
 
@@ -178,7 +180,7 @@ fn new_thread(
     name: &'static str,
     is_idle: bool,
     stack: Option<stack::Slot>,
-    entry: Option<(fn(usize), usize)>,
+    entry: Option<Entry>,
 ) -> Arc<Thread> {
     Arc::new(Thread {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
@@ -230,6 +232,7 @@ pub fn current_name() -> &'static str {
             if p.is_null() {
                 "boot"
             } else {
+                // SAFETY: ponteiro para thread viva enquanto ocupa a CPU.
                 unsafe { (*p).name }
             }
         }
@@ -404,6 +407,7 @@ fn schedule_locked(g: nexo_sync::SpinLockGuard<'static, Sched>, new_state: State
     g.switches += 1;
     // SAFETY: lock detido; `sp` só é tocado aqui e na troca.
     let prev_sp = unsafe { &raw mut cur.inner().sp };
+    // SAFETY: lock detido; `next` não executa em nenhuma CPU neste instante.
     let next_sp = unsafe { next.inner().sp };
     drop(next);
     drop(cur);

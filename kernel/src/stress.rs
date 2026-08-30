@@ -99,7 +99,7 @@ fn worker_sleep(arg: usize) {
 fn child(arg: usize) {
     CHILD_RUNS.fetch_add(1, Ordering::Relaxed);
     let v = alloc::vec![arg as u8; 256];
-    if arg % 3 == 0 {
+    if arg.is_multiple_of(3) {
         sched::yield_now();
     }
     if v[255] != arg as u8 {
@@ -121,7 +121,7 @@ fn worker_spawn(_arg: usize) {
         }
         i += 4;
         SPAWN_OPS.fetch_add(4, Ordering::Relaxed);
-        if i % 64 == 0 {
+        if i.is_multiple_of(64) {
             sched::reap();
         }
         note_cpu();
@@ -154,7 +154,7 @@ fn worker_pages(arg: usize) {
             Err(_) => fail("map falhou"),
         }
         round += 1;
-        if round % 8 == 0 {
+        if round.is_multiple_of(8) {
             sched::yield_now();
         }
         note_cpu();
@@ -163,7 +163,7 @@ fn worker_pages(arg: usize) {
 
 /// Executa o stress por `secs` segundos. Devolve `true` se nenhum invariante falhou.
 pub fn run(secs: u64) -> bool {
-    let cpus = crate::x86::percpu::online_count() as usize;
+    let cpus = crate::x86::percpu::online_count();
     kprint!("[STRESS] iniciando: {secs} s, {cpus} CPUs\n");
     let frames0 = crate::mm::phys::stats().free;
     let heap0 = crate::mm::heap::stats().used_bytes;

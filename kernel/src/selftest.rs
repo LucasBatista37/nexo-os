@@ -692,8 +692,8 @@ fn test_threads_preempt() -> TestResult {
     for id in &ids {
         check!(sched::join(*id), "join do spinner");
     }
-    for i in 0..n {
-        let c = SPIN_COUNTS[i].load(Ordering::Relaxed);
+    for (i, counter) in SPIN_COUNTS.iter().enumerate().take(n) {
+        let c = counter.load(Ordering::Relaxed);
         check!(c > 0, "spinner {i} nunca executou (preempcao falhou)");
     }
     let p1 = sched::stats().preemptions;
