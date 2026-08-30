@@ -86,7 +86,7 @@ Substitui um board externo até o repositório ter issues. Uma linha por item do
 | [x] | testes de concorrência e stress | `stress.rs`; cenário `stress`; `make stress` |
 | [x] | limitar e registrar `unsafe` | `docs/unsafe-inventory.md` |
 | [x] | symbolication e dump mínimo | herdado; registradores + backtrace por CPU |
-| [-] | publicar `0.1-kernel` | **Gate F1** exige 24 h de stress sem falha: `make stress DURATION=86400 SMP=4`; evidência parcial: 30 min com 4 CPUs sem erros |
+| [-] | publicar `0.1-kernel` | **Gate F1** exige 24 h de stress sem falha: `make stress DURATION=86400 SMP=4`; evidência parcial: 30 min com 4 CPUs sem erros (`docs/progress/2026-08-30-stress-30min.md`) |
 
 ## Marco: `0.2-userspace` (Fase 2) — iniciado
 
