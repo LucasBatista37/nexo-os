@@ -1,0 +1,9 @@
+[package]
+name = "nexo-fat"
+description = "Leitor FAT12/16/32 somente leitura (nomes 8.3 e longos) e localizacao da particao EFI em GPT — sem alocacao, testavel no host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

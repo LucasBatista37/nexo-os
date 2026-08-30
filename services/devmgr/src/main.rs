@@ -30,6 +30,28 @@ fn fail(code: i64, what: &str) -> ! {
     nexo_sys::exit(code)
 }
 
+/// Pergunta ao `blockdev` (op 3) o serial e se é somente leitura.
+fn block_identity(ch: Handle) -> (bool, [u8; 20]) {
+    let mut req = [0u8; 16];
+    req[0] = 3;
+    let mut reply = [0u8; 32];
+    let mut hs = [0u32; 1];
+    if nexo_sys::channel_send(ch, &req, &[]) == Status::Ok
+        && let Ok((22, _)) = nexo_sys::channel_recv(ch, &mut reply, &mut hs)
+        && reply[0] == 0
+    {
+        let mut serial = [0u8; 20];
+        serial.copy_from_slice(&reply[2..22]);
+        return (reply[1] != 0, serial);
+    }
+    (false, [0; 20])
+}
+
+fn serial_str(serial: &[u8; 20]) -> &str {
+    let len = serial.iter().position(|&b| b == 0).unwrap_or(20);
+    core::str::from_utf8(&serial[..len]).unwrap_or("?")
+}
+
 /// Inicia `driver` para a função `d` com concessão restrita; devolve o canal de serviço.
 fn start_driver(driver: &str, d: &PciInfo) -> Result<Handle, Status> {
     let grant = nexo_sys::device_open(ROOT, d.bdf)?;
@@ -57,6 +79,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         .unwrap_or_else(|_| fail(10, "pci_enum"))
         .min(32);
     let mut blk: Option<Handle> = None;
+    let mut boot: Option<Handle> = None;
     let mut rng: Option<Handle> = None;
     let mut bound = 0;
     for d in &devs[..n] {
@@ -67,7 +90,18 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             Ok(ch) => {
                 bound += 1;
                 match driver {
-                    "blockdev" if blk.is_none() => blk = Some(ch),
+                    "blockdev" => {
+                        let (ro, serial) = block_identity(ch);
+                        if serial_str(&serial) == "nexoboot" || (ro && boot.is_none()) {
+                            log!("devmgr: disco de boot (somente leitura) -> espfs");
+                            boot = Some(ch);
+                        } else if blk.is_none() {
+                            log!("devmgr: disco de dados '{}' -> fs", serial_str(&serial));
+                            blk = Some(ch);
+                        } else {
+                            let _ = nexo_sys::handle_close(ch);
+                        }
+                    }
                     "rngdev" if rng.is_none() => rng = Some(ch),
                     _ => {
                         let _ = nexo_sys::handle_close(ch);
@@ -103,6 +137,18 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         && nexo_sys::channel_send(CLIENT, b"rng", &[rng]) != Status::Ok
     {
         fail(13, "entrega do rng");
+    }
+    if let Some(boot) = boot {
+        let (c, d) = nexo_sys::channel_create().unwrap_or_else(|_| fail(11, "canal"));
+        match nexo_sys::process_spawn("espfs", 0, &[boot, c]) {
+            Ok(h) => {
+                let _ = nexo_sys::handle_close(h);
+                if nexo_sys::channel_send(CLIENT, b"esp", &[d]) != Status::Ok {
+                    fail(15, "entrega do esp");
+                }
+            }
+            Err(e) => log!("devmgr: espfs falhou: {:?}", e),
+        }
     }
     let _ = nexo_sys::channel_send(CLIENT, b"done", &[]);
     let mut buf = [0u8; 64];

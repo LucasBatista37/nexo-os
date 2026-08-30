@@ -37,6 +37,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-espfs"
+version = "0.0.1"
+dependencies = [
+ "nexo-fat",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
+name = "nexo-fat"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-fs"
 version = "0.0.1"
 dependencies = [

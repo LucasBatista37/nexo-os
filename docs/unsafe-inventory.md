@@ -7,16 +7,16 @@ Contagem em 2026-08-30 (`grep -rhoE 'unsafe( \{| fn| impl| extern)' --include='*
 | Crate | ocorrências `unsafe` | comentários `SAFETY:` |
 |---|---|---|
 | `nexo-boot-abi` | 1 (tipo `unsafe extern "sysv64" fn`) | — |
-| `nexo-mm`, `nexo-symbols`, `nexo-font`, `nexo-acpi`, `nexo-elf`, `nexo-initrd`, `nexo-syscall-abi`, `nexofs` | 0 | — |
+| `nexo-mm`, `nexo-symbols`, `nexo-font`, `nexo-acpi`, `nexo-elf`, `nexo-initrd`, `nexo-syscall-abi`, `nexofs`, `nexo-fat` | 0 | — |
 | `nexo-sync` | 9 | 8 |
 | `nexo-heap` | 30 | 27 |
 | `nexo-arch-x86_64` | 120 | 78 |
 | `nexo-loader` | 15 | 14 |
 | `nexo-kernel` | 120 | 111 |
 | `nexo-sys + nexo-rt` | 31 | 27 |
-| `nexo-virtio` | 10 | 5 (acessos voláteis a MMIO e às páginas da fila; um `SAFETY` por método/bloco) |
-| `services/*` | 13 | 13 (drivers: cópias de/para páginas de DMA e a queda deliberada do `blockdev`) |
-| **total** | **349** | **283** |
+| `nexo-virtio` | 10 | 10 (acessos voláteis a MMIO e às páginas da fila; um `SAFETY` por método/bloco) |
+| `services/*` | 14 | 14 (drivers: cópias de/para páginas de DMA e a queda deliberada do `blockdev`) |
+| **total** | **350** | **289** |
 
 Atualize junto com o código.
 

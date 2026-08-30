@@ -58,8 +58,13 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
     if disk is not None:
         cmd += [
             "-drive", f"if=none,id=nexodata,format=raw,file={disk}",
-            "-device", "virtio-blk-pci,drive=nexodata,disable-legacy=on",
+            "-device", "virtio-blk-pci,drive=nexodata,serial=nexodata,disable-legacy=on",
             "-device", "virtio-rng-pci,disable-legacy=on",
+            # A imagem de boot (GPT + ESP FAT32) tambem como virtio-blk somente leitura, depois
+            # dos outros (BDF maior): o `espfs` le o ESP por ela; `file.locking=off` porque o
+            # mesmo arquivo ja esta aberto como disco de boot (AHCI).
+            "-drive", f"if=none,id=nexoboot,format=raw,readonly=on,file.locking=off,file={image}",
+            "-device", "virtio-blk-pci,drive=nexoboot,serial=nexoboot,disable-legacy=on",
         ]
     cmd += [
         "-no-reboot",

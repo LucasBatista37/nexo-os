@@ -458,7 +458,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] implementar cache de blocos e fila assíncrona;
 - [ ] definir VFS e namespace por sessão/processo;
 - [-] implementar `ramfs` — *initramfs somente leitura (`NEXOIRD1`) com membros nomeados; `ramfs` gravável pendente*;
-- [ ] implementar FAT somente para EFI;
+- [x] implementar FAT somente para EFI — *`libraries/fat` (FAT12/16/32 só leitura + GPT) e `services/espfs`; teste `user_devmgr` lê `BOOTX64.EFI` e `kernel.elf` da ESP real*;
 - [x] implementar leitura de um filesystem persistente de teste — *NexoFS v0 (ADR-0016): `libraries/nexofs` + `services/fs`; `user_fs` e cenário `storage`*;
 - [x] implementar escrita, flush e sincronização — *copy-on-write com commit atômico por setor, `sync`; sem cache de blocos ainda*;
 - [x] criar testes de imagem corrompida e corte de energia — *host: corte em cada escrita (com escritas rasgadas) e 400 imagens corrompidas; QEMU: cenário `powercut` (SIGKILL durante escritas, boot seguinte monta e `nexo-disk check` confirma)*;

@@ -22,6 +22,10 @@ name = "nexo-elf"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-fat"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-font"
 version = "0.0.1"
 

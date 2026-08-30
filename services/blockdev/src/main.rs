@@ -65,7 +65,14 @@ struct Device {
     irq: Option<nexo_sys::abi::IrqInfo>,
     irq_seen: u64,
     capacity: u64,
+    read_only: bool,
+    serial: [u8; 20],
 }
+
+/// `VIRTIO_BLK_F_RO`.
+const F_RO: u32 = 1 << 5;
+/// Pedido `GET_ID` (serial de 20 bytes).
+const T_GET_ID: u32 = 8;
 
 fn fail(code: i64, what: &str) -> ! {
     log!("blockdev: falha: {}", what);
@@ -111,7 +118,7 @@ fn setup(info: &PciInfo) -> Device {
         fail(14, "configuracao do dispositivo ausente");
     }
     t.reset();
-    t.negotiate(0, 0).unwrap_or_else(|e| {
+    let (accepted_lo, _) = t.negotiate(F_RO, 0).unwrap_or_else(|e| {
         log!("blockdev: features: {:?}", e);
         nexo_sys::exit(15)
     });
@@ -138,7 +145,7 @@ fn setup(info: &PciInfo) -> Device {
     t.driver_ok();
     let dcfg = t.device.unwrap();
     let capacity = dcfg.r32(0) as u64 | ((dcfg.r32(4) as u64) << 32);
-    Device {
+    let mut dev = Device {
         t,
         q,
         hdr: dma(),
@@ -147,22 +154,37 @@ fn setup(info: &PciInfo) -> Device {
         irq,
         irq_seen: 0,
         capacity,
+        read_only: accepted_lo & F_RO != 0,
+        serial: [0; 20],
+    };
+    // Serial (GET_ID): 20 bytes no buffer de dados; erro nao e fatal.
+    if dev.raw_request(T_GET_ID, 0, 20).is_ok() {
+        // SAFETY: página de DMA exclusiva; 20 bytes.
+        unsafe {
+            core::ptr::copy_nonoverlapping(dev.data.virt as *const u8, dev.serial.as_mut_ptr(), 20)
+        };
     }
+    dev
 }
 
 impl Device {
     /// Executa um pedido de `count` setores a partir de `sector` (dados em `self.data`).
     fn request(&mut self, write: bool, sector: u64, count: usize) -> Result<(), u8> {
+        self.raw_request(write as u32, sector, (count * SECTOR) as u32)
+    }
+
+    /// Pedido cru: tipo `kind`, `len` bytes de dados (escritos pelo dispositivo, salvo OUT).
+    fn raw_request(&mut self, kind: u32, sector: u64, len: u32) -> Result<(), u8> {
+        let write = kind == 1;
         // SAFETY: páginas de DMA exclusivas deste driver.
         unsafe {
             (self.hdr.virt as *mut BlkReq).write_volatile(BlkReq {
-                kind: write as u32,
+                kind,
                 reserved: 0,
                 sector,
             });
             (self.status.virt as *mut u8).write_volatile(0xff);
         }
-        let len = (count * SECTOR) as u32;
         self.q.set_desc(0, self.hdr.phys, 16, DESC_NEXT, 1);
         self.q.set_desc(
             1,
@@ -198,8 +220,9 @@ impl Device {
 pub extern "C" fn _start(crash_after: u64) -> ! {
     let pci = find_virtio_blk();
     let mut dev = setup(&pci);
+    let serial_len = dev.serial.iter().position(|&b| b == 0).unwrap_or(20);
     log!(
-        "blockdev: virtio-blk {:04x}:{:04x} bdf {:#06x} capacidade {} setores, fila {}, {}",
+        "blockdev: virtio-blk {:04x}:{:04x} bdf {:#06x} capacidade {} setores, fila {}, {}{}, serial '{}'",
         pci.vendor,
         pci.device,
         pci.bdf,
@@ -209,7 +232,13 @@ pub extern "C" fn _start(crash_after: u64) -> ! {
             "MSI-X"
         } else {
             "polling"
-        }
+        },
+        if dev.read_only {
+            ", somente leitura"
+        } else {
+            ""
+        },
+        core::str::from_utf8(&dev.serial[..serial_len]).unwrap_or("?")
     );
     let mut buf = [0u8; 4096];
     let mut hs = [0u32; 1];
@@ -233,6 +262,18 @@ pub extern "C" fn _start(crash_after: u64) -> ! {
             r[1..9].copy_from_slice(&dev.capacity.to_le_bytes());
             let _ = nexo_sys::channel_send(CHAN, &r, &[]);
             served += 1;
+            continue;
+        }
+        if op == 3 {
+            let mut r = [0u8; 22];
+            r[1] = dev.read_only as u8;
+            r[2..22].copy_from_slice(&dev.serial);
+            let _ = nexo_sys::channel_send(CHAN, &r, &[]);
+            served += 1;
+            continue;
+        }
+        if op == 1 && dev.read_only {
+            let _ = nexo_sys::channel_send(CHAN, &[4u8], &[]);
             continue;
         }
         let sector = u64::from_le_bytes(buf[4..12].try_into().unwrap());

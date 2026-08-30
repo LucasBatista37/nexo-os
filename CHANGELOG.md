@@ -40,6 +40,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `services/rngdev`: driver VirtIO-RNG (entropia) com MSI-X; protocolo `nexo.rng` v0. `run-qemu` anexa `virtio-rng-pci`.
 - `utest` modo 11 e teste `user_devmgr`: usa o `fs` e o `rng` entregues pelo `devmgr`; bytes aleatórios não nulos e distintos; pedido inválido recusado; todos os processos terminam sem vazar. 38 testes no boot.
 
+### Adicionado (Fase 3, bloco 4 — FAT somente para EFI)
+- `libraries/fat` (`nexo-fat`): leitor FAT12/16/32 somente leitura (nomes 8.3 com caixa NT e nomes longos VFAT, cadeias de clusters, leitura com offset) e localização da partição de sistema EFI na GPT; `no_std`, `forbid(unsafe_code)`. Testes de host: imagem FAT12 construída à mão, 500 imagens corrompidas, GPT sintética e uma imagem FAT32 real gerada com mtools (como o ESP do projeto).
+- `services/espfs`: serve a ESP da imagem de boot (protocolo `nexo.esp` v0: list/stat/read); no boot registra os tamanhos de `/EFI/BOOT/BOOTX64.EFI` e `/nexo/kernel.elf`.
+- `run-qemu` anexa a própria imagem de boot como um segundo `virtio-blk` **somente leitura** (`serial=nexoboot`); `blockdev` negocia `VIRTIO_BLK_F_RO`, lê o serial (`GET_ID`) e recusa escritas em dispositivos somente leitura; `devmgr` roteia por serial (`nexodata` → `fs`, `nexoboot` → `espfs`).
+- `utest` modo 11 verifica pelo `espfs`: raiz com `EFI` e `nexo`, tamanhos, cabeçalhos `MZ` e `\x7fELF`, caminho inexistente → não encontrado.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

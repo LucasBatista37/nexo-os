@@ -627,6 +627,7 @@ fn devmgr_client() -> ! {
     let mut hs = [0u32; 1];
     let mut fs: Option<nexo_sys::Handle> = None;
     let mut rng: Option<nexo_sys::Handle> = None;
+    let mut esp: Option<nexo_sys::Handle> = None;
     loop {
         let (n, nh) = match nexo_sys::channel_recv(0, &mut buf, &mut hs) {
             Ok(v) => v,
@@ -635,6 +636,7 @@ fn devmgr_client() -> ! {
         match &buf[..n] {
             b"fs" if nh == 1 => fs = Some(hs[0]),
             b"rng" if nh == 1 => rng = Some(hs[0]),
+            b"esp" if nh == 1 => esp = Some(hs[0]),
             b"done" => break,
             _ => nexo_sys::exit(181),
         }
@@ -672,6 +674,7 @@ fn devmgr_client() -> ! {
         Ok((1, _)) if buf[0] == 1 => {}
         _ => nexo_sys::exit(188),
     }
+    esp_checks(esp, &mut hs);
     nexo_rt::log!(
         "utest: devmgr ok (rng {:02x}{:02x}{:02x}{:02x}...)",
         r1[0],
@@ -680,4 +683,98 @@ fn devmgr_client() -> ! {
         r1[3]
     );
     nexo_sys::exit(0)
+}
+
+/// Verifica a ESP pelo `espfs`: raiz com `EFI` e `nexo`, tamanhos e cabecalhos dos binarios.
+fn esp_checks(esp: Option<nexo_sys::Handle>, hs: &mut [u32; 1]) {
+    let Some(esp) = esp else { nexo_sys::exit(189) };
+    let mut ereq = [0u8; 64];
+    let mut ereply = [0u8; 4096];
+    let call = |op: u8,
+                offset: u64,
+                len: u32,
+                path: &[u8],
+                ereq: &mut [u8; 64],
+                ereply: &mut [u8; 4096],
+                hs: &mut [u32; 1]|
+     -> (u8, u64, usize) {
+        ereq[0] = op;
+        ereq[1..4].fill(0);
+        ereq[4..12].copy_from_slice(&offset.to_le_bytes());
+        ereq[12..16].copy_from_slice(&len.to_le_bytes());
+        ereq[16..16 + path.len()].copy_from_slice(path);
+        if nexo_sys::channel_send(esp, &ereq[..16 + path.len()], &[]) != Status::Ok {
+            nexo_sys::exit(190);
+        }
+        match nexo_sys::channel_recv(esp, ereply, hs) {
+            Ok((n, _)) if n >= 12 => (
+                ereply[0],
+                u64::from_le_bytes(ereply[4..12].try_into().unwrap()),
+                n - 12,
+            ),
+            _ => nexo_sys::exit(191),
+        }
+    };
+    let (st, count, n) = call(0, 0, 0, b"/", &mut ereq, &mut ereply, hs);
+    if st != 0 || count < 2 {
+        nexo_rt::log!(
+            "utest: esp: listar raiz: status {} ({} entradas)",
+            st,
+            count
+        );
+        nexo_sys::exit(192);
+    }
+    let (mut has_efi, mut has_nexo, mut pos) = (false, false, 0usize);
+    while pos + 6 <= n {
+        let nl = ereply[12 + pos + 5] as usize;
+        let name = &ereply[12 + pos + 6..12 + pos + 6 + nl];
+        has_efi |= name.eq_ignore_ascii_case(b"EFI");
+        has_nexo |= name.eq_ignore_ascii_case(b"nexo");
+        pos += 6 + nl;
+    }
+    if !has_efi || !has_nexo {
+        nexo_sys::exit(193);
+    }
+    let (st, boot_size, _) = call(
+        1,
+        0,
+        0,
+        b"/EFI/BOOT/BOOTX64.EFI",
+        &mut ereq,
+        &mut ereply,
+        hs,
+    );
+    if st != 0 || boot_size == 0 {
+        nexo_sys::exit(194);
+    }
+    let (st, kernel_size, _) = call(1, 0, 0, b"/nexo/kernel.elf", &mut ereq, &mut ereply, hs);
+    if st != 0 || kernel_size == 0 {
+        nexo_sys::exit(195);
+    }
+    let (st, r, n) = call(2, 0, 4, b"/nexo/kernel.elf", &mut ereq, &mut ereply, hs);
+    if st != 0 || r != 4 || n != 4 || &ereply[12..16] != b"\x7fELF" {
+        nexo_rt::log!("utest: esp: cabecalho do kernel: status {} {} bytes", st, r);
+        nexo_sys::exit(196);
+    }
+    let (st, r, _) = call(
+        2,
+        0,
+        2,
+        b"/EFI/BOOT/BOOTX64.EFI",
+        &mut ereq,
+        &mut ereply,
+        hs,
+    );
+    if st != 0 || r != 2 || &ereply[12..14] != b"MZ" {
+        nexo_sys::exit(197);
+    }
+    let (st, _, _) = call(1, 0, 0, b"/nexo/inexistente", &mut ereq, &mut ereply, hs);
+    if st != 3 {
+        nexo_sys::exit(198);
+    }
+    nexo_rt::log!(
+        "utest: esp ok (BOOTX64.EFI {} bytes, kernel.elf {} bytes)",
+        boot_size,
+        kernel_size
+    );
 }
