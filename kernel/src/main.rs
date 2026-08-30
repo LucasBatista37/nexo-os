@@ -16,6 +16,7 @@ mod acpi;
 mod boot;
 mod cell;
 mod console;
+mod ipc;
 mod mm;
 mod panic;
 mod process;

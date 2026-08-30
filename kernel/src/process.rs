@@ -143,6 +143,8 @@ pub struct Process {
     pub syscalls: AtomicU64,
     /// Motivo, se encerrado pelo kernel.
     pub kill_reason: IrqLock<Option<&'static str>>,
+    /// Handles do processo.
+    pub handles: IrqLock<crate::ipc::HandleTable>,
 }
 
 static TABLE: IrqLock<Vec<Arc<Process>>> = IrqLock::new(Vec::new());
@@ -170,6 +172,16 @@ pub fn spawn_elf(
     name: &'static str,
     elf_bytes: &[u8],
     arg: u64,
+) -> Result<Arc<Process>, &'static str> {
+    spawn_elf_with_handles(name, elf_bytes, arg, Vec::new())
+}
+
+/// Como [`spawn_elf`], entregando `handles` nos primeiros índices da tabela.
+pub fn spawn_elf_with_handles(
+    name: &'static str,
+    elf_bytes: &[u8],
+    arg: u64,
+    handles: Vec<crate::ipc::Handle>,
 ) -> Result<Arc<Process>, &'static str> {
     let elf = ElfFile::parse(elf_bytes).map_err(|_| "ELF invalido")?;
     let space = AddressSpace::new().ok_or("sem memoria para o espaco")?;
@@ -225,7 +237,14 @@ pub fn spawn_elf(
         exited: AtomicBool::new(false),
         syscalls: AtomicU64::new(0),
         kill_reason: IrqLock::new(None),
+        handles: IrqLock::new(crate::ipc::HandleTable::new()),
     });
+    {
+        let mut table = process.handles.lock();
+        for h in handles {
+            table.insert(h).map_err(|_| "tabela de handles cheia")?;
+        }
+    }
     TABLE.lock().push(process.clone());
     let start = alloc::boxed::Box::new(UserStart {
         entry: elf.entry,
@@ -262,6 +281,9 @@ pub fn exit_current(code: i64, reason: Option<&'static str>) -> ! {
         p.exit_code.store(code, Ordering::Release);
         *p.kill_reason.lock() = reason;
         p.exited.store(true, Ordering::Release);
+        // Fecha os handles já aqui: pares de canal veem PeerClosed sem esperar o reap.
+        let table = core::mem::take(&mut *p.handles.lock());
+        drop(table);
         if reason.is_some() {
             kwarn!(
                 "process: pid {} '{}' encerrado pelo kernel: {}",

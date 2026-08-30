@@ -31,11 +31,30 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 6 | `abi_version` | — | 0 | — |
 | 7 | `debug_info` | 0 CPUs online / 1 uptime ms / 2 syscalls do processo | valor | `InvalidArgs` |
 
-Números desconhecidos devolvem `NotSupported` (3) sem efeitos.
+| 8 | `handle_close` | h | 0 | `BadHandle` |
+| 9 | `handle_duplicate` | h, rights | novo handle | `BadHandle`, `Denied` (sem `DUPLICATE` ou tentando ampliar direitos) |
+| 10 | `channel_create` | — | `h0 \| (h1 << 32)` | `NoMemory` |
+| 11 | `channel_send` | h, ptr, len, handles_ptr, n | bytes enviados | `BadHandle`, `Denied` (sem `WRITE`/`TRANSFER`), `TooBig` (> 4096 B ou > 8 handles), `BadAddress`, `PeerClosed`, `QueueFull` (> 64 pendentes), `InvalidArgs` (enviar o próprio canal) |
+| 12 | `channel_recv` | h, buf, cap, handles_buf, hcap | `len \| (nhandles << 32)` | `BadHandle`, `Denied` (sem `READ`), `BadAddress` (buffers não graváveis), `PeerClosed` (par fechado e fila vazia), `TooBig` (mensagem descartada; `RDX` traz os tamanhos necessários) |
+| 13 | `handle_info` | h | `rights \| (kind << 32)` | `BadHandle` |
+
+Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` bloqueia a thread até haver mensagem ou o par fechar.
 
 ## 3. Status
 
-`Ok`=0, `InvalidArgs`=1, `BadAddress`=2, `NotSupported`=3, `NoMemory`=4, `NotFound`=5, `Denied`=6.
+`Ok`=0, `InvalidArgs`=1, `BadAddress`=2, `NotSupported`=3, `NoMemory`=4, `NotFound`=5, `Denied`=6, `PeerClosed`=7, `BadHandle`=8, `WouldBlock`=9 (reservado), `TooBig`=10, `QueueFull`=11.
+
+## 3.1 Handles e direitos (ADR-0004)
+
+- Handle = índice `u32` na tabela do processo (até 256); opaco e não forjável (o kernel valida índice, presença e direitos em toda syscall).
+- Direitos: `READ`=1, `WRITE`=2, `TRANSFER`=4, `DUPLICATE`=8, `SIGNAL`=16, `MAP`=32, `ADMIN`=64. Só diminuem: `handle_duplicate` aceita apenas subconjuntos.
+- Objetos v0: extremidade de canal (`kind` 1), criada com `READ|WRITE|TRANSFER|DUPLICATE`.
+- Handles enviados em uma mensagem saem da tabela do remetente e entram na do destinatário (índices novos) no `recv`; exigem `TRANSFER`.
+- Ao terminar, o processo fecha todos os handles; a última extremidade fechada de um canal libera o objeto; o par vê `PeerClosed`.
+
+## 3.2 Canais (ADR-0005)
+
+Mensagem = até 4096 bytes + até 8 handles; fila de 64 por extremidade. Sem cabeçalho/protocolo tipado ainda (IDL e versionamento de protocolo vêm no próximo bloco). O kernel copia os bytes para memória própria no `send` e para o usuário no `recv`.
 
 ## 4. Validação de ponteiros
 
@@ -46,4 +65,4 @@ Todo ponteiro de usuário é validado antes do acesso: faixa `[ptr, ptr+len)` ab
 - Espaço de endereçamento por processo (PML4 própria; metade do kernel compartilhada), carregado de um ELF64 estático com segmentos W^X; pilha de 64 KiB em `0x0000_7fff_fff0_0000` (guard page abaixo).
 - Uma thread por processo; `RDI` na entrada carrega um argumento inteiro.
 - Falha em modo usuário (`#PF`, `#GP`, `#UD`…) encerra apenas o processo com código `-1` e motivo registrado no log; o kernel continua.
-- Sem handles, capabilities, IPC ou memória compartilhada ainda — próximos blocos da Fase 2 (ADR-0004/0005).
+- Handles com direitos e canais com transferência de handles existem (§3.1–3.2); memória compartilhada, jobs/domínios, eventos/espera múltipla e timers de usuário vêm nos próximos blocos.

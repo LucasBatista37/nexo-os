@@ -27,8 +27,51 @@ pub const SYS_GET_PID: u64 = 5;
 pub const SYS_ABI_VERSION: u64 = 6;
 /// Informação de depuração do kernel: `a0` seleciona (0 = CPUs online, 1 = uptime ms, 2 = syscalls do processo) → `RDX`.
 pub const SYS_DEBUG_INFO: u64 = 7;
+/// Fecha o handle `a0`.
+pub const SYS_HANDLE_CLOSE: u64 = 8;
+/// Duplica o handle `a0` com direitos `a1` (subconjunto dos atuais) → novo handle em `RDX`.
+pub const SYS_HANDLE_DUPLICATE: u64 = 9;
+/// Cria um canal; `RDX` = `h0 | (h1 << 32)`.
+pub const SYS_CHANNEL_CREATE: u64 = 10;
+/// Envia `a2` bytes de `a1` pelo canal `a0`, com `a4` handles lidos de `a3` (u32 cada).
+pub const SYS_CHANNEL_SEND: u64 = 11;
+/// Recebe do canal `a0` em `a1` (capacidade `a2`), handles em `a3` (capacidade `a4`); `RDX` = `len | (nhandles << 32)`. Bloqueia até haver mensagem.
+pub const SYS_CHANNEL_RECV: u64 = 12;
+/// Informação do handle `a0`: `RDX` = `rights | (kind << 32)`.
+pub const SYS_HANDLE_INFO: u64 = 13;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 7;
+pub const SYS_MAX: u64 = 13;
+
+/// Tamanho máximo de uma mensagem de canal.
+pub const MSG_MAX: usize = 4096;
+/// Máximo de handles por mensagem.
+pub const MSG_HANDLES_MAX: usize = 8;
+/// Profundidade da fila de cada extremidade.
+pub const CHANNEL_QUEUE_MAX: usize = 64;
+/// Handles por processo.
+pub const HANDLES_MAX: usize = 256;
+/// Valor de handle inválido.
+pub const HANDLE_INVALID: u32 = u32::MAX;
+
+/// Direito de ler/receber.
+pub const RIGHT_READ: u32 = 1 << 0;
+/// Direito de escrever/enviar.
+pub const RIGHT_WRITE: u32 = 1 << 1;
+/// Direito de transferir por canal.
+pub const RIGHT_TRANSFER: u32 = 1 << 2;
+/// Direito de duplicar.
+pub const RIGHT_DUPLICATE: u32 = 1 << 3;
+/// Direito de sinalizar.
+pub const RIGHT_SIGNAL: u32 = 1 << 4;
+/// Direito de mapear.
+pub const RIGHT_MAP: u32 = 1 << 5;
+/// Direito administrativo.
+pub const RIGHT_ADMIN: u32 = 1 << 6;
+/// Todos os direitos aplicáveis a um canal.
+pub const RIGHTS_CHANNEL_DEFAULT: u32 = RIGHT_READ | RIGHT_WRITE | RIGHT_TRANSFER | RIGHT_DUPLICATE;
+
+/// Tipo de objeto: extremidade de canal.
+pub const KIND_CHANNEL: u32 = 1;
 
 /// Tamanho máximo de uma mensagem de [`SYS_LOG`].
 pub const LOG_MAX: usize = 1024;
@@ -57,6 +100,16 @@ pub enum Status {
     NotFound = 5,
     /// Permissão negada (capability ausente).
     Denied = 6,
+    /// A outra extremidade do canal foi fechada e não há mensagens pendentes.
+    PeerClosed = 7,
+    /// Handle inválido ou fechado.
+    BadHandle = 8,
+    /// Operação bloquearia (reservado).
+    WouldBlock = 9,
+    /// Mensagem/lista maior que o limite, ou buffer pequeno demais.
+    TooBig = 10,
+    /// Fila cheia.
+    QueueFull = 11,
     /// Valor desconhecido (reservado).
     Unknown = u64::MAX,
 }
@@ -72,6 +125,11 @@ impl Status {
             4 => Status::NoMemory,
             5 => Status::NotFound,
             6 => Status::Denied,
+            7 => Status::PeerClosed,
+            8 => Status::BadHandle,
+            9 => Status::WouldBlock,
+            10 => Status::TooBig,
+            11 => Status::QueueFull,
             _ => Status::Unknown,
         }
     }
@@ -89,6 +147,11 @@ impl Status {
             Status::NoMemory => "no-memory",
             Status::NotFound => "not-found",
             Status::Denied => "denied",
+            Status::PeerClosed => "peer-closed",
+            Status::BadHandle => "bad-handle",
+            Status::WouldBlock => "would-block",
+            Status::TooBig => "too-big",
+            Status::QueueFull => "queue-full",
             Status::Unknown => "unknown",
         }
     }
@@ -105,6 +168,12 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_GET_PID => "get_pid",
         SYS_ABI_VERSION => "abi_version",
         SYS_DEBUG_INFO => "debug_info",
+        SYS_HANDLE_CLOSE => "handle_close",
+        SYS_HANDLE_DUPLICATE => "handle_duplicate",
+        SYS_CHANNEL_CREATE => "channel_create",
+        SYS_CHANNEL_SEND => "channel_send",
+        SYS_CHANNEL_RECV => "channel_recv",
+        SYS_HANDLE_INFO => "handle_info",
         _ => "?",
     }
 }
@@ -123,6 +192,10 @@ mod tests {
             Status::NoMemory,
             Status::NotFound,
             Status::Denied,
+            Status::PeerClosed,
+            Status::BadHandle,
+            Status::TooBig,
+            Status::QueueFull,
         ] {
             assert_eq!(Status::from_u64(s as u64), s);
         }

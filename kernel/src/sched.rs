@@ -595,6 +595,43 @@ pub fn join(id: ThreadId) -> bool {
     }
 }
 
+/// Bloqueia a thread atual liberando `guard` só depois de marcá-la como
+/// bloqueada (sob o lock do escalonador): quem chamar [`unpark`] depois de
+/// obter o mesmo lock que `guard` protegia nunca perde o wakeup.
+pub fn park_with<T>(guard: crate::sync::IrqGuard<'_, T>) {
+    let g = SCHED.lock();
+    let ci = percpu::current().index;
+    let cur = g.running[ci].clone().expect("thread atual");
+    if cur.is_idle {
+        drop(g);
+        return;
+    }
+    let was_enabled = guard.unlock_keep_irqs_disabled();
+    schedule_locked(g, State::Blocked);
+    if was_enabled {
+        // SAFETY: estado anterior ao bloqueio.
+        unsafe { cpu::enable_interrupts() };
+    }
+}
+
+/// Acorda a thread `id` se estiver bloqueada em `park_with`/`join`.
+pub fn unpark(id: ThreadId) {
+    cpu::without_interrupts(|| {
+        let mut g = SCHED.lock();
+        let Some(t) = g.all.iter().find(|t| t.id == id).cloned() else {
+            return;
+        };
+        // SAFETY: lock detido.
+        let blocked = unsafe { t.inner().state == State::Blocked };
+        if blocked {
+            // SAFETY: lock detido.
+            unsafe { t.inner().state = State::Ready };
+            g.run_queue.push(t);
+            kick_idle_cpu(&g);
+        }
+    });
+}
+
 /// `true` se a thread terminou ou nunca existiu.
 pub fn is_finished(id: ThreadId) -> bool {
     cpu::without_interrupts(|| {

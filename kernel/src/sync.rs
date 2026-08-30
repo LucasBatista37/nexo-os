@@ -67,6 +67,18 @@ impl<T> IrqLock<T> {
     }
 }
 
+impl<T> IrqGuard<'_, T> {
+    /// Solta o lock **sem** restaurar o estado de interrupções. Devolve se
+    /// elas estavam habilitadas ao adquirir, para o chamador restaurar depois.
+    pub fn unlock_keep_irqs_disabled(mut self) -> bool {
+        // SAFETY: solta o guard interno exatamente uma vez.
+        unsafe { ManuallyDrop::drop(&mut self.guard) };
+        let was = self.was_enabled;
+        core::mem::forget(self);
+        was
+    }
+}
+
 impl<T> Deref for IrqGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {

@@ -59,6 +59,8 @@ SCENARIOS = {
             r"\[TEST\] user_process .*ok",
             r"\[TEST\] user_isolation \.\.\. ok",
             r"\[TEST\] user_syscall_error \.\.\. ok",
+            r"\[TEST\] user_ipc \.\.\. ok",
+            r"\[pid \d+ init\] init: ipc ok",
             r"\[pid \d+ init\] init: ola do modo usuario",
             r"encerrado pelo kernel: falta de pagina em modo usuario",
             r"encerrado pelo kernel: protecao geral em modo usuario",

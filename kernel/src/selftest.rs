@@ -60,6 +60,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_process", test_user_process),
     ("user_isolation", test_user_isolation),
     ("user_syscall_error", test_user_syscall_error),
+    ("user_ipc", test_user_ipc),
     ("symbols", test_symbols),
 ];
 
@@ -929,6 +930,43 @@ fn test_user_syscall_error() -> TestResult {
         code == nexo_syscall_abi::Status::NotSupported as u64 as i64,
         "status recebido pelo usuario: {code}"
     );
+    Ok(())
+}
+
+fn test_user_ipc() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let elf = init_elf()?;
+    let ends0 = crate::ipc::live_channel_ends();
+    let sent0 = crate::ipc::messages_sent();
+    let (a, b) = ChannelEnd::create_pair();
+    let rights = Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT);
+    let ha = alloc::vec![Handle {
+        object: Object::Channel(a),
+        rights
+    }];
+    let hb = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights
+    }];
+    let server =
+        crate::process::spawn_elf_with_handles("init", elf, 5, ha).map_err(String::from)?;
+    let client =
+        crate::process::spawn_elf_with_handles("init", elf, 6, hb).map_err(String::from)?;
+    let (sp, cp) = (server.pid, client.pid);
+    drop((server, client));
+    let cc = crate::process::wait(cp).ok_or("wait cliente")?;
+    let sc = crate::process::wait(sp).ok_or("wait servidor")?;
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(sc == 0, "servidor saiu com {sc}");
+    let sent = crate::ipc::messages_sent() - sent0;
+    check!(sent >= 4, "mensagens: {sent}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(
+        ends == ends0,
+        "extremidades de canal vazaram: {ends0} -> {ends}"
+    );
+    check!(crate::process::count() == 0, "processos sobrando");
+    kprint!("({sent} mensagens) ");
     Ok(())
 }
 
