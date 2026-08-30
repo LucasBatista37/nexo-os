@@ -13,19 +13,21 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use nexo_arch_x86_64::cpu;
 use nexo_arch_x86_64::gdt::KERNEL_CODE_SELECTOR;
 use nexo_arch_x86_64::idt::InterruptDescriptorTable;
-use nexo_arch_x86_64::pic;
 use nexo_arch_x86_64::trap::{self, PageFaultError, TrapFrame, exception_name};
+
+use super::apic::vectors;
 use nexo_sync::SpinLock;
 
 use crate::cell::StaticCell;
 use crate::symbols::Symbolized;
 
-/// Vetor da IRQ0 após o remapeamento do PIC.
-pub const IRQ_BASE: u8 = 0x20;
-
 static IDT: StaticCell<InterruptDescriptorTable> = StaticCell::new(InterruptDescriptorTable::new());
 static BREAKPOINTS: AtomicU64 = AtomicU64::new(0);
 static EXCEPTIONS: AtomicU64 = AtomicU64::new(0);
+static IOAPIC_TEST_IRQS: AtomicU64 = AtomicU64::new(0);
+static IPIS: AtomicU64 = AtomicU64::new(0);
+static SPURIOUS: AtomicU64 = AtomicU64::new(0);
+static TIMER_IRQS: AtomicU64 = AtomicU64::new(0);
 
 /// Instala os 256 vetores e carrega a IDT.
 pub fn init() {
@@ -39,10 +41,32 @@ pub fn init() {
     // SAFETY: todos os handlers apontam para stubs válidos gerados em assembly.
     unsafe { (*IDT.as_ptr()).load() };
     kinfo!(
-        "idt: 256 vetores instalados; #DF em IST1; IRQs em {:#x}..{:#x}",
-        IRQ_BASE,
-        IRQ_BASE + 15
+        "idt: 256 vetores instalados; #DF em IST1; timer {:#x}, IPIs {:#x}..{:#x}, espuria {:#x}",
+        vectors::TIMER,
+        vectors::RESCHED,
+        vectors::TLB_FLUSH,
+        vectors::SPURIOUS
     );
+}
+
+/// Interrupções recebidas pela entrada de teste do I/O APIC.
+pub fn ioapic_test_count() -> u64 {
+    IOAPIC_TEST_IRQS.load(Ordering::Relaxed)
+}
+
+/// IPIs recebidas (RESCHED + TLB_FLUSH).
+pub fn ipi_count() -> u64 {
+    IPIS.load(Ordering::Relaxed)
+}
+
+/// Interrupções espúrias.
+pub fn spurious_count() -> u64 {
+    SPURIOUS.load(Ordering::Relaxed)
+}
+
+/// Interrupções do timer do LAPIC.
+pub fn timer_irq_count() -> u64 {
+    TIMER_IRQS.load(Ordering::Relaxed)
 }
 
 /// Número de `#BP` tratados.
@@ -65,27 +89,40 @@ fn handle_trap(frame: &mut TrapFrame) {
         }
         14 => page_fault(frame),
         8 => double_fault(frame),
-        v if (IRQ_BASE..IRQ_BASE + 16).contains(&v) => irq(v - IRQ_BASE),
+        vectors::TIMER => {
+            TIMER_IRQS.fetch_add(1, Ordering::Relaxed);
+            crate::time::tick();
+            super::apic::eoi();
+        }
+        vectors::IOAPIC_TEST => {
+            IOAPIC_TEST_IRQS.fetch_add(1, Ordering::Relaxed);
+            super::apic::eoi();
+        }
+        vectors::RESCHED => {
+            IPIS.fetch_add(1, Ordering::Relaxed);
+            super::apic::eoi();
+        }
+        vectors::TLB_FLUSH => {
+            IPIS.fetch_add(1, Ordering::Relaxed);
+            cpu::flush_tlb_all();
+            super::apic::eoi();
+        }
+        vectors::HALT => cpu::halt_forever(),
+        vectors::APIC_ERROR => {
+            kwarn!("apic: erro ESR={:#x}", super::apic::lapic().error_status());
+            super::apic::eoi();
+        }
+        vectors::SPURIOUS => {
+            SPURIOUS.fetch_add(1, Ordering::Relaxed);
+            // Espúria: sem EOI.
+        }
+        v if (vectors::PIC_BASE..vectors::PIC_BASE + 16).contains(&v) => {
+            // PIC está mascarado; qualquer coisa aqui é espúria (IRQ7/15).
+            SPURIOUS.fetch_add(1, Ordering::Relaxed);
+            kdebug!("irq legada {} do PIC ignorada", v - vectors::PIC_BASE);
+        }
         _ => fatal(frame, "excecao nao tratada"),
     }
-}
-
-fn irq(irq: u8) {
-    match irq {
-        0 => crate::time::tick(),
-        7 | 15 => {
-            // Possível IRQ espúria: sem EOI para o PIC mestre no caso 7.
-            kdebug!("irq {irq} (espuria?)");
-            if irq == 15 {
-                // SAFETY: EOI apenas no mestre (cascata).
-                unsafe { pic::end_of_interrupt(0) };
-            }
-            return;
-        }
-        _ => kwarn!("irq {irq} sem handler"),
-    }
-    // SAFETY: uma interrupção foi atendida.
-    unsafe { pic::end_of_interrupt(irq) };
 }
 
 fn page_fault(frame: &mut TrapFrame) {

@@ -15,7 +15,11 @@ pub mod paging;
 pub mod pit;
 
 #[cfg(target_arch = "x86_64")]
+pub mod apic;
+#[cfg(target_arch = "x86_64")]
 pub mod cpu;
+#[cfg(target_arch = "x86_64")]
+pub mod ioapic;
 #[cfg(target_arch = "x86_64")]
 pub mod pic;
 #[cfg(target_arch = "x86_64")]

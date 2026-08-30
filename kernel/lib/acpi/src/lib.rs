@@ -95,7 +95,12 @@ impl Rsdp {
             }
             xsdt_addr = u64_at(ext, 24).ok_or(AcpiError::BadLength)?;
         }
-        Ok(Rsdp { revision, rsdt_addr, xsdt_addr, oem_id })
+        Ok(Rsdp {
+            revision,
+            rsdt_addr,
+            xsdt_addr,
+            oem_id,
+        })
     }
 }
 
@@ -128,10 +133,12 @@ impl<'a> Table<'a> {
     pub fn parse(reader: &'a impl TableReader, phys: u64) -> Result<Table<'a>, AcpiError> {
         let h = reader.read(phys, 36).ok_or(AcpiError::Unreadable(phys))?;
         let length = u32_at(h, 4).ok_or(AcpiError::BadLength)?;
-        if length < 36 || length > 16 * 1024 * 1024 {
+        if !(36..=16 * 1024 * 1024).contains(&length) {
             return Err(AcpiError::BadLength);
         }
-        let bytes = reader.read(phys, length as usize).ok_or(AcpiError::Unreadable(phys))?;
+        let bytes = reader
+            .read(phys, length as usize)
+            .ok_or(AcpiError::Unreadable(phys))?;
         if !checksum_ok(bytes) {
             return Err(AcpiError::BadChecksum);
         }
@@ -139,7 +146,16 @@ impl<'a> Table<'a> {
         signature.copy_from_slice(&bytes[0..4]);
         let mut oem_id = [0u8; 6];
         oem_id.copy_from_slice(&bytes[10..16]);
-        Ok(Table { header: SdtHeader { signature, length, revision: bytes[8], oem_id }, phys, bytes })
+        Ok(Table {
+            header: SdtHeader {
+                signature,
+                length,
+                revision: bytes[8],
+                oem_id,
+            },
+            phys,
+            bytes,
+        })
     }
 
     /// Dados após o cabeçalho.
@@ -173,7 +189,10 @@ impl Iterator for RootTables<'_> {
 }
 
 /// Abre a XSDT (preferida) ou RSDT e devolve o iterador de tabelas.
-pub fn root_tables<'a>(reader: &'a impl TableReader, rsdp: &Rsdp) -> Result<RootTables<'a>, AcpiError> {
+pub fn root_tables<'a>(
+    reader: &'a impl TableReader,
+    rsdp: &Rsdp,
+) -> Result<RootTables<'a>, AcpiError> {
     let (phys, sig, width) = if rsdp.xsdt_addr != 0 {
         (rsdp.xsdt_addr, b"XSDT", 8)
     } else {
@@ -183,7 +202,11 @@ pub fn root_tables<'a>(reader: &'a impl TableReader, rsdp: &Rsdp) -> Result<Root
     if &t.header.signature != sig {
         return Err(AcpiError::BadSignature);
     }
-    Ok(RootTables { entries: t.payload(), width, pos: 0 })
+    Ok(RootTables {
+        entries: t.payload(),
+        width,
+        pos: 0,
+    })
 }
 
 /// Procura a tabela com `signature`.
@@ -289,12 +312,19 @@ impl<'a> Madt<'a> {
         let p = table.payload();
         let lapic_address = u32_at(p, 0).ok_or(AcpiError::BadLength)?;
         let flags = u32_at(p, 4).ok_or(AcpiError::BadLength)?;
-        Ok(Madt { lapic_address, flags, entries: &p[8..] })
+        Ok(Madt {
+            lapic_address,
+            flags,
+            entries: &p[8..],
+        })
     }
 
     /// Itera as entradas.
     pub fn entries(&self) -> MadtEntries<'a> {
-        MadtEntries { b: self.entries, pos: 0 }
+        MadtEntries {
+            b: self.entries,
+            pos: 0,
+        }
     }
 
     /// Endereço físico efetivo do LAPIC (considera override de 64 bits).
@@ -310,12 +340,16 @@ impl<'a> Madt<'a> {
     /// Processadores habilitados (LAPIC e x2APIC), como `(acpi_id, apic_id)`.
     pub fn enabled_cpus(&self) -> impl Iterator<Item = (u32, u32)> + 'a {
         self.entries().filter_map(|e| match e {
-            MadtEntry::LocalApic { acpi_id, apic_id, flags } if flags & 0b11 != 0 => {
-                Some((acpi_id as u32, apic_id as u32))
-            }
-            MadtEntry::LocalX2Apic { x2apic_id, flags, acpi_uid } if flags & 0b11 != 0 => {
-                Some((acpi_uid, x2apic_id))
-            }
+            MadtEntry::LocalApic {
+                acpi_id,
+                apic_id,
+                flags,
+            } if flags & 0b11 != 0 => Some((acpi_id as u32, apic_id as u32)),
+            MadtEntry::LocalX2Apic {
+                x2apic_id,
+                flags,
+                acpi_uid,
+            } if flags & 0b11 != 0 => Some((acpi_uid, x2apic_id)),
             _ => None,
         })
     }
@@ -324,9 +358,12 @@ impl<'a> Madt<'a> {
     pub fn isa_irq_to_gsi(&self, irq: u8) -> (u32, u16) {
         self.entries()
             .find_map(|e| match e {
-                MadtEntry::InterruptSourceOverride { bus: 0, source, gsi, flags } if source == irq => {
-                    Some((gsi, flags))
-                }
+                MadtEntry::InterruptSourceOverride {
+                    bus: 0,
+                    source,
+                    gsi,
+                    flags,
+                } if source == irq => Some((gsi, flags)),
                 _ => None,
             })
             .unwrap_or((irq as u32, 0))
@@ -374,13 +411,18 @@ impl Iterator for MadtEntries<'_> {
                 flags: u16_at(e, 3).unwrap_or(0),
                 lint: e[5],
             },
-            5 if len >= 12 => MadtEntry::LocalApicAddressOverride { address: u64_at(e, 4).unwrap_or(0) },
+            5 if len >= 12 => MadtEntry::LocalApicAddressOverride {
+                address: u64_at(e, 4).unwrap_or(0),
+            },
             9 if len >= 16 => MadtEntry::LocalX2Apic {
                 x2apic_id: u32_at(e, 4).unwrap_or(0),
                 flags: u32_at(e, 8).unwrap_or(0),
                 acpi_uid: u32_at(e, 12).unwrap_or(0),
             },
-            _ => MadtEntry::Other { kind, len: len as u8 },
+            _ => MadtEntry::Other {
+                kind,
+                len: len as u8,
+            },
         })
     }
 }
@@ -520,7 +562,10 @@ mod tests {
         assert_eq!(all, vec![0x3000, 0x4000, 0x5000]);
         let madt_t = find_table(&mem, &rsdp, b"APIC").unwrap();
         assert_eq!(madt_t.phys, 0x3000);
-        assert_eq!(find_table(&mem, &rsdp, b"FACP").unwrap_err(), AcpiError::NotFound);
+        assert_eq!(
+            find_table(&mem, &rsdp, b"FACP").unwrap_err(),
+            AcpiError::NotFound
+        );
     }
 
     #[test]
@@ -535,12 +580,29 @@ mod tests {
         let cpus: Vec<(u32, u32)> = m.enabled_cpus().collect();
         assert_eq!(cpus, vec![(0, 0), (1, 1), (7, 7)]);
         assert_eq!(m.entries().count(), 9);
-        assert!(matches!(m.entries().nth(3), Some(MadtEntry::IoApic { id: 0, address: 0xfec0_0000, gsi_base: 0 })));
+        assert!(matches!(
+            m.entries().nth(3),
+            Some(MadtEntry::IoApic {
+                id: 0,
+                address: 0xfec0_0000,
+                gsi_base: 0
+            })
+        ));
         assert_eq!(m.isa_irq_to_gsi(0), (2, 0));
         assert_eq!(m.isa_irq_to_gsi(9), (9, 0x0d));
         assert_eq!(m.isa_irq_to_gsi(4), (4, 0));
-        assert!(matches!(m.entries().nth(6), Some(MadtEntry::LocalApicNmi { acpi_id: 0xff, lint: 1, .. })));
-        assert!(matches!(m.entries().last(), Some(MadtEntry::Other { kind: 0x7f, len: 3 })));
+        assert!(matches!(
+            m.entries().nth(6),
+            Some(MadtEntry::LocalApicNmi {
+                acpi_id: 0xff,
+                lint: 1,
+                ..
+            })
+        ));
+        assert!(matches!(
+            m.entries().last(),
+            Some(MadtEntry::Other { kind: 0x7f, len: 3 })
+        ));
     }
 
     #[test]
@@ -560,10 +622,22 @@ mod tests {
         let (mut mem, rsdp_addr) = build();
         mem.data[0x1000 + 20] ^= 0xff; // corrompe a XSDT (fis 0x2000 = data[0x1000])
         let rsdp = Rsdp::parse(&mem, rsdp_addr).unwrap();
-        assert_eq!(root_tables(&mem, &rsdp).unwrap_err(), AcpiError::BadChecksum);
+        assert_eq!(
+            root_tables(&mem, &rsdp).unwrap_err(),
+            AcpiError::BadChecksum
+        );
         mem.data[0] = b'X';
-        assert_eq!(Rsdp::parse(&mem, rsdp_addr).unwrap_err(), AcpiError::BadSignature);
-        let empty = Mem { base: 0, data: vec![] };
-        assert_eq!(Rsdp::parse(&empty, 0).unwrap_err(), AcpiError::Unreadable(0));
+        assert_eq!(
+            Rsdp::parse(&mem, rsdp_addr).unwrap_err(),
+            AcpiError::BadSignature
+        );
+        let empty = Mem {
+            base: 0,
+            data: vec![],
+        };
+        assert_eq!(
+            Rsdp::parse(&empty, 0).unwrap_err(),
+            AcpiError::Unreadable(0)
+        );
     }
 }

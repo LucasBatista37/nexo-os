@@ -43,6 +43,11 @@ const TESTS: &[(&str, TestFn)] = &[
     ("heap", test_heap),
     ("heap_grow", test_heap_grow),
     ("timer", test_timer),
+    ("acpi", test_acpi),
+    ("apic_timer", test_apic_timer),
+    ("tsc_clock", test_tsc_clock),
+    ("ioapic", test_ioapic),
+    ("ipi_self", test_ipi_self),
     ("coop_tasks", test_coop_tasks),
     ("symbols", test_symbols),
 ];
@@ -99,11 +104,15 @@ fn report_memory() {
     );
     kprint!("[MAP] regioes_normalizadas={}\n", phys::regions().len());
     kprint!(
-        "[TIME] ticks={} uptime_ms={} excecoes={} trocas_de_contexto={}\n",
+        "[TIME] ticks={} uptime_ms={} monotonic_ms={} tsc_hz={} apic_timer_hz={} excecoes={} trocas_de_contexto={} espurias={}\n",
         crate::time::ticks(),
         crate::time::uptime_ms(),
+        crate::time::monotonic_ns() / 1_000_000,
+        crate::time::tsc_hz(),
+        crate::time::apic_timer_hz(),
         crate::x86::traps::exception_count(),
-        crate::task::switches()
+        crate::task::switches(),
+        crate::x86::traps::spurious_count()
     );
 }
 
@@ -397,14 +406,143 @@ fn test_heap_grow() -> TestResult {
 
 fn test_timer() -> TestResult {
     let t0 = crate::time::ticks();
+    let u0 = crate::time::uptime_ms();
     crate::time::sleep_ms(50);
     let t1 = crate::time::ticks();
-    check!(t1 >= t0 + 50, "timer lento: {t0} -> {t1}");
-    check!(t1 < t0 + 500, "timer rapido demais: {t0} -> {t1}");
+    let u1 = crate::time::uptime_ms();
+    check!(t1 > t0, "tick parado: {t0} -> {t1}");
+    check!(t1 <= t0 + 500, "tick rapido demais: {t0} -> {t1}");
+    check!(u1 >= u0 + 45, "sleep_ms(50) durou {} ms", u1 - u0);
     let tsc0 = cpu::rdtsc();
     crate::time::sleep_ms(10);
     check!(cpu::rdtsc() > tsc0, "TSC nao avanca");
     check!(crate::time::uptime_ms() >= 60, "uptime inconsistente");
+    Ok(())
+}
+
+fn test_acpi() -> TestResult {
+    let p = crate::acpi::info();
+    check!(!p.cpus().is_empty(), "nenhuma CPU");
+    check!(
+        p.cpus()[0].apic_id == p.bsp_apic_id,
+        "BSP nao e a primeira CPU"
+    );
+    let (msr_base, enabled, is_bsp) = nexo_arch_x86_64::apic::apic_base();
+    check!(
+        enabled && is_bsp,
+        "MSR APIC_BASE: enable={enabled} bsp={is_bsp}"
+    );
+    if p.lapic_phys != 0 {
+        check!(
+            p.lapic_phys == msr_base,
+            "LAPIC MADT {:#x} != MSR {:#x}",
+            p.lapic_phys,
+            msr_base
+        );
+    }
+    check!(
+        crate::x86::apic::lapic().id() == p.bsp_apic_id,
+        "LAPIC id difere do CPUID"
+    );
+    Ok(())
+}
+
+fn test_apic_timer() -> TestResult {
+    let hz = crate::time::apic_timer_hz();
+    check!(hz > 1_000_000, "timer LAPIC lento demais: {hz} Hz");
+    let irqs0 = crate::x86::traps::timer_irq_count();
+    let t0 = crate::time::ticks();
+    let c0 = crate::x86::apic::lapic().timer_current();
+    crate::time::sleep_ms(30);
+    let irqs1 = crate::x86::traps::timer_irq_count();
+    // Em TCG as expiracoes coalescem durante `hlt`: exige-se progresso, nao contagem exata.
+    check!(irqs1 > irqs0, "nenhuma interrupcao do timer em 30 ms");
+    check!(
+        irqs1 <= irqs0 + 300,
+        "interrupcoes demais em 30 ms: {}",
+        irqs1 - irqs0
+    );
+    check!(
+        crate::time::ticks() - t0 == irqs1 - irqs0,
+        "ticks != interrupcoes do timer"
+    );
+    let c1 = crate::x86::apic::lapic().timer_current();
+    check!(
+        c0 != c1 || c0 == 0,
+        "contagem do timer LAPIC parada em {c0}"
+    );
+    let sp = crate::x86::traps::spurious_count();
+    check!(sp == 0, "interrupcoes espurias: {sp}");
+    Ok(())
+}
+
+fn test_tsc_clock() -> TestResult {
+    let hz = crate::time::tsc_hz();
+    check!(hz > 10_000_000, "TSC calibrado em {hz} Hz");
+    let a = crate::time::monotonic_ns();
+    let b = crate::time::monotonic_ns();
+    check!(b >= a, "monotonic_ns retrocedeu: {a} -> {b}");
+    let t0 = crate::time::ticks();
+    let n0 = crate::time::monotonic_ns();
+    crate::time::sleep_ms(100);
+    let dt_ms = crate::time::ticks() - t0;
+    let dn_ms = (crate::time::monotonic_ns() - n0) / 1_000_000;
+    // Invariantes: o sleep durou >= 100 ms reais; ticks nunca correm mais que o tempo real.
+    check!(
+        (95..=2000).contains(&dn_ms),
+        "sleep_ms(100) durou {dn_ms} ms pelo TSC"
+    );
+    check!(
+        dt_ms <= dn_ms * 5 / 4 + 5,
+        "ticks ({dt_ms}) mais rapidos que o TSC ({dn_ms} ms)"
+    );
+    check!(dt_ms >= 1, "nenhum tick em {dn_ms} ms");
+    let d0 = crate::time::monotonic_ns();
+    crate::time::delay_us(2000);
+    let d = (crate::time::monotonic_ns() - d0) / 1000;
+    check!((1500..=20_000).contains(&d), "delay_us(2000) durou {d} us");
+    Ok(())
+}
+
+fn test_ioapic() -> TestResult {
+    check!(crate::x86::apic::ioapic_count() >= 1, "nenhum I/O APIC");
+    let bsp = crate::acpi::info().bsp_apic_id;
+    let before = crate::x86::traps::ioapic_test_count();
+    let gsi = crate::x86::apic::route_isa_irq(0, crate::x86::apic::vectors::IOAPIC_TEST, bsp)
+        .map_err(String::from)?;
+    // PIT canal 0 periodico a ~200 Hz -> IRQ0 -> GSI -> vetor de teste.
+    // SAFETY: o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC).
+    let div = unsafe { nexo_arch_x86_64::pit::configure_periodic(200) };
+    crate::time::sleep_ms(50);
+    crate::x86::apic::mask_gsi(gsi);
+    // SAFETY: encerra o canal 0.
+    unsafe { nexo_arch_x86_64::pit::channel0_stop() };
+    let got = crate::x86::traps::ioapic_test_count() - before;
+    check!(
+        got >= 5,
+        "PIT via I/O APIC (gsi {gsi}, divisor {div}): {got} interrupcoes em 50 ms"
+    );
+    crate::time::sleep_ms(10);
+    let late = crate::x86::traps::ioapic_test_count() - before - got;
+    check!(late <= 1, "{late} interrupcoes apos mascarar o GSI");
+    kprint!("(gsi {gsi}, {got} irqs) ");
+    Ok(())
+}
+
+fn test_ipi_self() -> TestResult {
+    let before = crate::x86::traps::ipi_count();
+    crate::x86::apic::lapic().send_ipi_self(crate::x86::apic::vectors::RESCHED);
+    crate::time::delay_us(500);
+    check!(
+        crate::x86::traps::ipi_count() == before + 1,
+        "IPI RESCHED para si nao chegou"
+    );
+    crate::x86::apic::lapic().send_ipi_self(crate::x86::apic::vectors::TLB_FLUSH);
+    crate::time::delay_us(500);
+    check!(
+        crate::x86::traps::ipi_count() == before + 2,
+        "IPI TLB_FLUSH para si nao chegou"
+    );
     Ok(())
 }
 

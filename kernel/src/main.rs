@@ -12,6 +12,7 @@ extern crate alloc;
 
 #[macro_use]
 mod klog;
+mod acpi;
 mod boot;
 mod cell;
 mod console;
@@ -53,6 +54,8 @@ fn kmain(bi: &'static BootInfo) -> ! {
     symbols::init();
     mm::init();
     console::init();
+    acpi::init();
+    x86::apic::init_bsp();
     time::init();
     task::init();
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());

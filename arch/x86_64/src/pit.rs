@@ -37,6 +37,63 @@ pub unsafe fn configure_periodic(hz: u32) -> u16 {
     d
 }
 
+/// Inicia uma contagem única no canal 2 (gate via porta 0x61), a partir de `count`.
+///
+/// # Safety
+/// Programa o PIT e a porta 0x61 (também controla o alto-falante).
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn channel2_one_shot(count: u16) {
+    use crate::cpu::{inb, outb};
+    // SAFETY: sequência documentada; alto-falante fica desligado (bit 1 = 0).
+    unsafe {
+        let gate = inb(0x61);
+        outb(0x61, (gate & !0x03) | 0x00);
+        outb(0x43, 0b1011_0000); // canal 2, lo/hi, modo 0, binário
+        outb(0x42, count as u8);
+        outb(0x42, (count >> 8) as u8);
+        outb(0x61, (gate & !0x02) | 0x01); // gate alto inicia a contagem
+    }
+}
+
+/// Lê a contagem atual do canal 2 (comando de latch).
+#[cfg(target_arch = "x86_64")]
+pub fn channel2_read() -> u16 {
+    use crate::cpu::{inb, outb};
+    // SAFETY: latch + duas leituras do canal 2.
+    unsafe {
+        outb(0x43, 0b1000_0000);
+        let lo = inb(0x42) as u16;
+        let hi = inb(0x42) as u16;
+        (hi << 8) | lo
+    }
+}
+
+/// Desliga o gate do canal 2.
+///
+/// # Safety
+/// Altera a porta 0x61.
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn channel2_stop() {
+    use crate::cpu::{inb, outb};
+    // SAFETY: apenas limpa os bits de gate/alto-falante.
+    unsafe { outb(0x61, inb(0x61) & !0x03) };
+}
+
+/// Para o canal 0 (modo 0 com contagem 0: uma única expiração e silêncio).
+///
+/// # Safety
+/// Reprograma o PIT.
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn channel0_stop() {
+    use crate::cpu::outb;
+    // SAFETY: sequência documentada do PIT.
+    unsafe {
+        outb(0x43, 0b0011_0000);
+        outb(0x40, 0);
+        outb(0x40, 0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
