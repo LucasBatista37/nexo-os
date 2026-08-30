@@ -39,6 +39,34 @@ pub enum Object {
     Channel(Arc<ChannelEnd>),
     /// Processo.
     Process(Arc<crate::process::Process>),
+    /// Concessão de acesso a dispositivos (PCI/MMIO/DMA/IRQ).
+    Device(Arc<DeviceGrant>),
+}
+
+/// Concessão de acesso a dispositivos. `all` = qualquer função PCI.
+pub struct DeviceGrant {
+    /// Acesso a todos os dispositivos.
+    pub all: bool,
+    /// Vetores de interrupção reservados por esta concessão (devolvidos no drop).
+    pub vectors: IrqLock<Vec<u8>>,
+}
+
+impl DeviceGrant {
+    /// Concessão total.
+    pub fn all() -> Self {
+        Self {
+            all: true,
+            vectors: IrqLock::new(Vec::new()),
+        }
+    }
+}
+
+impl Drop for DeviceGrant {
+    fn drop(&mut self) {
+        for v in self.vectors.lock().drain(..) {
+            crate::irq::free(v);
+        }
+    }
 }
 
 impl Object {
@@ -47,6 +75,7 @@ impl Object {
         match self {
             Object::Channel(_) => KIND_CHANNEL,
             Object::Process(_) => KIND_PROCESS,
+            Object::Device(_) => KIND_DEVICE,
         }
     }
 }

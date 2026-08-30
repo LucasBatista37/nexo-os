@@ -18,6 +18,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 
 - **Fuzzing e regras de IPC (bloco 4):** testes *fuzz-lite* determinísticos (mutação de entradas válidas) para os parsers de ELF, initrd, ACPI, símbolos/demangler e ABI de boot; modo 7 do `utest` bombardeia o kernel com 20 000 syscalls aleatórias (ponteiros nulos/do kernel/desalinhados, tamanhos absurdos, handles inválidos) — encontrou e corrigiu um `expect` em handles repetidos numa mensagem e um vazamento por ciclo de referência (mensagem carregando a ponta do próprio canal); agora enviar uma ponta pelo seu próprio canal é `InvalidArgs` e um coletor de pontas inalcançáveis roda ao terminar processos. `docs/spec/ipc-compat.md` (regras de compatibilidade de protocolos). `docs/ROADMAP_STATUS.md` gerado por `tools/roadmap-status` (`make roadmap`). 33 testes no boot.
 
+### Adicionado (Fase 3, bloco 1 — dispositivos)
+- Enumeração PCI (`kernel/src/pci.rs`, acesso `0xCF8/0xCFC` em `nexo-arch-x86_64::pci`): todas as funções do barramento 0 (multifunção), classe, IRQ legada e BARs com tamanho por sondagem (32/64 bits, E/S), registradas no boot e listadas no log.
+- Concessões de dispositivo como objetos com handle (`kind` 3, ADR-0015) e syscalls 17–23: `pci_enum`, `pci_cfg_read/write`, `mmio_map` (só dentro de BARs enumerados, sem cache), `dma_alloc` (página física zerada do processo), `irq_alloc`/`irq_wait` (vetores MSI 0x50–0x6f com contadores; devolvidos ao pool com a concessão). Estruturas `PciInfo`, `DmaBuffer`, `IrqInfo` em `abi/syscall`; wrappers em `sdk/nexo-sys`.
+- `services/blockdev`: driver VirtIO-block 1.x em modo usuário (capabilities PCI modernas, negociação de `VERSION_1`, fila dividida de 64 descritores, MSI-X na entrada 0, bus master); protocolo cru `nexo.block` v0 (ler/escrever até 7 setores por mensagem).
+- `utest` modo 8 (cliente de bloco): escreve/lê 4 setores, verifica marcador de persistência no setor 8 (grava no 1º boot, encontra no 2º), pedido fora da capacidade é recusado sem derrubar o driver.
+- `tools/run-qemu --disk` (padrão `build/data.img`, 16 MiB, criado se ausente; `--no-disk`) anexa `virtio-blk-pci` moderno; cenário `storage` do `test-qemu` roda dois boots com o mesmo disco novo e exige o marcador persistido; testes `pci` e `user_block` (verifica ≥ 1 interrupção MSI-X entregue e ausência de vazamento de quadros/canais/vetores). 35 testes no boot.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

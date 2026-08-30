@@ -84,6 +84,17 @@ impl AddressSpace {
         Ok(frame)
     }
 
+    /// Mapeia um quadro físico **não possuído** (MMIO) em `virt`, sem cache.
+    pub fn map_user_mmio(&self, virt: VirtAddr, phys: PhysAddr) -> Result<(), MapError> {
+        if virt.as_u64() >= USER_ADDRESS_LIMIT {
+            return Err(MapError::Unaligned(virt));
+        }
+        let mut alloc = Recording(&self.frames);
+        let flags =
+            PageFlags::KERNEL_RW | PageFlags::USER | PageFlags::NO_CACHE | PageFlags::WRITE_THROUGH;
+        self.mapper().map_4k(virt, phys, flags, &mut alloc)
+    }
+
     /// Endereço físico mapeado em `virt` (páginas de 4 KiB).
     pub fn translate(&self, virt: VirtAddr) -> Option<PhysAddr> {
         self.mapper().translate(virt).map(|t| t.phys)
@@ -147,6 +158,8 @@ pub struct Process {
     pub handles: IrqLock<crate::ipc::HandleTable>,
     /// Threads bloqueadas em `wait` sobre este processo.
     pub exit_waiters: IrqLock<Vec<crate::sched::ThreadId>>,
+    /// Próximo endereço livre na região de dispositivos (MMIO/DMA) do processo.
+    pub device_next: AtomicU64,
 }
 
 static TABLE: IrqLock<Vec<Arc<Process>>> = IrqLock::new(Vec::new());
@@ -256,6 +269,7 @@ pub fn spawn_elf_with_handles(
         kill_reason: IrqLock::new(None),
         handles: IrqLock::new(crate::ipc::HandleTable::new()),
         exit_waiters: IrqLock::new(Vec::new()),
+        device_next: AtomicU64::new(nexo_syscall_abi::USER_DEVICE_REGION),
     });
     {
         let mut table = process.handles.lock();
@@ -291,6 +305,14 @@ pub fn spawn_elf_with_handles(
         arg
     );
     Ok(process)
+}
+
+impl Process {
+    /// Reserva `len` bytes (múltiplo de página) na região de dispositivos; devolve a base.
+    pub fn reserve_device_region(&self, len: u64) -> u64 {
+        self.device_next
+            .fetch_add(align_up(len, PAGE_SIZE), Ordering::Relaxed)
+    }
 }
 
 /// Processo da thread atual, se houver.

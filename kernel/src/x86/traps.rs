@@ -135,6 +135,10 @@ fn handle_trap(frame: &mut TrapFrame) {
             cpu::flush_tlb_all();
             super::apic::eoi();
         }
+        v if crate::irq::is_user_vector(v) => {
+            super::apic::eoi();
+            crate::irq::on_interrupt(v);
+        }
         vectors::HALT => cpu::halt_forever(),
         vectors::APIC_ERROR => {
             kwarn!("apic: erro ESR={:#x}", super::apic::lapic().error_status());

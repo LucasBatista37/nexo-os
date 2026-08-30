@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `4b2d8d6`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `701afac`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 126 · 🟡 27 · ⬜ 382 · ⛔ 0 → **26% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 130 · 🟡 31 · ⬜ 374 · ⛔ 0 → **27% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -11,7 +11,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 | Fase 0 — Fundação e preparação (meses 0–6) | ✅ atendido | 13 | 2 | 0 | 93% | 0 (concluída) | gate F0 atendido em clone limpo; release 0.0.1-boot publicada |
 | Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 17 | 2 | 0 | 95% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
 | Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 7 | 7 | 4 | 58% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
-| Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | ⬜ não iniciado | 0 | 1 | 20 | 2% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
+| Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 em andamento | 4 | 5 | 12 | 31% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 0 | 0 | 19 | 0% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
 | Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
@@ -29,7 +29,7 @@ Estimativas assumem uma pessoa com 15–25 h/semana (Plano §13). Somando as fai
 | Fase 0 | clone limpo → um comando gera imagem que inicia em QEMU; CI comprova a mensagem do kernel | ✅ atendido | clone limpo + `make ci` verde (2026-08-29); `docs/releases/0.0.1-boot.md` |
 | Fase 1 | 24 h de stress em QEMU, múltiplas CPUs, memória isolada, exceções tratadas, zero falha inexplicada | 🟡 quase | 30 min de stress com 4 CPUs sem erros; faltam as 24 h (`make stress DURATION=86400`) |
 | Fase 2 | 3 processos isolados simultâneos; servidor reinicia sem reiniciar o kernel; acesso sem capability falha de forma testada | 🟡 quase | 4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado |
-| Fase 3 | arquivos sobre VirtIO block persistem; driver de armazenamento pode falhar sem corromper o kernel; cortes de energia simulados | ⬜ não iniciado |  |
+| Fase 3 | arquivos sobre VirtIO block persistem; driver de armazenamento pode falhar sem corromper o kernel; cortes de energia simulados | 🟡 em andamento | PCI enumerado; driver VirtIO-block em modo usuário com MSI-X e dados persistindo entre boots (`test-qemu --scenario storage`, 2026-08-30); faltam VFS/arquivos, cache de blocos, FAT, IOMMU e testes de corte de energia |
 | Fase 4 | DHCP, DNS, TLS; tráfego malformado não derruba outros serviços | ⬜ não iniciado |  |
 | Fase 5 | login, dois apps, janelas/Contextos, teclado e mouse, sessão reiniciada sem reiniciar o kernel | ⬜ não iniciado |  |
 | Fase 6 | desenvolvedor novo cria, empacota, instala, depura e atualiza um app só pela documentação | ⬜ não iniciado |  |
@@ -113,24 +113,24 @@ Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem re
 | 🟡 | fuzzar decodificador de IPC e syscalls | fuzz-lite determinístico dos parsers no host e fuzz de syscalls de um processo de usuário; fuzzing contínuo (cargo-fuzz/CI) pendente |
 | ⬜ | publicar release `0.2-userspace` |  |
 
-### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) — 2% (0 ✅, 1 🟡, 20 ⬜)
+### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) — 31% (4 ✅, 5 🟡, 12 ⬜)
 
-Gate: ⬜ não iniciado. 
+Gate: 🟡 em andamento. PCI enumerado; driver VirtIO-block em modo usuário com MSI-X e dados persistindo entre boots (`test-qemu --scenario storage`, 2026-08-30); faltam VFS/arquivos, cache de blocos, FAT, IOMMU e testes de corte de energia
 
 | | Item | Evidência / nota |
 |---|---|---|
-| ⬜ | implementar enumeração ACPI mínima |  |
-| ⬜ | implementar enumeração PCI/PCIe |  |
-| ⬜ | definir protocolo driver–device manager |  |
+| ✅ | implementar enumeração ACPI mínima | RSDP/XSDT/RSDT/MADT/HPET (`nexo-acpi`, Fase 1); tabelas de PCIe (MCFG) e AML ainda não |
+| ✅ | implementar enumeração PCI/PCIe | PCI convencional (config `0xCF8/0xCFC`, barramento 0, BARs por sondagem); PCIe/ECAM pendente |
+| 🟡 | definir protocolo driver–device manager | concessão de dispositivo como objeto transferível (ADR-0015); device manager e binding ainda não existem |
 | ⬜ | implementar binding por IDs e propriedades |  |
-| ⬜ | implementar VirtIO transport |  |
-| ⬜ | implementar VirtIO block |  |
+| 🟡 | implementar VirtIO transport | transporte PCI moderno (capabilities, fila dividida, MSI-X) implementado dentro do `blockdev`; ainda não é biblioteca compartilhada |
+| ✅ | implementar VirtIO block | `services/blockdev` em modo usuário; teste `user_block` + cenário `storage` |
 | ⬜ | implementar VirtIO input |  |
 | ⬜ | implementar VirtIO RNG |  |
 | ⬜ | implementar VirtIO console |  |
-| ⬜ | implementar drivers em processos isolados |  |
-| ⬜ | restringir MMIO, IRQ e DMA por capabilities |  |
-| ⬜ | criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro |  |
+| ✅ | implementar drivers em processos isolados | driver de bloco em ring 3 com handle de dispositivo; queda do driver não afeta o kernel |
+| 🟡 | restringir MMIO, IRQ e DMA por capabilities | syscalls 17–23 exigem handle de dispositivo com direitos; MMIO limitado a BARs; falta concessão por dispositivo (BDF) e IOMMU |
+| 🟡 | criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro | caminho sem IOMMU documentado como inseguro (ADR-0015); abstração IOMMU pendente |
 | ⬜ | implementar cache de blocos e fila assíncrona |  |
 | ⬜ | definir VFS e namespace por sessão/processo |  |
 | 🟡 | implementar `ramfs` | initramfs somente leitura (`NEXOIRD1`) com membros nomeados; `ramfs` gravável pendente |

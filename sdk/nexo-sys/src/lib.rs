@@ -249,3 +249,89 @@ pub fn process_info(h: Handle) -> Result<(u64, bool), Status> {
         Err(st)
     }
 }
+
+/// Lê uma estrutura `#[repr(C)]` preenchida pelo kernel.
+fn zeroed<T: Default>() -> T {
+    T::default()
+}
+
+/// Enumera funções PCI em `out`; devolve o total existente (pode ser maior que `out.len()`).
+pub fn pci_enum(dev: Handle, out: &mut [abi::PciInfo]) -> Result<usize, Status> {
+    // SAFETY: buffer válido e mutável; o kernel escreve no máximo `out.len()` entradas.
+    let (st, n) = unsafe {
+        raw(
+            abi::SYS_PCI_ENUM,
+            dev as u64,
+            out.as_mut_ptr() as u64,
+            out.len() as u64,
+        )
+    };
+    if st.is_ok() { Ok(n as usize) } else { Err(st) }
+}
+
+/// Lê 32 bits de configuração PCI.
+pub fn pci_cfg_read(dev: Handle, bdf: u16, offset: u16) -> Result<u32, Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_PCI_CFG_READ, dev as u64, bdf as u64, offset as u64) };
+    if st.is_ok() { Ok(v as u32) } else { Err(st) }
+}
+
+/// Escreve 32 bits de configuração PCI.
+pub fn pci_cfg_write(dev: Handle, bdf: u16, offset: u16, value: u32) -> Status {
+    // SAFETY: sem ponteiros.
+    unsafe {
+        raw5(
+            abi::SYS_PCI_CFG_WRITE,
+            dev as u64,
+            bdf as u64,
+            offset as u64,
+            value as u64,
+            0,
+        )
+        .0
+    }
+}
+
+/// Mapeia MMIO no processo; devolve o endereço virtual.
+pub fn mmio_map(dev: Handle, phys: u64, len: u64) -> Result<u64, Status> {
+    // SAFETY: sem ponteiros de usuário.
+    let (st, v) = unsafe { raw(abi::SYS_MMIO_MAP, dev as u64, phys, len) };
+    if st.is_ok() { Ok(v) } else { Err(st) }
+}
+
+/// Aloca uma página de DMA.
+pub fn dma_alloc(dev: Handle) -> Result<abi::DmaBuffer, Status> {
+    let mut b: abi::DmaBuffer = zeroed();
+    // SAFETY: `b` é uma estrutura válida e mutável.
+    let (st, _) = unsafe {
+        raw(
+            abi::SYS_DMA_ALLOC,
+            dev as u64,
+            &mut b as *mut abi::DmaBuffer as u64,
+            0,
+        )
+    };
+    if st.is_ok() { Ok(b) } else { Err(st) }
+}
+
+/// Reserva um vetor de interrupção (MSI/MSI-X).
+pub fn irq_alloc(dev: Handle) -> Result<abi::IrqInfo, Status> {
+    let mut i: abi::IrqInfo = zeroed();
+    // SAFETY: `i` é uma estrutura válida e mutável.
+    let (st, _) = unsafe {
+        raw(
+            abi::SYS_IRQ_ALLOC,
+            dev as u64,
+            &mut i as *mut abi::IrqInfo as u64,
+            0,
+        )
+    };
+    if st.is_ok() { Ok(i) } else { Err(st) }
+}
+
+/// Espera o vetor disparar mais de `seen` vezes; devolve a contagem atual.
+pub fn irq_wait(dev: Handle, vector: u32, seen: u64) -> Result<u64, Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_IRQ_WAIT, dev as u64, vector as u64, seen) };
+    if st.is_ok() { Ok(v) } else { Err(st) }
+}

@@ -10,10 +10,12 @@ use nexo_arch_x86_64::trap::TrapFrame;
 use nexo_mm::{PAGE_SIZE, VirtAddr};
 use nexo_syscall_abi::*;
 
-use crate::ipc::{ChannelEnd, Handle, Message, Object, Rights};
+use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Message, Object, Rights};
 use crate::process;
 use crate::sched;
 use crate::sync::IrqLock;
+use nexo_arch_x86_64::pci::Bdf;
+use nexo_mm::PhysAddr;
 
 static LAST_LOG: IrqLock<String> = IrqLock::new(String::new());
 static RESTART_LOGS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
@@ -266,6 +268,178 @@ fn sys_process_spawn(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     }
 }
 
+/// Obtém a concessão de dispositivo do handle `h` com o direito `right`.
+fn device_grant(p: &process::Process, h: u32, right: u32) -> Result<Arc<DeviceGrant>, Status> {
+    match p.handles.lock().get(h) {
+        Ok(Handle {
+            object: Object::Device(g),
+            rights,
+        }) => {
+            if !rights.contains(right) {
+                return Err(Status::Denied);
+            }
+            Ok(g)
+        }
+        Ok(_) => Err(Status::InvalidArgs),
+        Err(e) => Err(e),
+    }
+}
+
+fn sys_device(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
+    let n = f.rax;
+    let h = f.rdi as u32;
+    match n {
+        SYS_PCI_ENUM => {
+            if let Err(e) = device_grant(p, h, RIGHT_READ) {
+                return (e, 0);
+            }
+            let devs = crate::pci::devices();
+            let cap = (f.rdx as usize).min(devs.len());
+            let bytes: Vec<u8> = devs[..cap]
+                .iter()
+                .flat_map(|d| {
+                    // SAFETY: PciInfo é repr(C) sem padding interno relevante para leitura como bytes.
+                    unsafe {
+                        core::slice::from_raw_parts(
+                            d as *const PciInfo as *const u8,
+                            core::mem::size_of::<PciInfo>(),
+                        )
+                    }
+                    .iter()
+                    .copied()
+                })
+                .collect();
+            if let Err(e) = copy_to_user(f.rsi, &bytes) {
+                return (e, 0);
+            }
+            (Status::Ok, devs.len() as u64)
+        }
+        SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE => {
+            let right = if n == SYS_PCI_CFG_READ {
+                RIGHT_READ
+            } else {
+                RIGHT_WRITE
+            };
+            let g = match device_grant(p, h, right) {
+                Ok(g) => g,
+                Err(e) => return (e, 0),
+            };
+            let bdf = Bdf::from_packed(f.rsi as u16);
+            if f.rdx > 0xfc || !f.rdx.is_multiple_of(4) || !g.all {
+                return (Status::InvalidArgs, 0);
+            }
+            if n == SYS_PCI_CFG_READ {
+                (Status::Ok, crate::pci::cfg_read(bdf, f.rdx as u8) as u64)
+            } else {
+                crate::pci::cfg_write(bdf, f.rdx as u8, f.r10 as u32);
+                (Status::Ok, 0)
+            }
+        }
+        SYS_MMIO_MAP => {
+            if let Err(e) = device_grant(p, h, RIGHT_MAP) {
+                return (e, 0);
+            }
+            let (phys, len) = (f.rsi, f.rdx);
+            if len == 0 || len > 16 * 1024 * 1024 || !phys.is_multiple_of(PAGE_SIZE) {
+                return (Status::InvalidArgs, 0);
+            }
+            let len = nexo_mm::align_up(len, PAGE_SIZE);
+            if !crate::pci::is_mmio_range(phys, len) {
+                return (Status::Denied, 0);
+            }
+            let base = p.reserve_device_region(len);
+            let mut off = 0;
+            while off < len {
+                if p.space
+                    .map_user_mmio(VirtAddr::new(base + off), PhysAddr::new(phys + off))
+                    .is_err()
+                {
+                    return (Status::NoMemory, 0);
+                }
+                off += PAGE_SIZE;
+            }
+            (Status::Ok, base)
+        }
+        SYS_DMA_ALLOC => {
+            if let Err(e) = device_grant(p, h, RIGHT_MAP) {
+                return (e, 0);
+            }
+            let base = p.reserve_device_region(PAGE_SIZE);
+            let phys = match p
+                .space
+                .map_user_page(VirtAddr::new(base), PageFlags::KERNEL_RW)
+            {
+                Ok(ph) => ph,
+                Err(_) => return (Status::NoMemory, 0),
+            };
+            // SAFETY: quadro recem-alocado, visivel pelo physmap, ainda nao entregue ao usuario.
+            unsafe {
+                core::ptr::write_bytes(
+                    crate::mm::virt::phys_to_virt(phys).as_u64() as *mut u8,
+                    0,
+                    PAGE_SIZE as usize,
+                )
+            };
+            let b = DmaBuffer {
+                virt: base,
+                phys: phys.as_u64(),
+                len: PAGE_SIZE,
+            };
+            // SAFETY: DmaBuffer é repr(C) de inteiros.
+            let bytes = unsafe {
+                core::slice::from_raw_parts(
+                    &b as *const DmaBuffer as *const u8,
+                    core::mem::size_of::<DmaBuffer>(),
+                )
+            };
+            match copy_to_user(f.rsi, bytes) {
+                Ok(()) => (Status::Ok, base),
+                Err(e) => (e, 0),
+            }
+        }
+        SYS_IRQ_ALLOC => {
+            let g = match device_grant(p, h, RIGHT_SIGNAL) {
+                Ok(g) => g,
+                Err(e) => return (e, 0),
+            };
+            let Some(v) = crate::irq::alloc() else {
+                return (Status::NoMemory, 0);
+            };
+            g.vectors.lock().push(v);
+            let apic_id = crate::acpi::info().bsp_apic_id as u64;
+            let info = IrqInfo {
+                vector: v as u32,
+                reserved: 0,
+                msi_address: 0xfee0_0000 | (apic_id << 12),
+                msi_data: v as u32,
+                reserved2: 0,
+            };
+            // SAFETY: IrqInfo é repr(C) de inteiros.
+            let bytes = unsafe {
+                core::slice::from_raw_parts(
+                    &info as *const IrqInfo as *const u8,
+                    core::mem::size_of::<IrqInfo>(),
+                )
+            };
+            match copy_to_user(f.rsi, bytes) {
+                Ok(()) => (Status::Ok, v as u64),
+                Err(e) => (e, 0),
+            }
+        }
+        SYS_IRQ_WAIT => {
+            if let Err(e) = device_grant(p, h, RIGHT_SIGNAL) {
+                return (e, 0);
+            }
+            let v = f.rsi;
+            if v > 0xff || !crate::irq::is_user_vector(v as u8) {
+                return (Status::InvalidArgs, 0);
+            }
+            (Status::Ok, crate::irq::wait(v as u8, f.rdx))
+        }
+        _ => (Status::NotSupported, 0),
+    }
+}
+
 fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
     let Some(p) = process::current() else {
         return (Status::Denied, 0);
@@ -372,6 +546,8 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_CHANNEL_SEND => sys_channel_send(&p, f),
         SYS_CHANNEL_RECV => sys_channel_recv(&p, f),
         SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
+        SYS_PCI_ENUM | SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE | SYS_MMIO_MAP | SYS_DMA_ALLOC
+        | SYS_IRQ_ALLOC | SYS_IRQ_WAIT => sys_device(&p, f),
         SYS_PROCESS_WAIT => {
             let h = p.handles.lock().get(f.rdi as u32);
             match h {

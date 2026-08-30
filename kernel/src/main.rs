@@ -18,8 +18,10 @@ mod cell;
 mod console;
 mod initrd;
 mod ipc;
+mod irq;
 mod mm;
 mod panic;
+mod pci;
 mod process;
 mod sched;
 mod selftest;
@@ -75,6 +77,7 @@ fn kmain(bi: &'static BootInfo) -> ! {
     sched::init();
     timer::init();
     initrd::init();
+    pci::init();
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());
 
     let cmdline = boot::cmdline();

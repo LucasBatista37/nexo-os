@@ -40,6 +40,13 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 14 | `process_spawn` | name_ptr, name_len (≤ 32), arg, handles_ptr, n | handle do processo filho | `NotFound` (membro ausente no initrd), `Denied` (handle sem `TRANSFER`), `TooBig`, `BadAddress` |
 | 15 | `process_wait` | h | código de saída (i64) | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs` (não é processo / é o próprio) — bloqueia |
 | 16 | `process_info` | h | `pid \| (1 << 63 se terminou)` | `BadHandle`, `InvalidArgs` |
+| 17 | `pci_enum` | dev, buf, cap | nº total de funções PCI (copia até `cap` `PciInfo` em `buf`) | `BadHandle`, `Denied` (sem `READ`), `BadAddress` |
+| 18 | `pci_cfg_read` | dev, bdf, offset (múltiplo de 4, ≤ 0xfc) | valor de 32 bits | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs` |
+| 19 | `pci_cfg_write` | dev, bdf, offset, valor | 0 | `BadHandle`, `Denied` (sem `WRITE`), `InvalidArgs` |
+| 20 | `mmio_map` | dev, phys (alinhado a 4 KiB), len (≤ 16 MiB) | endereço virtual (região `0x6000_0000_0000`, sem cache) | `BadHandle`, `Denied` (sem `MAP`, ou faixa fora de um BAR MMIO enumerado), `InvalidArgs`, `NoMemory` |
+| 21 | `dma_alloc` | dev, out (`DmaBuffer`) | endereço virtual da página (4 KiB zerada, contígua, mapeada `RW`) | `BadHandle`, `Denied` (sem `MAP`), `NoMemory`, `BadAddress` |
+| 22 | `irq_alloc` | dev, out (`IrqInfo`) | vetor (0x50–0x6f) com endereço/dados MSI para a BSP | `BadHandle`, `Denied` (sem `SIGNAL`), `NoMemory` (pool esgotado), `BadAddress` |
+| 23 | `irq_wait` | dev, vetor, visto | contagem atual de disparos (bloqueia até `> visto`) | `BadHandle`, `Denied` (sem `SIGNAL`), `InvalidArgs` |
 
 Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` bloqueia a thread até haver mensagem ou o par fechar.
 
@@ -56,6 +63,10 @@ Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` b
 - Ao terminar, o processo fecha todos os handles; a última extremidade fechada de um canal libera o objeto; o par vê `PeerClosed`.
 - Mensagens pendentes podem carregar pontas de canal; se nenhum processo vivo alcança uma ponta (nem diretamente, nem por mensagens que ele poderia receber), o kernel a fecha ao término de um processo (coletor de ciclos). Fechar uma ponta descarta as mensagens que ela ainda não recebeu.
 
+## 3.1.1 Concessões de dispositivo (`kind` 3, ADR-0015)
+
+Um handle de dispositivo autoriza syscalls 17–23. Nesta versão existe só a concessão **total** (todas as funções PCI), criada pelo kernel para o driver ao iniciá-lo (o teste `user_block` entrega uma ao `blockdev`); direitos padrão `READ|WRITE|MAP|SIGNAL|TRANSFER|DUPLICATE`. Restrições: `mmio_map` só aceita faixas dentro de BARs MMIO enumerados; DMA é uma página física por chamada, zerada, pertencente ao processo (liberada com ele) — **sem IOMMU**, o dispositivo pode escrever em qualquer endereço físico que o driver lhe indicar (caminho inseguro documentado no ADR-0015); vetores de IRQ são devolvidos ao pool quando a concessão é destruída. Estruturas `repr(C)` em `abi/syscall`: `PciInfo` (168 B: BDF, IDs, classe, IRQ legada, 6 `PciBar` com base/tamanho/flags), `DmaBuffer` (virt, phys, len), `IrqInfo` (vetor, endereço e dados MSI).
+
 ## 3.2 Canais (ADR-0005)
 
 Mensagem = até 4096 bytes + até 8 handles; fila de 64 por extremidade. Sem cabeçalho/protocolo tipado ainda (IDL e versionamento de protocolo vêm no próximo bloco). O kernel copia os bytes para memória própria no `send` e para o usuário no `recv`.
@@ -70,4 +81,4 @@ Todo ponteiro de usuário é validado antes do acesso: faixa `[ptr, ptr+len)` ab
 - Uma thread por processo; `RDI` na entrada carrega um argumento inteiro.
 - Falha em modo usuário (`#PF`, `#GP`, `#UD`…) encerra apenas o processo com código `-1` e motivo registrado no log; o kernel continua.
 - Handles com direitos, canais com transferência de handles e processos como objetos (spawn por nome do initrd, wait, info) existem (§3.1–3.2, syscalls 14–16); memória compartilhada, jobs/domínios, eventos/espera múltipla e timers de usuário vêm nos próximos blocos.
-- Programas: o initrd (`kernel/lib/initrd`, formato `NEXOIRD1`, gerado por `tools/mkinitrd.py`) contém `init`, `svcmgr`, `echo`, `echo-client` e `utest`. `init` inicia `svcmgr`; `svcmgr` supervisiona `echo` (reinício até 3 vezes) e atende pedidos de conexão de `echo-client` entregando um canal por pedido.
+- Programas: o initrd (`kernel/lib/initrd`, formato `NEXOIRD1`, gerado por `tools/mkinitrd.py`) contém `init`, `svcmgr`, `echo`, `echo-client`, `utest` e `blockdev` (driver VirtIO-block em modo usuário). `init` inicia `svcmgr`; `svcmgr` supervisiona `echo` (reinício até 3 vezes) e atende pedidos de conexão de `echo-client` entregando um canal por pedido.

@@ -40,8 +40,9 @@ GATES = {
     "Fase 0": ("✅ atendido", "clone limpo + `make ci` verde (2026-08-29); `docs/releases/0.0.1-boot.md`"),
     "Fase 1": ("🟡 quase", "30 min de stress com 4 CPUs sem erros; faltam as 24 h (`make stress DURATION=86400`)"),
     "Fase 2": ("🟡 quase", "4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado"),
+    "Fase 3": ("🟡 em andamento", "PCI enumerado; driver VirtIO-block em modo usuário com MSI-X e dados persistindo entre boots (`test-qemu --scenario storage`, 2026-08-30); faltam VFS/arquivos, cache de blocos, FAT, IOMMU e testes de corte de energia"),
 }
-for k in ["Fase 3", "Fase 4", "Fase 5", "Fase 6", "Fase 7", "Fase 8", "Fase 9", "Fase 10"]:
+for k in ["Fase 4", "Fase 5", "Fase 6", "Fase 7", "Fase 8", "Fase 9", "Fase 10"]:
     GATES[k] = ("⬜ não iniciado", "")
 
 ITEM_RE = re.compile(r"^- \[([x\- !])\] (.*?)(?: — \*(.*?)\*)?[;.]?\s*$")

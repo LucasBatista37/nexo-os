@@ -64,6 +64,13 @@ SCENARIOS = {
             r"\[pid \d+ utest\] utest: ola do modo usuario",
             r"\[TEST\] user_services .*ok",
             r"\[TEST\] user_syscall_fuzz .*ok",
+            r"pci: \d+ funcao\(oes\):",
+            r"pci:   00:\d\d\.\d 1af4:10(01|42) classe 01\.00\.00 .*virtio",
+            r"\[TEST\] pci \.\.\. ok",
+            r"blockdev: virtio-blk 1af4:10(01|42) bdf 0x[0-9a-f]+ capacidade 32768 setores, fila \d+, MSI-X",
+            r"utest: bloco ok",
+            r"irq: [1-9]\d* interrupcao\(oes\) MSI-X entregue\(s\) ao driver de bloco",
+            r"\[TEST\] user_block \.\.\. ok",
             r"utest: fuzz terminou: ok=\d+ erros=\d+",
             r"svcmgr: echo \(pid \d+\) caiu com -1; reiniciando \(1/3\)",
             r"echo-client: 8 respostas ok, \d+ falhas",
@@ -76,6 +83,24 @@ SCENARIOS = {
             r"NEXO: boot completo",
         ],
         "forbid": [r"FAIL", r"KERNEL PANIC", r"EXCEPTION"],
+    },
+    "storage": {
+        # Executado duas vezes com o mesmo disco novo: o 1o boot grava o marcador, o 2o encontra.
+        "cmdline": "exit",
+        "exit_code": 33,
+        "runs": 2,
+        "fresh_disk": True,
+        "expect": [
+            r"\[TEST\] user_block \.\.\. ok",
+            r"utest: marcador de persistencia gravado",
+            r"NEXO: boot completo",
+        ],
+        "expect_run2": [
+            r"\[TEST\] user_block \.\.\. ok",
+            r"utest: bloco persistente encontrado \(boot anterior\)",
+            r"NEXO: boot completo",
+        ],
+        "forbid": [r"FAIL", r"KERNEL PANIC", r"EXCEPTION", r"blockdev: falha"],
     },
     "stress": {
         "cmdline": "selftest=0 stress=15 exit",
@@ -131,22 +156,28 @@ def run_scenario(name: str, timeout: float) -> bool:
     logfile.parent.mkdir(parents=True, exist_ok=True)
     run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline", sc["cmdline"], "--out", image],
         stdout=subprocess.DEVNULL)
-    log(f"=== cenario '{name}' (cmdline: {sc['cmdline']!r}) ===")
-    rc = subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
-                          "--timeout", str(timeout), "--log", logfile])
-    text = logfile.read_bytes().decode("utf-8", errors="replace")
+    disk = BUILD / f"nexo-{name}-data.img"
+    if sc.get("fresh_disk") and disk.exists():
+        disk.unlink()
     ok = True
-    if rc != sc["exit_code"]:
-        log(f"FALHA: codigo de saida {rc}, esperado {sc['exit_code']}")
-        ok = False
-    for pat in sc["expect"]:
-        if not re.search(pat, text):
-            log(f"FALHA: marcador ausente: /{pat}/")
+    for run_no in range(1, sc.get("runs", 1) + 1):
+        log(f"=== cenario '{name}' (cmdline: {sc['cmdline']!r}, execucao {run_no}) ===")
+        run_log = logfile if run_no == 1 else logfile.with_suffix(f".{run_no}.log")
+        rc = subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
+                              "--disk", disk, "--timeout", str(timeout), "--log", run_log])
+        text = run_log.read_bytes().decode("utf-8", errors="replace")
+        if rc != sc["exit_code"]:
+            log(f"FALHA: codigo de saida {rc}, esperado {sc['exit_code']}")
             ok = False
-    for pat in sc["forbid"]:
-        if re.search(pat, text):
-            log(f"FALHA: marcador proibido presente: /{pat}/")
-            ok = False
+        expect = sc.get(f"expect_run{run_no}", sc["expect"])
+        for pat in expect:
+            if not re.search(pat, text):
+                log(f"FALHA: marcador ausente: /{pat}/")
+                ok = False
+        for pat in sc["forbid"]:
+            if re.search(pat, text):
+                log(f"FALHA: marcador proibido presente: /{pat}/")
+                ok = False
     log(f"=== cenario '{name}': {'PASS' if ok else 'FAIL'} (log: {logfile}) ===")
     return ok
 

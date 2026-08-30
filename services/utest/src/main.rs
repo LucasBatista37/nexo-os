@@ -49,6 +49,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         5 => ipc_server(),
         6 => ipc_client(),
         7 => syscall_fuzz(),
+        8 => block_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -302,5 +303,91 @@ fn syscall_fuzz() -> ! {
         errs,
         nexo_sys::debug_info(3)
     );
+    nexo_sys::exit(0)
+}
+
+/// Modo 8: cliente do `blockdev` (handle 0 = canal): escreve e le setores, e
+/// verifica/grava um marcador de persistencia no setor 8.
+fn block_client() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let mut req = [0u8; 4096];
+    let mut reply = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    fn header(req: &mut [u8], op: u8, sector: u64, count: u32) {
+        req[0] = op;
+        req[1..4].copy_from_slice(&[0, 0, 0]);
+        req[4..12].copy_from_slice(&sector.to_le_bytes());
+        req[12..16].copy_from_slice(&count.to_le_bytes());
+    }
+    // 1. Escreve padrao nos setores 0..4 (2048 bytes) em um pedido.
+    header(&mut req, 1, 0, 4);
+    for i in 0..2048usize {
+        req[16 + i] = (i as u8) ^ 0x5a ^ ((i / 512) as u8);
+    }
+    if nexo_sys::channel_send(ch, &req[..16 + 2048], &[]) != Status::Ok {
+        nexo_sys::exit(110);
+    }
+    match nexo_sys::channel_recv(ch, &mut reply, &mut hs) {
+        Ok((1, _)) if reply[0] == 0 => {}
+        Ok((n, _)) => {
+            nexo_rt::log!("utest: escrita falhou: status {} ({} bytes)", reply[0], n);
+            nexo_sys::exit(111)
+        }
+        Err(_) => nexo_sys::exit(112),
+    }
+    // 2. Le de volta e compara.
+    header(&mut req, 0, 0, 4);
+    if nexo_sys::channel_send(ch, &req[..16], &[]) != Status::Ok {
+        nexo_sys::exit(113);
+    }
+    match nexo_sys::channel_recv(ch, &mut reply, &mut hs) {
+        Ok((n, _)) if n == 1 + 2048 && reply[0] == 0 => {}
+        Ok((n, _)) => {
+            nexo_rt::log!("utest: leitura falhou: status {} ({} bytes)", reply[0], n);
+            nexo_sys::exit(114)
+        }
+        Err(_) => nexo_sys::exit(115),
+    }
+    for i in 0..2048usize {
+        if reply[1 + i] != (i as u8) ^ 0x5a ^ ((i / 512) as u8) {
+            nexo_rt::log!("utest: dado divergente no byte {}", i);
+            nexo_sys::exit(116);
+        }
+    }
+    // 3. Marcador de persistencia no setor 8.
+    header(&mut req, 0, 8, 1);
+    if nexo_sys::channel_send(ch, &req[..16], &[]) != Status::Ok {
+        nexo_sys::exit(117);
+    }
+    let marker = b"NEXO-PERSIST-v1";
+    match nexo_sys::channel_recv(ch, &mut reply, &mut hs) {
+        Ok((n, _)) if n == 1 + 512 && reply[0] == 0 => {
+            if reply[1..1 + marker.len()] == marker[..] {
+                nexo_sys::log("utest: bloco persistente encontrado (boot anterior)");
+            } else {
+                header(&mut req, 1, 8, 1);
+                req[16..16 + 512].fill(0);
+                req[16..16 + marker.len()].copy_from_slice(marker);
+                if nexo_sys::channel_send(ch, &req[..16 + 512], &[]) != Status::Ok {
+                    nexo_sys::exit(118);
+                }
+                match nexo_sys::channel_recv(ch, &mut reply, &mut hs) {
+                    Ok((1, _)) if reply[0] == 0 => {
+                        nexo_sys::log("utest: marcador de persistencia gravado");
+                    }
+                    _ => nexo_sys::exit(119),
+                }
+            }
+        }
+        _ => nexo_sys::exit(120),
+    }
+    // 4. Pedido invalido (alem da capacidade) deve ser recusado, nao derrubar o driver.
+    header(&mut req, 0, u64::MAX / 2, 1);
+    let _ = nexo_sys::channel_send(ch, &req[..16], &[]);
+    match nexo_sys::channel_recv(ch, &mut reply, &mut hs) {
+        Ok((1, _)) if reply[0] == 2 => {}
+        _ => nexo_sys::exit(121),
+    }
+    nexo_sys::log("utest: bloco ok");
     nexo_sys::exit(0)
 }

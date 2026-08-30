@@ -5,3 +5,4 @@
 *.img
 *.log
 .DS_Store
+/services/target/

@@ -1,4 +1,4 @@
-# Inventário de `unsafe` — `main` (Fases 1–2)
+# Inventário de `unsafe` — `main` (Fases 1–3)
 
 Regra (ADR-0001): todo bloco tem `// SAFETY:`; crates puros são `deny(unsafe_code)`. Este inventário lista as **classes** de uso por crate para revisão a cada release.
 
@@ -10,12 +10,12 @@ Contagem em 2026-08-30 (`grep -rhoE 'unsafe( \{| fn| impl| extern)' --include='*
 | `nexo-mm`, `nexo-symbols`, `nexo-font`, `nexo-acpi`, `nexo-elf`, `nexo-initrd`, `nexo-syscall-abi` | 0 | — |
 | `nexo-sync` | 9 | 8 |
 | `nexo-heap` | 30 | 27 |
-| `nexo-arch-x86_64` | 112 | 73 |
+| `nexo-arch-x86_64` | 120 | 78 |
 | `nexo-loader` | 15 | 14 |
-| `nexo-kernel` | 114 | 105 |
-| `nexo-sys + nexo-rt` | 23 | 19 |
-| `services/*` | 7 | 7 |
-| **total** | **311** | **253** |
+| `nexo-kernel` | 120 | 111 |
+| `nexo-sys + nexo-rt` | 30 | 26 |
+| `services/*` | 22 | 17 (o `blockdev` concentra os acessos MMIO/DMA: um comentário `SAFETY` por método de `Mmio`) |
+| **total** | **347** | **281** |
 
 Atualize junto com o código.
 

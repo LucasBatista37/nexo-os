@@ -46,5 +46,6 @@ Decodificadores rejeitam (sem efeitos) magic, `protocol_id`, `version_major` ou 
 | `echo-client` → `svcmgr` | `connect` · resposta `ok`+handle ou `retry` | substituído por protocolo tipado `nexo.svcmgr` |
 | `svcmgr` → `echo` | `serve`+handle | idem `nexo.service` |
 | cliente → `echo` | texto livre · resposta `echo: <texto>` | exemplo; não faz parte da ABI |
+| cliente → `blockdev` (`nexo.block` v0) | pedido `[op u8][pad 3][setor u64][n u32][dados n×512 se escrita]`, `op` 0 = ler, 1 = escrever, `n` ≤ 7 · resposta `[status u8][dados n×512 se leitura]`; status 0 ok, 1 pedido curto, 2 fora da capacidade/`n` inválido, 3 dados insuficientes, `0x1x` erro do dispositivo | um canal por cliente (handle 1 do driver); substituído por `nexo.block` tipado |
 
 Esses formatos são explicitamente **não estáveis** e existem só para o bring-up.

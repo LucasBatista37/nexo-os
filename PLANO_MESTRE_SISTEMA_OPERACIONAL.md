@@ -443,18 +443,18 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 **Resultado:** sistema persistente com drivers isolados, VFS e recuperação de falhas.
 
-- [ ] implementar enumeração ACPI mínima;
-- [ ] implementar enumeração PCI/PCIe;
-- [ ] definir protocolo driver–device manager;
+- [x] implementar enumeração ACPI mínima — *RSDP/XSDT/RSDT/MADT/HPET (`nexo-acpi`, Fase 1); tabelas de PCIe (MCFG) e AML ainda não*;
+- [x] implementar enumeração PCI/PCIe — *PCI convencional (config `0xCF8/0xCFC`, barramento 0, BARs por sondagem); PCIe/ECAM pendente*;
+- [-] definir protocolo driver–device manager — *concessão de dispositivo como objeto transferível (ADR-0015); device manager e binding ainda não existem*;
 - [ ] implementar binding por IDs e propriedades;
-- [ ] implementar VirtIO transport;
-- [ ] implementar VirtIO block;
+- [-] implementar VirtIO transport — *transporte PCI moderno (capabilities, fila dividida, MSI-X) implementado dentro do `blockdev`; ainda não é biblioteca compartilhada*;
+- [x] implementar VirtIO block — *`services/blockdev` em modo usuário; teste `user_block` + cenário `storage`*;
 - [ ] implementar VirtIO input;
 - [ ] implementar VirtIO RNG;
 - [ ] implementar VirtIO console;
-- [ ] implementar drivers em processos isolados;
-- [ ] restringir MMIO, IRQ e DMA por capabilities;
-- [ ] criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro;
+- [x] implementar drivers em processos isolados — *driver de bloco em ring 3 com handle de dispositivo; queda do driver não afeta o kernel*;
+- [-] restringir MMIO, IRQ e DMA por capabilities — *syscalls 17–23 exigem handle de dispositivo com direitos; MMIO limitado a BARs; falta concessão por dispositivo (BDF) e IOMMU*;
+- [-] criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro — *caminho sem IOMMU documentado como inseguro (ADR-0015); abstração IOMMU pendente*;
 - [ ] implementar cache de blocos e fila assíncrona;
 - [ ] definir VFS e namespace por sessão/processo;
 - [-] implementar `ramfs` — *initramfs somente leitura (`NEXOIRD1`) com membros nomeados; `ramfs` gravável pendente*;

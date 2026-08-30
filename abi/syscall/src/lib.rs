@@ -45,8 +45,114 @@ pub const SYS_PROCESS_SPAWN: u64 = 14;
 pub const SYS_PROCESS_WAIT: u64 = 15;
 /// Informação do processo do handle `a0`: `RDX` = `pid | (1 << 63 se terminou)`.
 pub const SYS_PROCESS_INFO: u64 = 16;
+/// Dispositivos (exigem handle de dispositivo `a0` com os direitos indicados):
+/// copia até `a2` [`PciInfo`] para `a1`; `RDX` = total de funções PCI. (`READ`)
+pub const SYS_PCI_ENUM: u64 = 17;
+/// Lê 32 bits do espaço de configuração PCI de `a1` (BDF compacto) no offset `a2`. (`READ`)
+pub const SYS_PCI_CFG_READ: u64 = 18;
+/// Escreve `a3` (32 bits) no espaço de configuração de `a1` no offset `a2`. (`WRITE`)
+pub const SYS_PCI_CFG_WRITE: u64 = 19;
+/// Mapeia MMIO `[a1, a1+a2)` (dentro de um BAR conhecido) no processo; `RDX` = endereço virtual. (`MAP`)
+pub const SYS_MMIO_MAP: u64 = 20;
+/// Aloca uma página de DMA (4 KiB, zerada); escreve [`DmaBuffer`] em `a1`. (`MAP`)
+pub const SYS_DMA_ALLOC: u64 = 21;
+/// Reserva um vetor de interrupção para MSI/MSI-X; escreve [`IrqInfo`] em `a1`. (`SIGNAL`)
+pub const SYS_IRQ_ALLOC: u64 = 22;
+/// Bloqueia até o vetor `a1` ter disparado mais de `a2` vezes; `RDX` = contagem atual. (`SIGNAL`)
+pub const SYS_IRQ_WAIT: u64 = 23;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 16;
+pub const SYS_MAX: u64 = 23;
+
+/// Tipo de objeto: concessão de acesso a dispositivos.
+pub const KIND_DEVICE: u32 = 3;
+/// Direitos padrão de uma concessão de dispositivo.
+pub const RIGHTS_DEVICE_DEFAULT: u32 =
+    RIGHT_READ | RIGHT_WRITE | RIGHT_MAP | RIGHT_SIGNAL | RIGHT_TRANSFER | RIGHT_DUPLICATE;
+/// Base da região de usuário onde o kernel mapeia MMIO e páginas de DMA.
+pub const USER_DEVICE_REGION: u64 = 0x0000_6000_0000_0000;
+/// Máximo de BARs por função PCI.
+pub const PCI_BARS: usize = 6;
+
+/// Um BAR PCI decodificado.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PciBar {
+    /// Endereço físico (MMIO) ou porta (E/S).
+    pub base: u64,
+    /// Tamanho em bytes (0 = ausente).
+    pub size: u64,
+    /// Bit 0: espaço de E/S; bit 1: 64 bits; bit 2: prefetchable.
+    pub flags: u32,
+    /// Reservado.
+    pub reserved: u32,
+}
+
+/// Uma função PCI (64 + 6×24 bytes).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PciInfo {
+    /// BDF compacto (`bus << 8 | dev << 3 | func`).
+    pub bdf: u16,
+    /// Vendor ID.
+    pub vendor: u16,
+    /// Device ID.
+    pub device: u16,
+    /// Revisão.
+    pub revision: u8,
+    /// Tipo de cabeçalho (bit 7 = multifunção).
+    pub header_type: u8,
+    /// Classe.
+    pub class: u8,
+    /// Subclasse.
+    pub subclass: u8,
+    /// Interface de programação.
+    pub prog_if: u8,
+    /// Linha de IRQ legada.
+    pub irq_line: u8,
+    /// Pino de IRQ (1 = INTA#).
+    pub irq_pin: u8,
+    /// Reservado.
+    pub reserved: [u8; 3],
+    /// Subsystem vendor/device.
+    pub subsystem: u32,
+    /// BARs.
+    pub bars: [PciBar; PCI_BARS],
+}
+
+impl PciInfo {
+    /// `true` se é um dispositivo VirtIO (vendor 0x1AF4).
+    pub const fn is_virtio(&self) -> bool {
+        self.vendor == 0x1af4
+    }
+}
+
+/// Página de DMA devolvida por [`SYS_DMA_ALLOC`].
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DmaBuffer {
+    /// Endereço virtual no processo.
+    pub virt: u64,
+    /// Endereço físico (para o dispositivo).
+    pub phys: u64,
+    /// Tamanho em bytes.
+    pub len: u64,
+}
+
+/// Vetor de interrupção reservado por [`SYS_IRQ_ALLOC`].
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IrqInfo {
+    /// Vetor.
+    pub vector: u32,
+    /// Reservado.
+    pub reserved: u32,
+    /// Endereço de mensagem MSI (`0xFEE0_0000 | apic_id << 12`).
+    pub msi_address: u64,
+    /// Dados de mensagem MSI (vetor).
+    pub msi_data: u32,
+    /// Reservado.
+    pub reserved2: u32,
+}
 
 /// Tamanho máximo de uma mensagem de canal.
 pub const MSG_MAX: usize = 4096;
@@ -189,6 +295,13 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_PROCESS_SPAWN => "process_spawn",
         SYS_PROCESS_WAIT => "process_wait",
         SYS_PROCESS_INFO => "process_info",
+        SYS_PCI_ENUM => "pci_enum",
+        SYS_PCI_CFG_READ => "pci_cfg_read",
+        SYS_PCI_CFG_WRITE => "pci_cfg_write",
+        SYS_MMIO_MAP => "mmio_map",
+        SYS_DMA_ALLOC => "dma_alloc",
+        SYS_IRQ_ALLOC => "irq_alloc",
+        SYS_IRQ_WAIT => "irq_wait",
         _ => "?",
     }
 }
@@ -218,5 +331,8 @@ mod tests {
         assert!(Status::Ok.is_ok());
         assert_eq!(syscall_name(SYS_LOG), "log");
         assert_eq!(syscall_name(SYS_MAX + 1), "?");
+        assert_eq!(core::mem::size_of::<PciInfo>(), 24 + 24 * PCI_BARS);
+        assert_eq!(core::mem::size_of::<DmaBuffer>(), 24);
+        assert_eq!(core::mem::size_of::<IrqInfo>(), 24);
     }
 }

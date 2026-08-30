@@ -1,2 +1,0 @@
-cargo:rustc-link-arg=-T/Users/lucaspereirabatista/Downloads/SistemaOperacional/services/linker.ld
-cargo:rerun-if-changed=/Users/lucaspereirabatista/Downloads/SistemaOperacional/services/linker.ld

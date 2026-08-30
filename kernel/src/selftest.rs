@@ -5,6 +5,7 @@
 
 use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use nexo_arch_x86_64::cpu;
@@ -63,6 +64,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_ipc", test_user_ipc),
     ("user_services", test_user_services),
     ("user_syscall_fuzz", test_user_syscall_fuzz),
+    ("pci", test_pci),
+    ("user_block", test_user_block),
     ("symbols", test_symbols),
 ];
 
@@ -1110,6 +1113,118 @@ fn test_timers() -> TestResult {
         crate::timer::fired_total()
     );
     let _ = (a, b, c);
+    Ok(())
+}
+
+fn test_pci() -> TestResult {
+    let devs = crate::pci::devices();
+    check!(!devs.is_empty(), "nenhuma funcao PCI enumerada");
+    check!(
+        devs.iter().any(|d| d.class == 0x06 && d.subclass == 0x00),
+        "host bridge ausente"
+    );
+    let virtio: alloc::vec::Vec<_> = devs.iter().filter(|d| d.is_virtio()).collect();
+    check!(
+        !virtio.is_empty(),
+        "nenhum dispositivo virtio (rode com o disco de dados)"
+    );
+    for d in &virtio {
+        let mmio = d.bars.iter().filter(|b| b.size != 0 && b.flags & 1 == 0);
+        let mut n = 0;
+        for b in mmio {
+            check!(
+                b.size.is_power_of_two(),
+                "BAR de {:#06x} com tamanho {:#x}",
+                d.bdf,
+                b.size
+            );
+            check!(
+                b.base.is_multiple_of(b.size),
+                "BAR de {:#06x} desalinhado: {:#x}",
+                d.bdf,
+                b.base
+            );
+            check!(
+                crate::pci::is_mmio_range(b.base, b.size),
+                "BAR nao reconhecido como MMIO"
+            );
+            n += 1;
+        }
+        check!(
+            n >= 1,
+            "virtio {:#06x} sem BAR MMIO (interface moderna)",
+            d.bdf
+        );
+    }
+    check!(
+        !crate::pci::is_mmio_range(0, PAGE_SIZE),
+        "pagina 0 aceita como MMIO"
+    );
+    check!(
+        !crate::pci::is_mmio_range(u64::MAX - 4096, 8192),
+        "overflow aceito como MMIO"
+    );
+    Ok(())
+}
+
+fn test_user_block() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    if !crate::pci::devices()
+        .iter()
+        .any(|d| d.is_virtio() && (d.device == 0x1001 || d.device == 0x1042))
+    {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let irqs0 = crate::irq::total();
+    let (a, b) = ChannelEnd::create_pair();
+    let hdrv = alloc::vec![
+        Handle {
+            object: Object::Device(Arc::new(DeviceGrant::all())),
+            rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+        },
+        Handle {
+            object: Object::Channel(a),
+            rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+        },
+    ];
+    let hcli = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let driver = crate::process::spawn_named("blockdev", 0, hdrv).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 8, hcli).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let dc = crate::process::wait_and_reap(&driver);
+    drop((driver, client));
+    sched::reap();
+    check!(cc == 0, "cliente de bloco saiu com {cc}");
+    check!(dc == 0, "driver saiu com {dc}");
+    let irqs = crate::irq::total() - irqs0;
+    kinfo!("irq: {irqs} interrupcao(oes) MSI-X entregue(s) ao driver de bloco");
+    check!(
+        irqs >= 1,
+        "nenhuma interrupcao MSI-X chegou ao vetor de usuario"
+    );
+    check!(
+        crate::irq::alloc() == Some(crate::irq::USER_VECTOR_BASE),
+        "vetor nao devolvido no fim do driver"
+    );
+    crate::irq::free(crate::irq::USER_VECTOR_BASE);
+    let ends = crate::ipc::live_channel_ends();
+    check!(
+        ends == ends0,
+        "extremidades de canal vazaram: {ends0} -> {ends}"
+    );
+    let frames = phys::stats().free;
+    // As paginas de DMA e as tabelas de paginas do driver devem ter sido liberadas.
+    check!(
+        frames + 4 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
     Ok(())
 }
 

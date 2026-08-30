@@ -21,6 +21,9 @@ pub mod cpu;
 #[cfg(target_arch = "x86_64")]
 pub mod ioapic;
 #[cfg(target_arch = "x86_64")]
+pub mod pci;
+pub mod pci_types;
+#[cfg(target_arch = "x86_64")]
 pub mod pic;
 #[cfg(target_arch = "x86_64")]
 pub mod qemu;
