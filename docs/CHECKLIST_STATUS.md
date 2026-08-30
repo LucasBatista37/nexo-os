@@ -7,7 +7,7 @@ Marcações também aplicadas diretamente em `PLANO_MESTRE_SISTEMA_OPERACIONAL.m
 
 | Gate | Critério | Estado | Evidência |
 |---|---|---|---|
-| **F0** | em um clone limpo, um único comando gera uma imagem que inicia em QEMU e o CI comprova a mensagem do kernel | **atendido** | `make image` → `build/nexo.img`; `tools/test-qemu` verifica `Nexo OS kernel 0.0.1-boot (x86_64) iniciando`, `[RESULT] PASS 15/15`, `NEXO: boot completo`, código de saída 33; verificação em clone limpo registrada em `docs/releases/0.0.1-boot.md` |
+| **F0** | em um clone limpo, um único comando gera uma imagem que inicia em QEMU e o CI comprova a mensagem do kernel | **atendido** | clone novo em diretório temporário + `make ci` → exit 0 em 2026-08-29; `tools/test-qemu` verifica `Nexo OS kernel 0.0.1-boot (x86_64) iniciando`, `[RESULT] PASS 15/15`, `NEXO: boot completo`, código de saída 33 (`docs/releases/0.0.1-boot.md`) |
 | 90 dias | fundação reproduzível, observável e testada; sem passos manuais; falhas diagnosticáveis | **atendido** | `make reproducible` OK; panic/exceções com backtrace simbolizado (`build/logs/{panic,fault,overflow}.log`) |
 | F1..F10 | — | não iniciados | Plano Mestre §5 |
 
@@ -30,7 +30,7 @@ ADR-0001..0004 aceitas em detalhe; ADR-0005, 0007, 0008, 0009, 0010, 0013 aceita
 | Rust bare-metal, linker, asm, QEMU | [x] | |
 | toolchain fixada | [x] | Rust 1.98.0 |
 | UEFI no QEMU | [x] | edk2 do pacote QEMU |
-| imagem reproduzível | [x] | mesma imagem em duas builds; ver nota sobre caminho do checkout em `docs/releases/0.0.1-boot.md` |
+| imagem reproduzível | [x] | mesma imagem em duas builds do mesmo checkout (`make reproducible`, também no clone limpo); hash varia entre diretórios de checkout por causa dos hashes de metadados do cargo nos símbolos — documentado em `docs/toolchain.md` |
 | logs por serial | [x] | |
 | CI que compila e inicia em QEMU | [x] | workflow escrito; `make ci` executa o mesmo localmente; a execução hospedada começa quando houver remoto |
 | teste de sucesso/falha via serial | [x] | |

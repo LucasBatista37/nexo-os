@@ -38,6 +38,7 @@ sudo apt install qemu-system-x86 ovmf mtools build-essential curl git python3
 - `tools/build-image` compila o loader com `--remap-path-prefix` para `~/.cargo/registry` e para o repositório, e coloca na ESP uma cópia do kernel sem `.debug_*` (`llvm-objcopy --strip-debug`); o ELF completo fica em `build/kernel.elf` para `tools/symbolize`.
 - `rust-src` não faz parte da toolchain fixada: quando instalado, o `rustc` reescreve `/rustc/<hash>/library/...` para o caminho local em strings de `panic` de código genérico de `core`/`alloc`, e a imagem passaria a depender do usuário/máquina. Instale-o só para o IDE (`rustup component add rust-src`) e não confie no hash da imagem nesse caso.
 - `make reproducible` compara duas builds no mesmo checkout; o hash oficial de cada release é registrado em `docs/releases/`.
+- Limite conhecido: o `cargo` deriva o hash de metadados dos símbolos (`_RNvCs<hash>_…`) do caminho dos pacotes; como a cópia do kernel na ESP mantém `.symtab`, checkouts em diretórios diferentes geram imagens diferentes (cada uma determinística). Compare hashes apenas entre builds do mesmo caminho (o CI usa caminho fixo).
 
 ## Política de atualização controlada
 

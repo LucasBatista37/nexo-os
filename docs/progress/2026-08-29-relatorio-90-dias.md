@@ -44,6 +44,7 @@ Testes de exaustão: no host (`bitmap::tests`, `heap::tests::exhaustion_and_reco
 - **`mcopy -m` copia o mtime da fonte** e destrói a reprodutibilidade; timestamps fixos + `SOURCE_DATE_EPOCH` resolvem.
 - **Janelas MMIO de 64 bits** (PCIe em `0xfd00000000`) faziam o physmap crescer para 1 TiB; só RAM/ACPI dimensionam o physmap.
 - Sondas de falta esperada (`probe`) com retomada por RIP tornaram testáveis guard pages, CR0.WP e NX sem crashar o kernel — vale generalizar para *exception tables* na Fase 2.
+- **Reprodutibilidade tem alcance definido:** remapear caminhos e retirar debuginfo/`rust-src` eliminou strings de caminho, mas o hash de metadados do `cargo` nos nomes de símbolo depende do diretório do checkout; a imagem é determinística por caminho, e o CI compara builds do mesmo caminho.
 
 ## Riscos e próximos passos
 
