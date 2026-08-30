@@ -55,6 +55,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("threads_sleep_join", test_threads_sleep_join),
     ("threads_spawn_churn", test_threads_spawn_churn),
     ("threads_multi_cpu", test_threads_multi_cpu),
+    ("timers", test_timers),
+    ("threads_affinity", test_threads_affinity),
     ("symbols", test_symbols),
 ];
 
@@ -795,6 +797,113 @@ fn test_threads_multi_cpu() -> TestResult {
         check!(mask == 1, "mascara {mask:#b}");
     }
     kprint!("(cpus {mask:#b}) ");
+    Ok(())
+}
+
+static AFFINITY_SEEN: [AtomicUsize; 64] = [const { AtomicUsize::new(usize::MAX) }; 64];
+
+fn pinned(i: usize) {
+    for _ in 0..20 {
+        let here = crate::x86::percpu::current().index;
+        let prev = AFFINITY_SEEN[i].load(Ordering::Relaxed);
+        if prev != usize::MAX && prev != here {
+            AFFINITY_SEEN[i].store(usize::MAX - 1, Ordering::Relaxed); // migrou: erro
+            return;
+        }
+        AFFINITY_SEEN[i].store(here, Ordering::Relaxed);
+        sched::yield_now();
+        crate::time::delay_us(100);
+    }
+}
+
+fn test_threads_affinity() -> TestResult {
+    let n = crate::x86::percpu::online_count().min(64);
+    for s in AFFINITY_SEEN.iter().take(n) {
+        s.store(usize::MAX, Ordering::Relaxed);
+    }
+    let me = crate::x86::percpu::current().index;
+    check!(
+        me == 0,
+        "thread principal deveria estar presa a cpu0 (esta em cpu{me})"
+    );
+    let ids: Vec<_> = (0..n)
+        .map(|i| sched::spawn_on("pinned", pinned, i, i))
+        .collect();
+    for id in &ids {
+        check!(sched::join(*id), "join");
+    }
+    for (i, s) in AFFINITY_SEEN.iter().enumerate().take(n) {
+        let seen = s.load(Ordering::Relaxed);
+        check!(seen == i, "thread presa a cpu{i} executou em {seen}");
+    }
+    check!(
+        !sched::set_affinity(usize::MAX, 1),
+        "afinidade de id inexistente"
+    );
+    sched::reap();
+    check!(crate::x86::percpu::current().index == 0, "principal migrou");
+    Ok(())
+}
+
+static TIMER_LOG: IrqLock<Vec<(usize, u64)>> = IrqLock::new(Vec::new());
+static PERIODIC_HITS: AtomicUsize = AtomicUsize::new(0);
+
+fn timer_cb(arg: usize) {
+    TIMER_LOG.lock().push((arg, crate::time::monotonic_ns()));
+}
+
+fn periodic_cb(_: usize) {
+    PERIODIC_HITS.fetch_add(1, Ordering::Relaxed);
+}
+
+fn test_timers() -> TestResult {
+    TIMER_LOG.lock().clear();
+    PERIODIC_HITS.store(0, Ordering::Relaxed);
+    let t0 = crate::time::monotonic_ns();
+    let a = crate::timer::after_ns(30_000_000, timer_cb, 3);
+    let b = crate::timer::after_ns(10_000_000, timer_cb, 1);
+    let c = crate::timer::after_ns(20_000_000, timer_cb, 2);
+    let cancelled = crate::timer::after_ns(15_000_000, timer_cb, 99);
+    check!(crate::timer::cancel(cancelled), "cancelamento");
+    check!(!crate::timer::cancel(cancelled), "cancelamento duplo");
+    let p = crate::timer::periodic_ns(5_000_000, periodic_cb, 0);
+    sched::sleep_ms(60);
+    check!(crate::timer::cancel(p), "cancelar periodico");
+    let hits = PERIODIC_HITS.load(Ordering::Relaxed);
+    check!(
+        (6..=14).contains(&hits),
+        "periodico de 5 ms disparou {hits} vezes em 60 ms"
+    );
+    let log = TIMER_LOG.lock().clone();
+    check!(
+        log.len() == 3,
+        "{} disparos (esperado 3): {:?}",
+        log.len(),
+        log.iter().map(|e| e.0).collect::<Vec<_>>()
+    );
+    check!(
+        log.iter().map(|e| e.0).collect::<Vec<_>>() == alloc::vec![1, 2, 3],
+        "ordem {:?}",
+        log.iter().map(|e| e.0).collect::<Vec<_>>()
+    );
+    for (arg, at) in &log {
+        let dt = (at - t0) / 1_000_000;
+        let want = *arg as u64 * 10;
+        check!(
+            dt >= want && dt < want + 30,
+            "timer {arg} disparou em {dt} ms (esperado >= {want})"
+        );
+    }
+    check!(
+        crate::timer::pending_count() == 0,
+        "timers pendentes sobrando"
+    );
+    check!(
+        crate::timer::fired_total() >= 3 + hits as u64,
+        "total de disparos {}",
+        crate::timer::fired_total()
+    );
+    let _ = (a, b, c);
     Ok(())
 }
 

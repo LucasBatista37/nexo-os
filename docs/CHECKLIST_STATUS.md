@@ -50,7 +50,7 @@ Todos os itens das semanas 1–12 implementados e verificados (`docs/board.md` l
 
 ## §5 Fase 1 — 14 `[x]`, 5 `[-]` (ver `docs/board.md`)
 
-Pendentes: espaços de endereçamento de usuário (Fase 2), API de timers genérica, execução do stress de 24 h e a release `0.1-kernel`.
+Pendentes: espaços de endereçamento de usuário (Fase 2), execução do stress de 24 h e a release `0.1-kernel`. Evidência parcial do gate: stress de 30 min com 4 CPUs sem erros (ver `docs/progress/`).
 
 ## §6 Frentes permanentes — o que já existe
 

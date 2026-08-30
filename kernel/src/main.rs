@@ -24,6 +24,7 @@ mod stress;
 mod symbols;
 mod sync;
 mod time;
+mod timer;
 mod x86;
 
 use nexo_arch_x86_64::qemu;
@@ -62,6 +63,7 @@ fn kmain(bi: &'static BootInfo) -> ! {
     time::init();
     x86::smp::boot_aps();
     sched::init();
+    timer::init();
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());
 
     let cmdline = boot::cmdline();

@@ -8,8 +8,8 @@ Sistema operacional próprio, construído do zero em Rust estável — kernel, l
 
 - Loader UEFI próprio (`boot/loader`): carrega o kernel ELF, constrói tabelas de página (physmap NX, kernel W^X, pilha com guard page), entrega `BootInfo` versionado ([spec](docs/spec/boot-abi.md)).
 - Kernel x86_64 (`kernel/`): logger serial, GDT/TSS/IDT com 256 stubs, panic com backtrace simbolizado (demangler v0 próprio), alocador de quadros por bitmap, paginação (map/unmap/flags), heap com crescimento sob demanda, PIT a 1000 Hz, tarefas cooperativas, console de framebuffer com fonte própria.
-- ACPI (MADT/HPET), LAPIC + I/O APIC, TSC como relógio monotônico, SMP (INIT/SIPI, dados por CPU), threads de kernel preemptivas (`spawn/sleep/join`), stress multi-CPU.
-- 25 auto-testes executados no boot e verificados por serial no CI; cenários de falha (panic, page fault, estouro de pilha) com diagnóstico útil; cenário de stress.
+- ACPI (MADT/HPET), LAPIC + I/O APIC, TSC como relógio monotônico, SMP (INIT/SIPI, dados por CPU), threads de kernel preemptivas (`spawn/sleep/join`, afinidade), timers de kernel, stress multi-CPU.
+- 27 auto-testes executados no boot e verificados por serial no CI; cenários de falha (panic, page fault, estouro de pilha) com diagnóstico útil; cenário de stress.
 - Imagem GPT+ESP reproduzível gerada por um comando; toolchain fixada.
 
 ## Começando

@@ -12,8 +12,8 @@ Contagem em 2026-08-30 (`grep -rhoE 'unsafe( \{| fn| impl| extern)' --include='*
 | `nexo-heap` | 30 | 27 |
 | `nexo-arch-x86_64` | 107 | 71 |
 | `nexo-loader` | 15 | 14 |
-| `nexo-kernel` | 96 | 85 |
-| **total** | **258** | **205** |
+| `nexo-kernel` | 96 | 87 |
+| **total** | **258** | **207** |
 
 Atualize junto com o código.
 

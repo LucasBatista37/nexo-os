@@ -405,7 +405,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] descobrir CPUs e iniciar multiprocessamento SMP — *ACPI MADT + INIT/SIPI; 4/4 CPUs online no QEMU*;
 - [x] criar threads do kernel e troca de contexto;
 - [x] criar escalonador simples preemptivo — *round-robin com quantum de 10 ms em todas as CPUs*;
-- [-] implementar relógio monotônico e timers — *TSC calibrado como relógio monotônico e sleep por thread; API de timers genérica pendente*;
+- [x] implementar relógio monotônico e timers — *TSC calibrado (ns) + timers de kernel únicos/periódicos com thread `ktimer`*;
 - [x] adicionar locks, atomics e primitivas de sincronização — *SpinLock, IrqLock, Once; regra: locks sempre com IRQs desabilitadas*;
 - [x] criar testes de concorrência e stress em QEMU — *`make stress DURATION=…` e cenário `stress` no CI (15 s)*;
 - [x] limitar e registrar todo uso de `unsafe` — *docs/unsafe-inventory.md*;
@@ -675,9 +675,9 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 
 - [x] especificação da ABI de boot — *docs/spec/boot-abi.md*;
 - [-] memória física e virtual — *0.0.1-boot: bitmap + paginação 4 níveis; falta SMP/afinidade*;
-- [-] SMP e afinidade — *SMP sim; afinidade não*;
+- [x] SMP e afinidade — *4 CPUs no QEMU; afinidade por máscara (`spawn_on`, `set_affinity`)*;
 - [-] preempção e prioridades — *preempção sim; prioridades não*;
-- [-] temporizadores de alta resolução — *TSC em ns; timers de alta resolução para threads pendentes*;
+- [-] temporizadores de alta resolução — *TSC em ns; timers despachados com resolução de 1 ms (tick)*;
 - [ ] isolamento usuário/kernel;
 - [ ] syscalls versionadas;
 - [ ] IPC com transferência de capabilities;

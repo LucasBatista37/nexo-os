@@ -70,6 +70,8 @@ pub struct Thread {
     pub runs: AtomicU64,
     /// Última CPU em que executou.
     pub last_cpu: AtomicUsize,
+    /// Máscara de CPUs permitidas (bit i = CPU i).
+    pub affinity: AtomicU64,
     stack: Option<stack::Slot>,
     entry: UnsafeCell<Option<Entry>>,
     inner: UnsafeCell<Inner>,
@@ -189,6 +191,7 @@ fn new_thread(
         finished: AtomicBool::new(false),
         runs: AtomicU64::new(0),
         last_cpu: AtomicUsize::new(usize::MAX),
+        affinity: AtomicU64::new(u64::MAX),
         stack,
         entry: UnsafeCell::new(entry),
         inner: UnsafeCell::new(Inner {
@@ -244,6 +247,8 @@ pub fn current_name() -> &'static str {
 pub fn init() {
     let cpu_data = percpu::current();
     let main = new_thread("main", false, None, None);
+    // A thread principal fica na BSP: mantém determinísticos os testes e o tick global.
+    main.affinity.store(1, Ordering::Relaxed);
     let idle_stack = stack::alloc().expect("pilha da idle");
     let idle = new_thread("idle/0", true, Some(idle_stack), Some((idle_entry, 0)));
     // SAFETY: pilha recém-alocada e exclusiva.
@@ -331,8 +336,15 @@ extern "C" fn thread_main(arg: usize) -> ! {
 
 /// Cria uma thread de kernel executando `f(arg)`. Devolve o ID.
 pub fn spawn(name: &'static str, f: fn(usize), arg: usize) -> ThreadId {
+    spawn_with_affinity(name, f, arg, u64::MAX)
+}
+
+/// Cria uma thread restrita às CPUs de `mask` (a afinidade vale desde o primeiro escalonamento).
+pub fn spawn_with_affinity(name: &'static str, f: fn(usize), arg: usize, mask: u64) -> ThreadId {
     let slot = stack::alloc().expect("sem slot de pilha");
     let t = new_thread(name, false, Some(slot), Some((f, arg)));
+    t.affinity
+        .store(if mask == 0 { u64::MAX } else { mask }, Ordering::Relaxed);
     // SAFETY: pilha recém-mapeada e exclusiva.
     unsafe {
         t.inner().sp = prepare_stack(slot.top, thread_main, Arc::as_ptr(&t) as usize);
@@ -374,10 +386,9 @@ fn schedule_locked(g: nexo_sync::SpinLockGuard<'static, Sched>, new_state: State
     let ci = cpu_data.index;
     let cur = g.running[ci].clone().expect("cpu sem thread atual");
     let idle = g.idle[ci].clone().expect("cpu sem idle");
-    let next = if g.run_queue.is_empty() {
-        idle.clone()
-    } else {
-        g.run_queue.remove(0)
+    let next = match g.run_queue.iter().position(|t| allowed_on(t, ci)) {
+        Some(i) => g.run_queue.remove(i),
+        None => idle.clone(),
     };
     if Arc::ptr_eq(&next, &cur) {
         // Nada melhor para executar: continua.
@@ -571,6 +582,7 @@ pub fn on_tick() {
     let mut g = SCHED.lock();
     let ci = cpu_data.index;
     if ci == 0 {
+        crate::timer::on_tick();
         let now = crate::time::monotonic_ns();
         let mut i = 0;
         while i < g.sleepers.len() {
@@ -595,7 +607,7 @@ pub fn on_tick() {
         inner.quantum_left = inner.quantum_left.saturating_sub(1);
         inner.quantum_left == 0
     };
-    let has_work = !g.run_queue.is_empty();
+    let has_work = g.run_queue.iter().any(|t| allowed_on(t, ci));
     if has_work && (cur.is_idle || expired) {
         g.preemptions += 1;
         drop(cur);
@@ -616,10 +628,36 @@ pub fn on_resched_ipi() {
     let Some(cur) = g.running[ci].clone() else {
         return;
     };
-    if cur.is_idle && !g.run_queue.is_empty() {
+    if cur.is_idle && g.run_queue.iter().any(|t| allowed_on(t, ci)) {
         drop(cur);
         schedule_locked(g, State::Ready);
     }
+}
+
+fn allowed_on(t: &Arc<Thread>, cpu_index: usize) -> bool {
+    t.affinity.load(Ordering::Relaxed) & (1u64 << cpu_index.min(63)) != 0
+}
+
+/// Restringe a thread `id` às CPUs da máscara. Devolve `false` se não existe.
+pub fn set_affinity(id: ThreadId, mask: u64) -> bool {
+    if mask == 0 {
+        return false;
+    }
+    cpu::without_interrupts(|| {
+        let g = SCHED.lock();
+        match g.all.iter().find(|t| t.id == id) {
+            Some(t) => {
+                t.affinity.store(mask, Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
+    })
+}
+
+/// Cria uma thread já restrita à CPU `cpu_index`.
+pub fn spawn_on(name: &'static str, f: fn(usize), arg: usize, cpu_index: usize) -> ThreadId {
+    spawn_with_affinity(name, f, arg, 1u64 << cpu_index.min(63))
 }
 
 /// Limites da pilha de thread que contém `addr` (para backtraces).

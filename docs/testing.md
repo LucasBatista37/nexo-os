@@ -5,7 +5,7 @@
 | Camada | Comando | O que cobre |
 |---|---|---|
 | Host (`cargo test`) | `cargo test --workspace` | ABI de boot (layout/validação/cmdline), endereços, normalização do mapa, bitmap de quadros, paginação (arena), heap (inclui aleatório com verificação de corrupção), spinlock/once, símbolos/demangler, fonte |
-| Kernel em QEMU (`selftest`) | `tools/test-qemu --scenario boot` (4 CPUs) | 25 testes no kernel real: boot info, segmentos, `#BP`, quadros, map/unmap, permissões de seção, recuperação de `#PF`, guard pages, CR0.WP, NX, heap, crescimento do heap, timer, ACPI, timer do LAPIC, relógio TSC, I/O APIC, IPI, SMP (4/4 online, broadcast, shootdown), threads (yield, preempção, sleep/join, churn, multi-CPU), símbolos |
+| Kernel em QEMU (`selftest`) | `tools/test-qemu --scenario boot` (4 CPUs) | 27 testes no kernel real: boot info, segmentos, `#BP`, quadros, map/unmap, permissões de seção, recuperação de `#PF`, guard pages, CR0.WP, NX, heap, crescimento do heap, timer, ACPI, timer do LAPIC, relógio TSC, I/O APIC, IPI, SMP (4/4 online, broadcast, shootdown), threads (yield, preempção, sleep/join, churn, multi-CPU, afinidade), timers de kernel, símbolos |
 | Cenários de falha | `tools/test-qemu --scenario panic|fault|overflow` | panic com backtrace simbolizado; `#PF` fatal com CR2/RIP/backtrace; estouro de pilha → `#DF` em IST1 |
 | Stress (SMP) | `tools/test-qemu --scenario stress` (15 s no CI) · `make stress DURATION=86400 SMP=4` (gate F1) | threads de lock/atomics/heap/sleep/spawn-join/map-unmap em todas as CPUs; a cada segundo `[STRESS] t=…` com invariantes (contador com lock exato, heap e quadros sem vazamento, ≥ 2 CPUs); fim com `[STRESS] PASS` |
 | Reprodutibilidade | `make reproducible` | duas builds → mesma imagem |

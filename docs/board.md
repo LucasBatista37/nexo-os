@@ -80,7 +80,8 @@ Substitui um board externo até o repositório ter issues. Uma linha por item do
 | [x] | descobrir CPUs e SMP | `acpi.rs`, `x86/smp.rs`, `x86/percpu.rs`; teste `smp` (4/4) |
 | [x] | threads do kernel e troca de contexto | `sched.rs`; `threads_yield` |
 | [x] | escalonador preemptivo | `sched::on_tick`; `threads_preempt` |
-| [-] | relógio monotônico e timers | TSC (`monotonic_ns`), `sleep` por thread; API de timers genérica pendente |
+| [x] | relógio monotônico e timers | TSC (`monotonic_ns`), `sleep` por thread, `timer::{after_ns, periodic_ns, cancel}` com thread `ktimer`; teste `timers` |
+| [x] | afinidade de CPU | `sched::spawn_on/set_affinity`; teste `threads_affinity` |
 | [x] | locks, atomics e sincronização | `nexo-sync`, `kernel/src/sync.rs` (`IrqLock`) |
 | [x] | testes de concorrência e stress | `stress.rs`; cenário `stress`; `make stress` |
 | [x] | limitar e registrar `unsafe` | `docs/unsafe-inventory.md` |

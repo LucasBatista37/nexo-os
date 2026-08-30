@@ -56,8 +56,9 @@ flowchart LR
 14. `time::init` — calibra TSC e timer do LAPIC pelo PIT (canal 2, 20 ms); tick de 1000 Hz; TSC vira o relógio monotônico; `sti`.
 15. `x86::smp::boot_aps` — trampolim em `0x8000`, pilhas por CPU, INIT/SIPI/SIPI; APs carregam GDT/TSS/IDT/LAPIC/timer e viram threads idle.
 16. `sched::init` — thread `main` (contexto de boot) + idle da BSP; escalonador preemptivo ativo.
-17. `selftest::run` — 25 testes com marcadores `[TEST]`/`[RESULT]`; cenários `test=panic|fault|overflow`; `stress=<s>`.
-18. `exit` → `isa-debug-exit` (33 sucesso / 35 falha) ou a thread `main` dorme em laço com relatório periódico.
+17. `timer::init` — thread `ktimer`.
+18. `selftest::run` — 27 testes com marcadores `[TEST]`/`[RESULT]`; cenários `test=panic|fault|overflow`; `stress=<s>`.
+19. `exit` → `isa-debug-exit` (33 sucesso / 35 falha) ou a thread `main` dorme em laço com relatório periódico.
 
 ## Interrupções e tempo
 
@@ -79,6 +80,8 @@ Relógio: TSC calibrado (≈1 GHz no QEMU) → `monotonic_ns`; ticks (1000 Hz) a
 - Dados por CPU (`PerCpu`, `gs:[0]`): índice, APIC ID, GDT/TSS/pilha de `#DF` próprias, contadores, thread atual e idle.
 - APs: pilhas de 64 KiB em slots de 128 KiB (guarda) a partir de `0xffff_ffff_a000_0000`.
 - Threads (`sched.rs`): fila global FIFO sob spinlock (IRQs off), quantum de 10 ticks, preempção dentro do handler do timer, `spawn/yield/sleep/join/exit/reap`, thread moribunda recolhida por quem recebe a CPU (`finish_switch`), pilhas de 32 KiB em slots de 64 KiB (guarda) a partir de `0xffff_ffff_b000_0000`, IPI RESCHED para CPU ociosa.
+- Afinidade: máscara de CPUs por thread; o escalonador só entrega a uma CPU threads permitidas nela; `main` fica presa à BSP (tick global e testes determinísticos).
+- Timers (`timer.rs`): lista ordenada por prazo verificada no tick da BSP; callbacks executam na thread `ktimer` (podem dormir/alocar); únicos ou periódicos; resolução de 1 ms.
 - Regra de locks: todo spinlock do kernel é detido com interrupções desabilitadas (`IrqLock`/`without_interrupts`), senão a preempção poderia escalonar na mesma CPU uma thread que gira pelo mesmo lock.
 - Limitações registradas: shootdown de TLB sem confirmação (fire-and-forget); sem prioridades/afinidade; TSC assumido sincronizado entre CPUs (QEMU).
 

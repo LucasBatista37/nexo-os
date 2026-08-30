@@ -54,9 +54,9 @@ reproducible:
 ci: lint test-host image test-qemu reproducible
 
 stress: image
-	tools/build-image --no-build --cmdline "selftest=0 stress=$(DURATION) exit" --out build/nexo-stress.img
+	tools/build-image --no-build --cmdline "selftest=0 stress=$(DURATION) exit" --out build/nexo-stress-long.img
 	mkdir -p build/logs
-	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress.log
+	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress.log
 
 clean:
 	rm -rf build target kernel/target boot/loader/target
