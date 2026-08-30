@@ -132,3 +132,88 @@ def normalize_fat_timestamps(esp_image: Path) -> int:
                         pending.append(sub)
     esp_image.write_bytes(bytes(data))
     return changed
+
+
+def normalize_fat_free_space(esp_image: Path) -> dict:
+    """Zera tudo que não pertence a dados válidos da FAT32: clusters livres,
+    folga após o fim de cada arquivo no último cluster e setores de sobra após
+    o último cluster. Versões diferentes do mtools deixam lixo diferente nessas
+    áreas; sem isto a imagem não é reproduzível entre máquinas.
+    Devolve estatísticas.
+    """
+    data = bytearray(esp_image.read_bytes())
+    bps = int.from_bytes(data[11:13], "little")
+    spc = data[13]
+    reserved = int.from_bytes(data[14:16], "little")
+    nfats = data[16]
+    total_sectors = int.from_bytes(data[32:36], "little")
+    fat_size = int.from_bytes(data[36:40], "little")
+    root_cluster = int.from_bytes(data[44:48], "little")
+    fat_start = reserved * bps
+    data_start = (reserved + nfats * fat_size) * bps
+    cluster_bytes = spc * bps
+    n_clusters = (total_sectors * bps - data_start) // cluster_bytes
+
+    def fat_entry(c: int) -> int:
+        return int.from_bytes(data[fat_start + c * 4:fat_start + c * 4 + 4], "little") & 0x0FFFFFFF
+
+    def cluster_off(c: int) -> int:
+        return data_start + (c - 2) * cluster_bytes
+
+    def chain(first: int):
+        c = first
+        n = 0
+        while 2 <= c < 0x0FFFFFF8 and n < n_clusters + 2:
+            yield c
+            c = fat_entry(c)
+            n += 1
+
+    stats = {"free_clusters": 0, "file_tail_bytes": 0, "slack_bytes": 0}
+    # 1. Folga dos arquivos: caminha os diretórios.
+    pending = [root_cluster]
+    visited = set()
+    while pending:
+        first = pending.pop()
+        if first in visited:
+            continue
+        visited.add(first)
+        for c in chain(first):
+            base = cluster_off(c)
+            for off in range(base, base + cluster_bytes, 32):
+                e = data[off:off + 32]
+                if e[0] == 0x00:
+                    break
+                if e[0] == 0xE5 or e[11] == 0x0F or e[11] & 0x08:
+                    continue
+                start = (int.from_bytes(e[20:22], "little") << 16) | int.from_bytes(e[26:28], "little")
+                name = bytes(e[0:11])
+                if e[11] & 0x10:
+                    if start >= 2 and name not in (b".          ", b"..         "):
+                        pending.append(start)
+                    continue
+                size = int.from_bytes(e[28:32], "little")
+                if start < 2:
+                    continue
+                last = None
+                for cl in chain(start):
+                    last = cl
+                if last is not None:
+                    used = size % cluster_bytes
+                    if used != 0:
+                        tail_off = cluster_off(last) + used
+                        stats["file_tail_bytes"] += cluster_bytes - used
+                        data[tail_off:cluster_off(last) + cluster_bytes] = b"\0" * (cluster_bytes - used)
+    # 2. Clusters livres.
+    for c in range(2, 2 + n_clusters):
+        if fat_entry(c) == 0:
+            off = cluster_off(c)
+            if any(data[off:off + cluster_bytes]):
+                data[off:off + cluster_bytes] = b"\0" * cluster_bytes
+                stats["free_clusters"] += 1
+    # 3. Sobra após o último cluster.
+    end = cluster_off(2 + n_clusters)
+    if end < len(data):
+        stats["slack_bytes"] = len(data) - end
+        data[end:] = b"\0" * (len(data) - end)
+    esp_image.write_bytes(bytes(data))
+    return stats

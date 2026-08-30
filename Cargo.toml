@@ -10,6 +10,7 @@ members = [
     "kernel/lib/heap",
     "kernel/lib/sync",
     "kernel/lib/symbols",
+    "kernel/lib/acpi",
     "libraries/font",
 ]
 exclude = ["kernel", "boot/loader"]

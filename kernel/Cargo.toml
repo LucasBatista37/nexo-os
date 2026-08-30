@@ -10,7 +10,7 @@ build = "build.rs"
 # Workspace proprio: alvo x86_64-unknown-none (ver .cargo/config.toml).
 # As bibliotecas em lib/ pertencem ao workspace raiz (testaveis no host).
 [workspace]
-exclude = ["lib/mm", "lib/heap", "lib/sync", "lib/symbols"]
+exclude = ["lib/mm", "lib/heap", "lib/sync", "lib/symbols", "lib/acpi"]
 
 [dependencies]
 nexo-boot-abi = { path = "../abi/boot" }
@@ -18,6 +18,7 @@ nexo-mm = { path = "lib/mm" }
 nexo-heap = { path = "lib/heap" }
 nexo-sync = { path = "lib/sync" }
 nexo-symbols = { path = "lib/symbols" }
+nexo-acpi = { path = "lib/acpi" }
 nexo-font = { path = "../libraries/font" }
 nexo-arch-x86_64 = { path = "../arch/x86_64" }
 

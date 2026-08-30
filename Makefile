@@ -44,7 +44,7 @@ fmt:
 reproducible:
 	tools/build-image --cmdline "" --out build/repro-a.img | tee build/repro-a.txt
 	tools/build-image --cmdline "" --out build/repro-b.img | tee build/repro-b.txt
-	@cmp build/repro-a.img build/repro-b.img && echo "[nexo] imagem reproduzivel: OK" || (echo "[nexo] imagem NAO reproduzivel"; exit 1)
+	@cmp build/repro-a.img build/repro-b.img && echo "[nexo] imagem reproduzivel: OK" || (echo "[nexo] imagem NAO reproduzivel; primeiras diferencas (offset, a, b):"; cmp -l build/repro-a.img build/repro-b.img | head -20; exit 1)
 
 ci: lint test-host image test-qemu reproducible
 

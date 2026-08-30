@@ -1,0 +1,9 @@
+[package]
+name = "nexo-acpi"
+description = "Parser minimo de tabelas ACPI (RSDP, XSDT/RSDT, MADT, HPET) sem alocacao, testavel no host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
