@@ -18,7 +18,7 @@ exclude = ["kernel", "boot/loader"]
 version = "0.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/[DEFINIR]/nexo-os"
+repository = "https://github.com/LucasBatista37/nexo-os"
 rust-version = "1.98"
 
 [workspace.lints.rust]

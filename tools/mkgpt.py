@@ -63,3 +63,72 @@ def build_gpt_image(esp_image: Path, out: Path, first_lba: int = 2048) -> None:
         f.write(entries)                               # tabela secundária (backup_lba-32..backup_lba-1)
         f.write(header(backup_lba, 1, backup_lba - 32))
     assert out.stat().st_size == total_sectors * SECTOR, "tamanho da imagem inconsistente"
+
+
+# ---------------------------------------------------------------------------
+# Normalização de timestamps FAT32 (reprodutibilidade independente do mtools)
+# ---------------------------------------------------------------------------
+
+FAT_DATE = ((2026 - 1980) << 9) | (8 << 5) | 29  # 2026-08-29
+FAT_TIME = 0  # 00:00:00
+
+
+def normalize_fat_timestamps(esp_image: Path) -> int:
+    """Zera criação/acesso/modificação de todas as entradas de diretório de uma
+    imagem FAT32 para uma data fixa. Devolve o número de entradas alteradas.
+
+    Percorre o diretório raiz e subdiretórios seguindo a FAT. Entradas LFN,
+    apagadas e o fim de diretório são ignorados; `.` e `..` são normalizadas
+    mas não percorridas.
+    """
+    data = bytearray(esp_image.read_bytes())
+    bps = int.from_bytes(data[11:13], "little")
+    spc = data[13]
+    reserved = int.from_bytes(data[14:16], "little")
+    nfats = data[16]
+    fat_size = int.from_bytes(data[36:40], "little")
+    root_cluster = int.from_bytes(data[44:48], "little")
+    if bps == 0 or spc == 0 or fat_size == 0 or root_cluster < 2:
+        raise ValueError("BPB FAT32 invalido")
+    fat_start = reserved * bps
+    data_start = (reserved + nfats * fat_size) * bps
+    cluster_bytes = spc * bps
+
+    def cluster_chain(first: int):
+        c = first
+        seen = 0
+        while 2 <= c < 0x0FFFFFF8 and seen < 1_000_000:
+            yield c
+            c = int.from_bytes(data[fat_start + c * 4:fat_start + c * 4 + 4], "little") & 0x0FFFFFFF
+            seen += 1
+
+    changed = 0
+    pending = [root_cluster]
+    visited = set()
+    while pending:
+        first = pending.pop()
+        if first in visited:
+            continue
+        visited.add(first)
+        for c in cluster_chain(first):
+            base = data_start + (c - 2) * cluster_bytes
+            for off in range(base, base + cluster_bytes, 32):
+                e = data[off:off + 32]
+                if e[0] == 0x00:
+                    break
+                if e[0] == 0xE5 or e[11] == 0x0F:
+                    continue
+                data[off + 13] = 0
+                data[off + 14:off + 16] = FAT_TIME.to_bytes(2, "little")
+                data[off + 16:off + 18] = FAT_DATE.to_bytes(2, "little")
+                data[off + 18:off + 20] = FAT_DATE.to_bytes(2, "little")
+                data[off + 22:off + 24] = FAT_TIME.to_bytes(2, "little")
+                data[off + 24:off + 26] = FAT_DATE.to_bytes(2, "little")
+                changed += 1
+                name = bytes(e[0:11])
+                if e[11] & 0x10 and name not in (b".          ", b"..         "):
+                    sub = (int.from_bytes(e[20:22], "little") << 16) | int.from_bytes(e[26:28], "little")
+                    if sub >= 2:
+                        pending.append(sub)
+    esp_image.write_bytes(bytes(data))
+    return changed

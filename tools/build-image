@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nexo_common import (BUILD, KERNEL_DIR, KERNEL_ELF, LOADER_DIR, LOADER_EFI, ROOT, cargo_env, die,
                          llvm_tool, log, require, run, sha256)
-from mkgpt import build_gpt_image
+from mkgpt import build_gpt_image, normalize_fat_timestamps
 
 ESP_SIZE_MIB = 64
 
@@ -64,7 +64,11 @@ def make_esp(esp_img: Path, loader: Path, kernel: Path, cmdline: str) -> None:
         else:
             shutil.copy2(src, dst)
         os.utime(dst, (epoch, epoch))
-        run([mcopy, "-i", esp_img, dst, dest])
+        run([mcopy, "-i", esp_img, "-m", dst, dest])
+    # Independente da versão do mtools (SOURCE_DATE_EPOCH ou não), todas as
+    # entradas de diretório recebem a mesma data fixa.
+    n = normalize_fat_timestamps(esp_img)
+    log(f"esp: {n} entradas de diretorio com timestamp normalizado")
 
 
 def write_symbols(kernel: Path) -> Path:

@@ -2,7 +2,7 @@
 
 ## Contato e divulgação
 
-- Relate vulnerabilidades por e-mail para **security@[DEFINIR-DOMINIO]** (até o domínio existir: abra uma *security advisory* privada no repositório GitHub ou contate o mantenedor diretamente; não abra issue pública).
+- Relate vulnerabilidades por uma *security advisory* privada em https://github.com/LucasBatista37/nexo-os/security/advisories/new (não abra issue pública). Um endereço `security@` será publicado quando houver domínio.
 - Prazo de resposta inicial: 7 dias. Divulgação coordenada: até 90 dias após a confirmação, ou antes se houver correção publicada.
 - Enquanto o projeto está antes de `0.9-beta`, não há canal de atualização; correções entram na próxima release.
 

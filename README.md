@@ -16,7 +16,8 @@ Sistema operacional próprio, construído do zero em Rust estável — kernel, l
 ```sh
 brew install qemu mtools            # macOS  (Debian: apt install qemu-system-x86 ovmf mtools)
 curl https://sh.rustup.rs -sSf | sh # rustup; a toolchain vem de rust-toolchain.toml
-rustup show
+git clone https://github.com/LucasBatista37/nexo-os.git && cd nexo-os
+rustup toolchain install && rustup show
 tools/check-toolchain
 make image   # build/nexo.img
 make run     # QEMU com display; serial no terminal

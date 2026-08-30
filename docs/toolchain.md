@@ -21,7 +21,7 @@ Verifique com `tools/check-toolchain`. Atualizações de versão só por PR dedi
 # macOS (Apple Silicon ou Intel)
 brew install qemu mtools
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
-git clone <repo> nexo-os && cd nexo-os
+git clone https://github.com/LucasBatista37/nexo-os.git nexo-os && cd nexo-os
 rustup show            # instala 1.98.0 + targets + componentes de rust-toolchain.toml
 tools/check-toolchain
 make test              # testes de host + boot em QEMU

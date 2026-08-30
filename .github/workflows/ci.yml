@@ -24,7 +24,8 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/rustup" show   # instala o canal e os targets do rust-toolchain.toml
+          "$HOME/.cargo/bin/rustup" toolchain install   # canal, targets e componentes de rust-toolchain.toml
+          "$HOME/.cargo/bin/rustup" show
 
       - name: Cache do cargo
         uses: actions/cache@v4

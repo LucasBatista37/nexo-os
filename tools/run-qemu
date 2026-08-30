@@ -18,6 +18,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nexo_common import BUILD, die, find_ovmf, log, require
 
 SUCCESS_EXIT = 33  # (0x10 << 1) | 1
+
+
+def ovmf_vars_for(code: Path):
+    """Arquivo de variáveis correspondente ao firmware CODE, se existir."""
+    name = code.name
+    candidates = [
+        name.replace("CODE", "VARS"),
+        name.replace("x86_64-code", "i386-vars"),
+        "OVMF_VARS_4M.fd" if "4M" in name else "OVMF_VARS.fd",
+    ]
+    for c in candidates:
+        p = code.parent / c
+        if p != code and p.is_file():
+            return p
+    return None
 FAILURE_EXIT = 35  # (0x11 << 1) | 1
 
 
@@ -27,6 +42,14 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list) -> list:
     cmd = [
         qemu, "-machine", "q35", "-cpu", "qemu64", "-m", "512M", "-smp", "1",
         "-drive", f"if=pflash,format=raw,readonly=on,file={ovmf}",
+    ]
+    # NVRAM gravável (cópia por execução): OVMF de distribuições Linux exige.
+    vars_src = ovmf_vars_for(ovmf)
+    if vars_src is not None:
+        vars_img = BUILD / "efivars.fd"
+        shutil.copy2(vars_src, vars_img)
+        cmd += ["-drive", f"if=pflash,format=raw,file={vars_img}"]
+    cmd += [
         "-drive", f"format=raw,file={image}",
         "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
         "-no-reboot",
