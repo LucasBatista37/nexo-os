@@ -91,6 +91,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-netd"
+version = "0.0.1"
+dependencies = [
+ "nexo-netstack",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-netdev"
 version = "0.0.1"
 dependencies = [

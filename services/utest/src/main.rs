@@ -58,6 +58,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         12 => vfs_client(),
         13 => input_client(),
         14 => net_client(param as u16),
+        15 => sock_client(param as u16, (param >> 16) as u16),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1620,6 +1621,159 @@ fn tcp_check(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], port: u16) -> ! {
         b"",
         &mut msg,
         &mut hs,
+    );
+    nexo_sys::exit(0)
+}
+
+/// Modo 15: cliente do `netd` (handle 0, protocolo `nexo.sock`): info, DNS com cache,
+/// eco UDP e conexao TCP com os servidores do harness no host (10.0.2.2).
+fn sock_client(tcp_port: u16, udp_port: u16) -> ! {
+    use nexo_proto::sock::{
+        InfoRequest, ResolveRequest, TcpCloseRequest, TcpConnectRequest, TcpRecvRequest,
+        TcpSendRequest, UdpRecvRequest, UdpSendRequest, decode_info_response,
+        decode_resolve_response, decode_tcp_close_response, decode_tcp_connect_response,
+        decode_tcp_recv_response, decode_tcp_send_response, decode_udp_recv_response,
+        decode_udp_send_response,
+    };
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    macro_rules! call {
+        ($req:expr, $dec:ident, $code:expr) => {{
+            let m = $req.encode_msg(&mut msg).unwrap_or(0);
+            if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+                nexo_sys::exit($code);
+            }
+            let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+                Ok((n, _)) => n,
+                _ => nexo_sys::exit($code + 1),
+            };
+            match $dec(&msg[..n]) {
+                Ok(r) => r,
+                Err(e) => {
+                    nexo_rt::log!("utest: sock: erro {:?} (passo {})", e, $code);
+                    nexo_sys::exit($code + 2)
+                }
+            }
+        }};
+    }
+    // 1. info
+    let info = call!(InfoRequest {}, decode_info_response, 300);
+    if info.ip() != [10, 0, 2, 15] || info.gateway() != [10, 0, 2, 2] {
+        nexo_sys::exit(303);
+    }
+    nexo_rt::log!(
+        "utest: sock info — ip {}.{}.{}.{} gw {}.{}.{}.{}",
+        info.ip()[0],
+        info.ip()[1],
+        info.ip()[2],
+        info.ip()[3],
+        info.gateway()[0],
+        info.gateway()[1],
+        info.gateway()[2],
+        info.gateway()[3]
+    );
+    // 2. DNS com cache: segunda consulta deve vir do cache
+    let mut name = ResolveRequest {
+        name: [0; 253],
+        name_len: 11,
+    };
+    name.name[..11].copy_from_slice(b"example.com");
+    let r1 = call!(name.clone(), decode_resolve_response, 310);
+    let r2 = call!(name, decode_resolve_response, 314);
+    if r1.cached != 0 || r2.cached != 1 || r1.addr() != r2.addr() {
+        nexo_rt::log!(
+            "utest: sock dns: cached {}/{} divergente",
+            r1.cached,
+            r2.cached
+        );
+        nexo_sys::exit(318);
+    }
+    nexo_rt::log!(
+        "utest: sock dns ok — example.com = {}.{}.{}.{} (2a consulta do cache)",
+        r1.addr()[0],
+        r1.addr()[1],
+        r1.addr()[2],
+        r1.addr()[3]
+    );
+    // 3. eco UDP com o servidor do harness
+    let mut u = UdpSendRequest {
+        dst_ip: [10, 0, 2, 2],
+        dst_ip_len: 4,
+        dst_port: udp_port,
+        src_port: 40200,
+        data: [0; 1400],
+        data_len: 8,
+    };
+    u.data[..8].copy_from_slice(b"nexo-udp");
+    call!(u, decode_udp_send_response, 320);
+    let start = nexo_sys::time_now();
+    loop {
+        let r = call!(
+            UdpRecvRequest { port: 40200 },
+            decode_udp_recv_response,
+            324
+        );
+        if r.data().is_empty() {
+            if nexo_sys::time_now() - start > 20_000_000_000 {
+                nexo_rt::log!("utest: sock udp: sem eco em 20 s");
+                nexo_sys::exit(328)
+            }
+            nexo_sys::sleep_ns(20_000_000);
+            continue;
+        }
+        if r.data() != b"nexo-udp-ok" || r.from_ip() != [10, 0, 2, 2] {
+            nexo_sys::exit(329);
+        }
+        break;
+    }
+    nexo_rt::log!("utest: sock udp ok — eco de 10.0.2.2:{}", udp_port);
+    // 4. TCP pela API de sockets
+    let c = call!(
+        TcpConnectRequest {
+            dst_ip: [10, 0, 2, 2],
+            dst_ip_len: 4,
+            dst_port: tcp_port,
+        },
+        decode_tcp_connect_response,
+        330
+    );
+    let mut t = TcpSendRequest {
+        conn: c.conn,
+        data: [0; 1400],
+        data_len: 9,
+    };
+    t.data[..9].copy_from_slice(b"ola netd\n");
+    call!(t, decode_tcp_send_response, 334);
+    let start = nexo_sys::time_now();
+    loop {
+        let r = call!(
+            TcpRecvRequest { conn: c.conn },
+            decode_tcp_recv_response,
+            338
+        );
+        if !r.data().is_empty() {
+            if r.data() != b"nexo-tcp-ok" {
+                nexo_sys::exit(342);
+            }
+            break;
+        }
+        if r.closed != 0 {
+            nexo_sys::exit(343);
+        }
+        if nexo_sys::time_now() - start > 20_000_000_000 {
+            nexo_rt::log!("utest: sock tcp: sem resposta em 20 s");
+            nexo_sys::exit(344)
+        }
+        nexo_sys::sleep_ns(20_000_000);
+    }
+    call!(
+        TcpCloseRequest { conn: c.conn },
+        decode_tcp_close_response,
+        346
+    );
+    nexo_rt::log!(
+        "utest: sock tcp ok — conectou, enviou e recebeu por 10.0.2.2:{}",
+        tcp_port
     );
     nexo_sys::exit(0)
 }

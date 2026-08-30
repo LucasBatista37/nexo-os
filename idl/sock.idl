@@ -1,0 +1,94 @@
+# nexo.sock — API de sockets nativa do servico de rede residente (services/netd).
+# Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = tempo esgotado,
+# 4 = conexao fechada/reiniciada, 5 = nome nao resolvido, 6 = nao conectado.
+protocol sock 1.0
+
+# Configuracao de rede corrente (obtida por DHCP no arranque do netd).
+method 1 info {
+    request {
+    }
+    response {
+        ip: bytes<4>,
+        mask: bytes<4>,
+        gateway: bytes<4>,
+        dns: bytes<4>,
+        mac: bytes<6>,
+    }
+}
+
+# Resolve um nome (A) usando o DNS do lease, com cache no netd.
+method 2 resolve {
+    request {
+        name: bytes<253>,
+    }
+    response {
+        addr: bytes<4>,
+        cached: u8,
+    }
+}
+
+# Envia um datagrama UDP de `src_port` para `dst`.
+method 3 udp_send {
+    request {
+        dst_ip: bytes<4>,
+        dst_port: u16,
+        src_port: u16,
+        data: bytes<1400>,
+    }
+    response {
+    }
+}
+
+# Le um datagrama recebido em `port` (sem bloquear; resposta vazia = nada).
+method 4 udp_recv {
+    request {
+        port: u16,
+    }
+    response {
+        from_ip: bytes<4>,
+        from_port: u16,
+        data: bytes<1400>,
+    }
+}
+
+# Abre uma conexao TCP (bloqueia ate ESTABLISHED ou erro 3/4).
+method 5 tcp_connect {
+    request {
+        dst_ip: bytes<4>,
+        dst_port: u16,
+    }
+    response {
+        conn: u32,
+    }
+}
+
+# Envia dados pela conexao.
+method 6 tcp_send {
+    request {
+        conn: u32,
+        data: bytes<1400>,
+    }
+    response {
+        sent: u32,
+    }
+}
+
+# Le o que houver recebido na conexao (sem bloquear; vazio = nada ainda).
+method 7 tcp_recv {
+    request {
+        conn: u32,
+    }
+    response {
+        data: bytes<1400>,
+        closed: u8,
+    }
+}
+
+# Encerra a conexao (FIN; erro 4 se ja reiniciada).
+method 8 tcp_close {
+    request {
+        conn: u32,
+    }
+    response {
+    }
+}

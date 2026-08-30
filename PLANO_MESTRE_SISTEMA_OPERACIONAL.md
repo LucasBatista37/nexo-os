@@ -475,11 +475,11 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] implementar Ethernet e ARP/NDP conforme a fase IPv6 — *Ethernet e ARP (request/reply) em `nexo-netstack`, exercitados no cenário `net`; NDP vem com o IPv6*;
 - [-] implementar IPv4 — *cabeçalho + checksum com validação (`nexo-netstack`), usado no ping do cenário `net`; sem roteamento/fragmentação/pilha residente*;
 - [-] implementar ICMP — *echo request/reply completos no cenário `net` (ping real ao slirp); demais tipos pendentes*;
-- [-] implementar UDP — *montagem/leitura em `nexo-netstack` (o DHCP viaja por UDP no cenário `net`); sockets e entrega por porta pendentes*;
-- [-] implementar TCP com suíte de testes e estados documentados — *segmentos com checksum de pseudo-cabeçalho em `nexo-netstack`; handshake, dados e RST reais com um servidor no host (cenário `net`); máquina de estados completa, retransmissão e suíte dedicada pendentes*;
+- [-] implementar UDP — *montagem/leitura em `nexo-netstack` e sockets por porta no `netd` (`udp_send`/`udp_recv` com eco real no cenário `net`); entrega a múltiplos clientes pendente*;
+- [-] implementar TCP com suíte de testes e estados documentados — *máquina de estados do cliente em `services/netd` documentada em `docs/spec/tcp-states.md` (handshake, dados, FIN/CLOSE_WAIT/LAST_ACK, RST) e exercitada no cenário `net`; retransmissão, escuta e suíte dedicada pendentes*;
 - [-] implementar DHCP — *cliente completo (DISCOVER→OFFER→REQUEST→ACK com opções) obtém lease real do slirp no cenário `net`; renovação/temporizadores e serviço residente pendentes*;
-- [-] implementar DNS com cache e validação de entradas — *consulta A e parser (compressão com limites) em `nexo-netstack`; resolução real no cenário `net`; cache e serviço residente pendentes*;
-- [ ] criar API de sockets nativa;
+- [-] implementar DNS com cache e validação de entradas — *consulta A + parser validado em `nexo-netstack`; `netd` resolve com cache (2ª consulta atendida do cache no cenário `net`); expiração por TTL e serviço para vários clientes pendentes*;
+- [-] criar API de sockets nativa — *`nexo.sock` v1.0 no `netd` (info/resolve/UDP por porta/TCP conectar-enviar-receber-fechar), exercitada no cenário `net`; múltiplos clientes, escuta TCP e eventos assíncronos pendentes*;
 - [ ] criar compatibilidade POSIX de sockets;
 - [ ] implementar IPv6;
 - [ ] implementar firewall por aplicativo e perfil;

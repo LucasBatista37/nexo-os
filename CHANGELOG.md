@@ -105,6 +105,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo-netstack`: segmentos TCP (montagem/leitura sem opções, checksum com pseudo-cabeçalho IPv4 validado nos dois sentidos, flags/seq/ack/janela); testes de host e fuzz-lite ampliado.
 - Cenário `net`: o harness sobe um servidor TCP no host (porta efêmera, passada por `tcp-port=` na linha de comando) e o cliente no Nexo faz o handshake completo (SYN → SYN-ACK → ACK) com `10.0.2.2:<porta>` através do slirp, envia uma linha, recebe `nexo-tcp-ok` e encerra com RST — sequência DHCP → ARP → ICMP → DNS → TCP inteira num boot.
 
+### Adicionado (Fase 4, bloco 6 — netd: serviço de rede residente com sockets nativos)
+- `services/netd`: DHCP no arranque, ARP do gateway (e resposta a ARP pelo nosso IP), laço de eventos único (`channel_try_recv` + bomba de quadros) e a **API de sockets nativa** `nexo.sock` v1.0 (`idl/sock.idl`): `info`, `resolve` (DNS **com cache**), `udp_send`/`udp_recv` (filas por porta), `tcp_connect`/`tcp_send`/`tcp_recv`/`tcp_close`.
+- Máquina de estados TCP do cliente documentada em `docs/spec/tcp-states.md` (SYN_SENT → ESTABLISHED → FIN_WAIT/CLOSE_WAIT/LAST_ACK; RST; limitações da v0: sem retransmissão própria, TIME_WAIT imediato).
+- Cenário `net`, fase 2: `netdev` + `netd` + cliente — info do lease, resolução com cache comprovado (2ª consulta `cached=1`), eco UDP e conexão TCP completa com os servidores do harness no host (que agora atendem múltiplas conexões).
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

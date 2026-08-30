@@ -1696,6 +1696,36 @@ pub fn net_test_mode() {
     kinfo!("[NET] aguardando troca ARP com o gateway do slirp");
     let code = crate::process::wait_and_reap(&client);
     kinfo!("[NET] teste de rede terminou com {code}");
+    // Fase 2: netd (servico residente) com a API de sockets.
+    let udp_port = nexo_boot_abi::cmdline_value(crate::boot::cmdline(), "udp-port")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    if tcp_port == 0 || udp_port == 0 {
+        return;
+    }
+    let (na, nb) = ChannelEnd::create_pair();
+    let (sa, sb) = ChannelEnd::create_pair();
+    let g2 = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let _drv2 = crate::process::spawn_named("netdev", 0, alloc::vec![g2, channel_handle(na)])
+        .expect("netdev 2");
+    let _netd = crate::process::spawn_named(
+        "netd",
+        0,
+        alloc::vec![channel_handle(nb), channel_handle(sa)],
+    )
+    .expect("netd");
+    let client2 = crate::process::spawn_named(
+        "utest",
+        15 | (tcp_port << 8) | (udp_port << 24),
+        alloc::vec![channel_handle(sb)],
+    )
+    .expect("utest 15");
+    kinfo!("[NET] fase 2: netd + API de sockets");
+    let code = crate::process::wait_and_reap(&client2);
+    kinfo!("[NET] fase 2 (netd) terminou com {code}");
 }
 
 /// `fs-churn=1` na linha de comando: blockdev + fs + utest(10) escrevendo sem parar, para o

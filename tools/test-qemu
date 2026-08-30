@@ -423,31 +423,57 @@ def run_net_scenario(timeout: float) -> bool:
     tcp_port = srv.getsockname()[1]
 
     def serve():
-        try:
-            srv.settimeout(timeout)
-            conn, _ = srv.accept()
-            conn.settimeout(30)
-            data = b""
-            while b"\n" not in data:
-                chunk = conn.recv(256)
-                if not chunk:
-                    break
-                data += chunk
-            conn.sendall(b"nexo-tcp-ok")
+        # atende quantas conexoes chegarem (fase 1: TCP cru; fase 2: netd)
+        srv.settimeout(timeout)
+        while True:
             try:
-                conn.recv(64)
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            try:
+                conn.settimeout(30)
+                data = b""
+                while b"\n" not in data:
+                    chunk = conn.recv(256)
+                    if not chunk:
+                        break
+                    data += chunk
+                conn.sendall(b"nexo-tcp-ok")
+                try:
+                    conn.recv(64)
+                except OSError:
+                    pass
+                conn.close()
             except OSError:
                 pass
-            conn.close()
-        except OSError:
-            pass
 
     th = threading.Thread(target=serve, daemon=True)
     th.start()
 
+    # servidor de eco UDP no host: responde "nexo-udp-ok" a qualquer datagrama
+    usrv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    usrv.bind(("127.0.0.1", 0))
+    udp_port = usrv.getsockname()[1]
+
+    def userve():
+        usrv.settimeout(timeout)
+        while True:
+            try:
+                data, addr = usrv.recvfrom(2048)
+            except OSError:
+                return
+            if data:
+                try:
+                    usrv.sendto(b"nexo-udp-ok", addr)
+                except OSError:
+                    return
+
+    uth = threading.Thread(target=userve, daemon=True)
+    uth.start()
+
     image = BUILD / "nexo-net.img"
     run([sys.executable, ROOT / "tools" / "build-image", "--no-build",
-         "--cmdline", f"selftest=0 net-test=1 tcp-port={tcp_port} exit",
+         "--cmdline", f"selftest=0 net-test=1 tcp-port={tcp_port} udp-port={udp_port} exit",
          "--out", image], stdout=subprocess.DEVNULL)
     logfile = BUILD / "logs" / "net.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
@@ -461,6 +487,7 @@ def run_net_scenario(timeout: float) -> bool:
         log(f"FALHA: codigo de saida {rc}, esperado 33")
         ok = False
     srv.close()
+    usrv.close()
     for pat in [r"netdev: virtio-net bdf 0x[0-9a-f]+ mac 52:54:00:12:34:56 \(rx \d+, tx \d+, MSI-X\)",
                 r"utest: dhcp ok — ip 10\.0\.2\.15 mascara 255\.255\.255\.0 gw 10\.0\.2\.2 dns 10\.0\.2\.3",
                 r"utest: net: ARP reply do gateway",
@@ -468,12 +495,18 @@ def run_net_scenario(timeout: float) -> bool:
                 r"utest: dns ok —",
                 r"utest: tcp: handshake completo com 10\.0\.2\.2:\d+",
                 r"utest: tcp ok — dados recebidos de 10\.0\.2\.2:\d+ \(11 bytes\)",
+                r"netd: pronto — ip 10\.0\.2\.15 gw 10\.0\.2\.2 dns 10\.0\.2\.3",
+                r"utest: sock info — ip 10\.0\.2\.15 gw 10\.0\.2\.2",
+                r"utest: sock dns ok — example\.com = \d+\.\d+\.\d+\.\d+ \(2a consulta do cache\)",
+                r"utest: sock udp ok — eco de 10\.0\.2\.2:\d+",
+                r"utest: sock tcp ok — conectou, enviou e recebeu por 10\.0\.2\.2:\d+",
+                r"\[NET\] fase 2 \(netd\) terminou com 0",
                 r"\[NET\] teste de rede terminou com 0",
                 r"NEXO: boot completo"]:
         if not re.search(pat, text):
             log(f"FALHA: marcador ausente: /{pat}/")
             ok = False
-    for pat in [r"KERNEL PANIC", r"EXCEPTION", r"netdev: falha"]:
+    for pat in [r"KERNEL PANIC", r"EXCEPTION", r"netdev: falha", r"netd: falha"]:
         if re.search(pat, text):
             log(f"FALHA: marcador proibido presente: /{pat}/")
             ok = False
