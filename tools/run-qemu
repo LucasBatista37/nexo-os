@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""run-qemu — inicia build/nexo.img no QEMU (q35 + UEFI) com serial no terminal.
+
+Uso: tools/run-qemu [--image build/nexo.img] [--test] [--timeout 120] [--log arquivo] [--gdb]
+  --test   headless: sem display, encerra via isa-debug-exit, aplica timeout, retorna o codigo do QEMU
+  --gdb    expoe gdbstub em :1234 e aguarda (lldb: `gdb-remote 1234`; gdb: `target remote :1234`)
+"""
+import argparse
+import os
+import selectors
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nexo_common import BUILD, die, find_ovmf, log, require
+
+SUCCESS_EXIT = 33  # (0x10 << 1) | 1
+FAILURE_EXIT = 35  # (0x11 << 1) | 1
+
+
+def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list) -> list:
+    qemu = require("qemu-system-x86_64", "Instale QEMU (macOS: brew install qemu; Debian: apt install qemu-system-x86)")
+    ovmf = find_ovmf()
+    cmd = [
+        qemu, "-machine", "q35", "-cpu", "qemu64", "-m", "512M", "-smp", "1",
+        "-drive", f"if=pflash,format=raw,readonly=on,file={ovmf}",
+        "-drive", f"format=raw,file={image}",
+        "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
+        "-no-reboot",
+        "-serial", "stdio",
+        "-monitor", "none",
+    ]
+    if test:
+        cmd += ["-display", "none"]
+    if gdb:
+        cmd += ["-s", "-S"]
+    return cmd + extra
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--image", default=str(BUILD / "nexo.img"))
+    ap.add_argument("--test", action="store_true")
+    ap.add_argument("--timeout", type=float, default=120.0)
+    ap.add_argument("--log", default=None, help="grava a saida serial neste arquivo")
+    ap.add_argument("--gdb", action="store_true")
+    ap.add_argument("extra", nargs="*", help="argumentos extras para o QEMU (apos --)")
+    a = ap.parse_args()
+    image = Path(a.image)
+    if not image.exists():
+        die(f"imagem nao encontrada: {image} (rode tools/build-image)")
+    cmd = qemu_cmd(image, a.test, a.gdb, a.extra)
+    log("$ " + " ".join(cmd))
+    if not a.test and not a.log:
+        return subprocess.call(cmd)
+
+    logf = open(a.log, "wb") if a.log else None
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+    start = time.time()
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ)
+    timed_out = False
+
+    def emit(chunk: bytes) -> None:
+        sys.stdout.buffer.write(chunk)
+        sys.stdout.flush()
+        if logf:
+            logf.write(chunk)
+
+    while True:
+        if proc.poll() is not None:
+            rest = proc.stdout.read()
+            if rest:
+                emit(rest)
+            break
+        if time.time() - start > a.timeout:
+            timed_out = True
+            proc.kill()
+            break
+        for _ in sel.select(timeout=0.2):
+            chunk = os.read(proc.stdout.fileno(), 65536)
+            if chunk:
+                emit(chunk)
+    if logf:
+        logf.close()
+    if timed_out:
+        log(f"TIMEOUT apos {a.timeout:.0f}s")
+        return 124
+    log(f"QEMU encerrou com codigo {proc.returncode} "
+        f"({'sucesso' if proc.returncode == SUCCESS_EXIT else 'falha' if proc.returncode == FAILURE_EXIT else 'inesperado'})")
+    return proc.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

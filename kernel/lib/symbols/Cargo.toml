@@ -1,0 +1,9 @@
+[package]
+name = "nexo-symbols"
+description = "Leitura de .symtab ELF64 e demangling de simbolos Rust para backtraces do kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

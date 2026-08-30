@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""symbolize — resolve enderecos 0xffffffff8xxxxxxx de um log (panic/exception) para funcao+arquivo:linha.
+
+Uso: tools/symbolize build/logs/panic.log   (ou via stdin)
+Usa llvm-symbolizer (componente llvm-tools) sobre build/kernel.elf.
+"""
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nexo_common import BUILD, die, llvm_tool
+
+ADDR = re.compile(r"0x(ffffffff[89a-f][0-9a-f]{7})")
+
+
+def main() -> None:
+    kernel = BUILD / "kernel.elf"
+    if not kernel.exists():
+        die("build/kernel.elf ausente; rode tools/build-image")
+    text = Path(sys.argv[1]).read_text(errors="replace") if len(sys.argv) > 1 else sys.stdin.read()
+    addrs = sorted({m.group(0) for m in ADDR.finditer(text)})
+    if not addrs:
+        print("nenhum endereco de kernel encontrado")
+        return
+    sym = llvm_tool("llvm-symbolizer")
+    out = subprocess.run([sym, "--obj", str(kernel), "--demangle", "--inlining=false", *addrs],
+                         capture_output=True, text=True, check=True).stdout
+    for addr, block in zip(addrs, out.strip().split("\n\n")):
+        lines = block.splitlines()
+        print(f"{addr}  {lines[0] if lines else '?'}  {lines[1] if len(lines) > 1 else '?'}")
+
+
+if __name__ == "__main__":
+    main()

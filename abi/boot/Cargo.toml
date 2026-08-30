@@ -1,0 +1,9 @@
+[package]
+name = "nexo-boot-abi"
+description = "Contrato de boot entre o loader UEFI e o kernel Nexo (docs/spec/boot-abi.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

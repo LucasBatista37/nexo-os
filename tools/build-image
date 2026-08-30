@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""build-image — comando único: compila loader + kernel e gera build/nexo.img (GPT + ESP FAT32).
+
+Uso: tools/build-image [--cmdline "..."] [--out build/nexo.img] [--debug] [--no-build]
+"""
+import argparse
+import os
+import shutil
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nexo_common import (BUILD, KERNEL_DIR, KERNEL_ELF, LOADER_DIR, LOADER_EFI, ROOT, cargo_env, die,
+                         llvm_tool, log, require, run, sha256)
+from mkgpt import build_gpt_image
+
+ESP_SIZE_MIB = 64
+
+
+def build_rust(debug: bool) -> None:
+    require("cargo", "Instale rustup: https://rustup.rs (a toolchain vem de rust-toolchain.toml)")
+    prof = [] if debug else ["--release"]
+    # Caminhos absolutos (registro do cargo, checkout) são remapeados para que as
+    # strings de panic/Location não dependam da máquina. `--config` com um array
+    # é *anexado* aos rustflags de .cargo/config.toml (cargo funde arrays), então
+    # as flags do kernel continuam valendo.
+    env = cargo_env()
+    cargo_home = Path(env.get("CARGO_HOME", str(Path.home() / ".cargo")))
+    remaps = [
+        f"--remap-path-prefix={cargo_home / 'registry' / 'src'}=/cargo/registry/src",
+        f"--remap-path-prefix={ROOT}=/nexo",
+    ]
+    flags = "[" + ", ".join(f'"{r}"' for r in remaps) + "]"
+    run(["cargo", "build", *prof, "--config", f"target.x86_64-unknown-uefi.rustflags={flags}"], cwd=LOADER_DIR)
+    run(["cargo", "build", *prof, "--config", f"target.x86_64-unknown-none.rustflags={flags}"], cwd=KERNEL_DIR)
+
+
+def make_esp(esp_img: Path, loader: Path, kernel: Path, cmdline: str) -> None:
+    mformat = require("mformat", "Instale mtools (macOS: brew install mtools; Debian: apt install mtools)")
+    mmd = require("mmd", "Instale mtools")
+    mcopy = require("mcopy", "Instale mtools")
+    if esp_img.exists():
+        esp_img.unlink()
+    sectors = ESP_SIZE_MIB * 1024 * 1024 // 512
+    # -C cria a imagem; -F FAT32; -N serial fixo (reprodutibilidade); -T total de setores.
+    run([mformat, "-i", str(esp_img), "-C", "-F", "-T", str(sectors), "-h", "64", "-s", "32",
+         "-N", "4E45584F", "-v", "NEXO", "::"])
+    run([mmd, "-i", esp_img, "::/EFI", "::/EFI/BOOT", "::/nexo"])
+    # Área de preparação com mtime fixo: os timestamps FAT vêm de SOURCE_DATE_EPOCH
+    # (mtools) e nunca do relógio ou do mtime dos binários recém-compilados.
+    staging = BUILD / "esp-staging"
+    staging.mkdir(exist_ok=True)
+    epoch = int(cargo_env()["SOURCE_DATE_EPOCH"])
+    files = {
+        "BOOTX64.EFI": (loader, "::/EFI/BOOT/BOOTX64.EFI"),
+        "kernel.elf": (kernel, "::/nexo/kernel.elf"),
+        "boot.cfg": (None, "::/nexo/boot.cfg"),
+    }
+    for name, (src, dest) in files.items():
+        dst = staging / name
+        if src is None:
+            dst.write_text("# Nexo OS boot.cfg — primeira linha nao comentada = linha de comando do kernel\n"
+                           f"{cmdline}\n")
+        else:
+            shutil.copy2(src, dst)
+        os.utime(dst, (epoch, epoch))
+        run([mcopy, "-i", esp_img, dst, dest])
+
+
+def write_symbols(kernel: Path) -> Path:
+    nm = llvm_tool("llvm-nm")
+    out = BUILD / "kernel.sym"
+    with open(out, "w") as f:
+        run([nm, "-n", "--defined-only", kernel], stdout=f)
+    return out
+
+
+def strip_debug(kernel: Path) -> Path:
+    """Cópia sem seções .debug_* (mantém .symtab para symbolication no kernel).
+
+    O ELF completo fica em build/kernel.elf para `tools/symbolize`; a cópia na ESP
+    não carrega caminhos absolutos do checkout, o que torna a imagem independente
+    do diretório onde o repositório foi clonado.
+    """
+    objcopy = llvm_tool("llvm-objcopy")
+    out = BUILD / "kernel-stripped.elf"
+    run([objcopy, "--strip-debug", kernel, out])
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--cmdline", default="", help="linha de comando do kernel (boot.cfg)")
+    ap.add_argument("--out", default=str(BUILD / "nexo.img"))
+    ap.add_argument("--debug", action="store_true", help="perfil dev em vez de release")
+    ap.add_argument("--no-build", action="store_true", help="reutiliza binarios ja compilados")
+    a = ap.parse_args()
+
+    BUILD.mkdir(exist_ok=True)
+    if not a.no_build:
+        build_rust(a.debug)
+    loader = LOADER_EFI if not a.debug else Path(str(LOADER_EFI).replace("/release/", "/debug/"))
+    kernel = KERNEL_ELF if not a.debug else Path(str(KERNEL_ELF).replace("/release/", "/debug/"))
+    for p in (loader, kernel):
+        if not p.exists():
+            die(f"binario ausente: {p}")
+
+    shutil.copy2(kernel, BUILD / "kernel.elf")
+    shutil.copy2(loader, BUILD / "BOOTX64.EFI")
+    sym = write_symbols(kernel)
+    kernel_esp = strip_debug(kernel)
+
+    esp = BUILD / "esp.img"
+    make_esp(esp, loader, kernel_esp, a.cmdline)
+    out = Path(a.out)
+    build_gpt_image(esp, out)
+    log(f"imagem: {out} ({out.stat().st_size // (1024*1024)} MiB) sha256={sha256(out)}")
+    log(f"kernel: {kernel.stat().st_size} bytes sha256={sha256(kernel)} (na ESP sem debuginfo: {kernel_esp.stat().st_size} bytes sha256={sha256(kernel_esp)})")
+    log(f"loader: {loader.stat().st_size} bytes sha256={sha256(loader)}")
+    log(f"simbolos: {sym}")
+
+
+if __name__ == "__main__":
+    main()

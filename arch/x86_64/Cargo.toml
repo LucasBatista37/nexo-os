@@ -1,0 +1,12 @@
+[package]
+name = "nexo-arch-x86_64"
+description = "Abstracoes x86_64 do Nexo OS: paginacao, GDT/TSS, IDT, traps, portas de E/S, serial, PIC/PIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexo-mm = { path = "../../kernel/lib/mm" }
+
+[lints]
+workspace = true

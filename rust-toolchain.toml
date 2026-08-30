@@ -1,0 +1,9 @@
+# Toolchain fixado (ver docs/toolchain.md). Atualizações somente via ADR/PR dedicado.
+[toolchain]
+channel = "1.98.0"
+# rust-src fica de fora de propósito: com ele instalado o rustc troca `/rustc/<hash>/`
+# por caminhos locais em strings de panic de código genérico de core/alloc, o que
+# tornaria a imagem dependente da máquina. Adicione localmente só para o IDE.
+components = ["rustfmt", "clippy", "llvm-tools"]
+targets = ["x86_64-unknown-none", "x86_64-unknown-uefi"]
+profile = "minimal"

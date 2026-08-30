@@ -1,0 +1,29 @@
+# Workspace de host: crates independentes de plataforma, testáveis com `cargo test`.
+# O kernel (`kernel/`) e o loader (`boot/loader/`) são workspaces próprios porque
+# exigem targets bare-metal distintos (x86_64-unknown-none / x86_64-unknown-uefi).
+[workspace]
+resolver = "2"
+members = [
+    "abi/boot",
+    "arch/x86_64",
+    "kernel/lib/mm",
+    "kernel/lib/heap",
+    "kernel/lib/sync",
+    "kernel/lib/symbols",
+    "libraries/font",
+]
+exclude = ["kernel", "boot/loader"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/[DEFINIR]/nexo-os"
+rust-version = "1.98"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"

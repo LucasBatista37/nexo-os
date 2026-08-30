@@ -1,0 +1,1 @@
+Reservado (ver ../README.md).

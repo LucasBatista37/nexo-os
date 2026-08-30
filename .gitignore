@@ -1,0 +1,7 @@
+/target/
+/kernel/target/
+/boot/loader/target/
+/build/
+*.img
+*.log
+.DS_Store

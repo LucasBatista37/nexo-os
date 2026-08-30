@@ -1,0 +1,1257 @@
+# Plano Mestre — Sistema Operacional Próprio de Alto Nível
+
+**Documento:** roadmap técnico, estratégico e operacional  
+**Versão:** 1.0  
+**Data-base:** 28 de agosto de 2026  
+**Horizonte:** 8 a 12+ anos para uma pessoa; menor com equipe experiente  
+**Estado inicial:** planejamento → **Fase 0 concluída em 2026-08-29** (ver `docs/CHECKLIST_STATUS.md`)  
+**Nome do projeto:** `Nexo OS` (provisório; era `[DEFINIR] OS`)
+
+---
+
+## 1. Objetivo do projeto
+
+Construir do zero um sistema operacional de uso geral com kernel, serviços de sistema, drivers, armazenamento, rede, interface gráfica, plataforma de aplicativos, segurança, instalador e atualizações próprios. O padrão de qualidade desejado é o de um sistema desktop moderno, comparável a Windows 11, macOS e distribuições Linux maduras nos equipamentos oficialmente suportados.
+
+“Comparável” não significa copiar a interface nem atingir imediatamente a mesma compatibilidade de hardware ou catálogo de programas. Windows, macOS e Linux acumulam décadas de trabalho, equipes grandes e colaboração de fabricantes. A meta realista é:
+
+- possuir arquitetura própria e coerente;
+- ser estável, seguro e visualmente refinado;
+- funcionar muito bem em QEMU e em um pequeno conjunto de computadores de referência;
+- oferecer aplicativos essenciais e um SDK utilizável;
+- crescer gradualmente em compatibilidade, comunidade e hardware.
+
+### 1.1 O que “do zero” significa neste plano
+
+O sistema terá kernel, modelo de processos, IPC, userland, compositor, shell gráfico e serviços próprios. Ele não será uma distribuição Linux e não usará o kernel Linux como base.
+
+Ainda será correto usar:
+
+- compiladores, linguagens e depuradores existentes;
+- especificações abertas como UEFI, ACPI, PCI, USB, TCP/IP, POSIX e VirtIO;
+- QEMU para virtualização;
+- bibliotecas pequenas e auditadas quando isso não elimina o aprendizado central;
+- fontes, formatos de arquivo e protocolos padronizados;
+- código externo somente após análise de licença, segurança e manutenção.
+
+Criar também uma CPU, uma ISA e todo o hardware não faz parte do escopo. A “arquitetura própria” será a arquitetura de software, segurança, serviços e experiência do sistema. Uma porta para RISC-V poderá ser feita no futuro.
+
+---
+
+## 2. Visão de produto
+
+### 2.1 Proposta central
+
+Um sistema operacional rápido, compreensível e seguro por padrão, no qual aplicativos recebem apenas as capacidades explicitamente concedidas, serviços podem ser atualizados de forma modular e o usuário entende o que está acontecendo com seus dados, dispositivos e tarefas.
+
+### 2.2 Princípios não negociáveis
+
+1. **Segurança por construção:** privilégio mínimo, isolamento, atualizações assinadas e redução de código privilegiado.
+2. **Memória segura:** Rust como linguagem principal; `unsafe` e Assembly concentrados, documentados e auditáveis.
+3. **Compatibilidade planejada:** ABI versionada e camadas de compatibilidade; nenhuma promessa informal de estabilidade.
+4. **Recuperação antes da conveniência:** toda atualização do sistema deve ter rollback; todo formato persistente deve resistir a falhas.
+5. **Desempenho mensurável:** decisões baseadas em métricas, traces e perfis, não em impressão.
+6. **Acessibilidade desde o desenho:** teclado, leitor de tela, contraste, escala e redução de movimento não serão adaptações tardias.
+7. **Identidade sem sacrificar familiaridade:** interface própria, mas com modelos mentais reconhecíveis para janelas, arquivos, aplicativos e configurações.
+8. **Documentação como parte do código:** recurso sem especificação, testes e documentação não está concluído.
+9. **Escopo controlado:** primeiro uma máquina virtual e um computador de referência; depois a expansão.
+10. **Evolução substituível:** componentes poderão ser trocados sem reescrever o sistema inteiro.
+
+### 2.3 Conceito provisório de experiência própria: “Contextos”
+
+O diferencial visual e de interação será validado por protótipos e testes, mas o plano parte desta direção:
+
+- o usuário organiza trabalho, estudo, vida pessoal ou projetos em **Contextos** persistentes;
+- cada Contexto preserva janelas, documentos, permissões temporárias, notificações e estado;
+- uma **Central de Ações** reúne busca, comandos, aplicativos, arquivos e automações;
+- uma **Faixa de Atividades** substitui a dependência de uma barra de tarefas tradicional, mostrando tarefas vivas, transferências, áudio, dispositivos e processos relevantes;
+- o sistema oferece janelas flutuantes e mosaico, sem impor apenas um modelo;
+- permissões são explicadas no momento de uso e podem ser inspecionadas por aplicativo;
+- animações comunicam continuidade e hierarquia, nunca escondem latência.
+
+Esse conceito não deve ser implementado diretamente no kernel. Ele pertence ao shell gráfico e deve permanecer substituível.
+
+### 2.4 Metas que não pertencem à primeira versão
+
+- executar todos os programas do Windows, macOS ou Linux;
+- suportar todo notebook, GPU, impressora e adaptador Wi-Fi;
+- criar navegador moderno do zero;
+- criar uma GPU API própria antes de possuir drivers básicos;
+- competir imediatamente com lojas de aplicativos existentes;
+- certificar-se para uso médico, automotivo ou aeroespacial;
+- prometer estabilidade de ABI antes de testes e governança adequados;
+- construir simultaneamente versões desktop, celular, servidor e embarcada.
+
+---
+
+## 3. Arquitetura técnica escolhida
+
+### 3.1 Resumo
+
+O sistema usará um **núcleo híbrido orientado a microkernel e baseado em capacidades**.
+
+No modo privilegiado permanecerão apenas:
+
+- inicialização e abstração mínima da CPU;
+- interrupções e exceções;
+- gerenciamento de memória e espaços de endereçamento;
+- threads, escalonamento e temporizadores;
+- IPC e objetos do kernel;
+- capacidades e controles fundamentais;
+- primitivas mínimas para DMA/IOMMU e depuração.
+
+Preferencialmente no espaço de usuário ficarão:
+
+- sistema de arquivos e VFS;
+- rede;
+- áudio;
+- compositor gráfico;
+- gerenciador de dispositivos;
+- drivers que possam ser isolados;
+- sessão, login, configurações e serviços de desktop;
+- instalador, atualizador e gerenciador de pacotes.
+
+Drivers ou caminhos críticos poderão possuir módulos privilegiados somente depois de medição, threat model e ADR aprovados. Isso é o aspecto “híbrido”: isolamento por padrão, fast paths excepcionais.
+
+### 3.2 Pilha de referência
+
+```mermaid
+flowchart TD
+    A["Firmware UEFI"] --> B["Boot Manager e Recovery"]
+    B --> C["Kernel mínimo"]
+    C --> D["IPC, memória, tarefas e capacidades"]
+    D --> E["Drivers e serviços isolados"]
+    E --> F["VFS, rede, áudio e segurança"]
+    F --> G["Compositor e shell Contextos"]
+    G --> H["SDK, runtimes e aplicativos"]
+```
+
+### 3.3 Plataformas e tecnologias iniciais
+
+| Decisão | Escolha inicial | Motivo |
+|---|---|---|
+| CPU | `x86_64` | Maior disponibilidade de documentação, emulação e computadores de teste |
+| Firmware | UEFI 64-bit | Inicialização moderna, framebuffer e caminho claro para Secure Boot |
+| Segunda arquitetura | `aarch64` | Somente após a abstração de hardware estar madura |
+| Terceira arquitetura | `riscv64` opcional | Boa plataforma futura de aprendizado e experimentação |
+| Kernel | Rust `no_std` + Assembly mínimo | Segurança de memória e controle bare-metal |
+| ABI pública | C estável e versionada | Interoperabilidade entre linguagens |
+| Executáveis | ELF inicialmente | Formato documentado e amplamente suportado por toolchains |
+| Máquina de desenvolvimento | QEMU `q35` + UEFI | Ambiente reproduzível antes do hardware real |
+| Dispositivos virtuais | VirtIO quando possível | Drivers virtuais padronizados e testáveis |
+| Build | Cargo + scripts reproduzíveis | Simplicidade inicial; evolução posterior conforme necessário |
+| CI | Linux + QEMU headless | Testes automáticos de boot e subsistemas |
+| Interface | Compositor e toolkit próprios | Identidade e controle da experiência |
+| Gráficos iniciais | Framebuffer/software renderer | Evita bloquear a GUI em drivers de GPU |
+| GPU futura | Compatibilidade Vulkan/DRM por camadas | Ecossistema e aceleração sem inventar uma API completa cedo |
+| Segurança | Capabilities + manifests + sandbox | Privilégio mínimo verificável |
+| Atualizações | Imagens A/B, atômicas e assinadas | Recuperação segura após falhas |
+
+### 3.4 Objetos fundamentais do kernel
+
+O desenho exato passará por RFC, mas o conjunto mínimo previsto é:
+
+- `Process`: contêiner de recursos e identidade;
+- `Thread`: unidade escalonável;
+- `AddressSpace`: mapas de memória virtual;
+- `MemoryObject`: memória anônima, compartilhada, arquivo ou dispositivo;
+- `Channel`: IPC bidirecional com transferência de capacidades;
+- `Port/Event`: espera, sinais e multiplexação assíncrona;
+- `Timer`: tempo monotônico e deadlines;
+- `Interrupt`: acesso autorizado a uma fonte de interrupção;
+- `DeviceMemory`: região MMIO/DMA autorizada;
+- `Job/Domain`: agrupamento, limites e encerramento recursivo;
+- `Capability/Handle`: referência com direitos específicos.
+
+### 3.5 Chamadas de sistema mínimas
+
+A superfície inicial deve ser pequena e versionada:
+
+- criar, iniciar, suspender e encerrar tarefas;
+- mapear, desmapear, proteger e compartilhar memória;
+- criar canais, enviar, receber, esperar e sinalizar;
+- duplicar, reduzir direitos e transferir capacidades;
+- consultar tempo e criar temporizadores;
+- manipular interrupções e memória de dispositivo com autorização;
+- obter informação mínima para depuração;
+- operações administrativas somente via capacidades especiais.
+
+Arquivos, sockets, janelas, áudio e configurações não precisam ser syscalls; serão protocolos IPC de serviços.
+
+### 3.6 Modelo de serviços
+
+| Serviço | Responsabilidade |
+|---|---|
+| `init` | Primeiro processo, inicia o sistema mínimo |
+| `service-manager` | Dependências, ciclo de vida, health checks e reinício |
+| `device-manager` | Descoberta de barramentos, vínculo e isolamento de drivers |
+| `vfs` | Namespace, mounts, permissões e roteamento de sistemas de arquivos |
+| `storage-manager` | Partições, volumes, criptografia e mídia removível |
+| `network-stack` | Ethernet, IP, ICMP, UDP, TCP, DHCP e DNS |
+| `security-broker` | Políticas, capabilities, consentimento e auditoria |
+| `package-manager` | Instalação e remoção transacional de pacotes |
+| `update-manager` | Atualizações A/B, verificação, rollback e recuperação |
+| `session-manager` | Login, sessão, bloqueio e credenciais do usuário |
+| `input-service` | Teclado, mouse, touch e métodos de entrada |
+| `compositor` | Superfícies, composição, displays e captura autorizada |
+| `audio-service` | Dispositivos, mixagem, rotas e permissões de microfone |
+| `settings-service` | Configurações tipadas, versionadas e sincronizáveis |
+| `log-service` | Logs estruturados, métricas, crash reports opt-in |
+| `power-manager` | Energia, suspensão, bateria e políticas térmicas |
+
+### 3.7 Modelo de aplicativos
+
+Cada aplicativo terá:
+
+- pacote imutável e assinado;
+- manifesto com ID, versão, entry point, tipos de arquivo e capacidades;
+- diretório privado de dados;
+- acesso a arquivos externos somente por seleção do usuário ou grant persistente;
+- acesso mediado a rede, câmera, microfone, localização, notificações e dispositivos;
+- limites de recursos e isolamento por processo ou domínio;
+- APIs versionadas do SDK;
+- atualizações transacionais;
+- declaração de compatibilidade mínima e máxima quando necessário.
+
+### 3.8 Compatibilidade
+
+A ordem será:
+
+1. ABI nativa C e SDK Rust.
+2. Biblioteca padrão e runtime próprios.
+3. Subconjunto POSIX para portar ferramentas de linha de comando.
+4. APIs de arquivo, processo, thread e socket suficientes para softwares portáveis.
+5. Web apps/PWA por meio de um motor de navegador portado, não criado do zero.
+6. Contêiner ou VM Linux opcional para aplicações legadas.
+7. Camadas Win32/Wine somente como pesquisa tardia; nunca requisito de 1.0.
+
+POSIX deve ser uma personalidade de compatibilidade, não a autoridade sobre toda a arquitetura. A especificação de referência é POSIX.1-2024, Issue 8.
+
+### 3.9 Sistema de arquivos
+
+Evolução planejada:
+
+1. FAT somente para a partição EFI.
+2. `ramfs/initramfs` para bring-up.
+3. Leitura de um formato simples e conhecido para testes.
+4. VFS próprio e API assíncrona.
+5. Escrita persistente com testes de queda de energia.
+6. Sistema de arquivos próprio copy-on-write somente após o VFS e a suíte de testes estarem maduros.
+
+Recursos desejados no formato final:
+
+- checksums de dados e metadados;
+- snapshots;
+- transações ou journaling;
+- compressão opcional;
+- criptografia por volume e integração com chaves de hardware;
+- quotas;
+- deduplicação apenas se houver benefício medido;
+- ferramenta offline de verificação e reparo;
+- especificação pública e versionada.
+
+### 3.10 Segurança
+
+O threat model inicial considera:
+
+- aplicativo local malicioso sem privilégios;
+- arquivo, pacote, mídia ou tráfego de rede malformado;
+- driver comprometido;
+- repositório ou chave online comprometida;
+- ataque de rollback;
+- acesso físico limitado;
+- perda de energia durante escrita ou atualização;
+- exploração de corrupção de memória em código `unsafe`.
+
+Defesas planejadas:
+
+- W^X, NX, ASLR e guard pages;
+- separação kernel/usuário e isolamento de drivers;
+- capabilities não forjáveis e redução de direitos;
+- validação de todos os limites IPC;
+- IOMMU e DMA restrito quando disponível;
+- pacotes assinados e metadados resistentes a rollback;
+- Secure Boot e measured boot após o fluxo básico estar estável;
+- criptografia de disco e cofre de segredos;
+- bloqueio de tela e autenticação segura;
+- fuzzing de parsers, syscalls, IPC, rede e sistemas de arquivos;
+- atualizações de segurança independentes da interface;
+- política de divulgação e resposta a vulnerabilidades.
+
+---
+
+## 4. Governança e método de trabalho
+
+### 4.1 Como usar esta checklist
+
+- `[ ]` não iniciado;
+- `[-]` em andamento;
+- `[x]` concluído;
+- `[!]` bloqueado, sempre acompanhado de uma issue;
+- cada item recebe uma issue com responsável, marco e evidência;
+- um item somente vira `[x]` quando atende à definição de pronto.
+
+### 4.2 Definição geral de pronto
+
+Uma funcionalidade está concluída somente quando:
+
+- [ ] a especificação ou ADR correspondente existe;
+- [ ] o código compila no ambiente limpo;
+- [ ] testes positivos, negativos e de falha passam;
+- [ ] o CI reproduz o resultado;
+- [ ] logs e erros permitem diagnóstico;
+- [ ] limites de segurança foram analisados;
+- [ ] documentação de desenvolvimento e uso foi atualizada;
+- [ ] não há `unsafe`, formatos ou protocolos sem justificativa;
+- [ ] existe demonstração ou artefato verificável;
+- [ ] regressões conhecidas estão registradas.
+
+### 4.3 Documentos obrigatórios
+
+- [x] `PROJECT_CHARTER.md`: visão, usuário-alvo e não objetivos.
+- [x] `ARCHITECTURE.md`: arquitetura vigente.
+- [x] `SECURITY.md`: contato, política e threat model.
+- [x] `CONTRIBUTING.md`: build, testes e revisão.
+- [x] `CODE_OF_CONDUCT.md`.
+- [x] `LICENSES.md`: licenças do projeto e dependências.
+- [x] `SUPPORTED_HARDWARE.md`.
+- [x] `COMPATIBILITY.md`: ABI, API e formatos.
+- [x] `RELEASE.md`: versionamento e canais.
+- [x] `RECOVERY.md`: backup, rollback e recuperação.
+- [x] diretório `docs/adr/` para decisões arquiteturais.
+- [x] diretório `docs/rfc/` para propostas grandes.
+
+### 4.4 ADRs iniciais
+
+- [x] ADR-0001 — linguagem principal e política de `unsafe`.
+- [x] ADR-0002 — microkernel híbrido e limites privilegiados.
+- [x] ADR-0003 — x86_64, UEFI e política de arquiteturas.
+- [x] ADR-0004 — modelo de objetos, handles e capabilities.
+- [x] ADR-0005 — formato e versionamento de IPC.
+- [x] ADR-0006 — ABI nativa e política de estabilidade.
+- [x] ADR-0007 — modelo de drivers.
+- [x] ADR-0008 — VFS e namespace.
+- [x] ADR-0009 — pacotes, manifests e identidade de aplicativos.
+- [x] ADR-0010 — atualizações A/B e trust root.
+- [x] ADR-0011 — telemetria opt-in e privacidade.
+- [x] ADR-0012 — licença do projeto e política de dependências.
+- [x] ADR-0013 — shell gráfico e conceito de Contextos.
+- [x] ADR-0014 — estratégia de compatibilidade POSIX/Linux/Web.
+
+### 4.5 Estrutura recomendada do repositório
+
+```text
+/
+├── boot/                 # loader UEFI, recovery e imagem
+├── kernel/               # núcleo independente de plataforma
+├── arch/                 # x86_64, aarch64 e HAL
+├── abi/                  # syscalls, IPC e formatos públicos
+├── services/             # init, VFS, rede, segurança etc.
+├── drivers/              # virtio, PCI, USB, armazenamento etc.
+├── libraries/            # runtime, libc, UI, codecs auditados
+├── compositor/           # display server e composição
+├── shell/                # desktop, Contextos e sessão
+├── apps/                 # aplicativos essenciais
+├── sdk/                  # headers, crates, ferramentas e exemplos
+├── tools/                # image builder, debugger e empacotamento
+├── tests/                # host, QEMU, integração, fuzz e hardware
+├── docs/                 # arquitetura, ADRs, RFCs e manuais
+├── third_party/          # dependências vendorizadas e licenças
+└── ci/                   # pipelines e ambientes reproduzíveis
+```
+
+---
+
+## 5. Roadmap plurianual
+
+Os anos representam ordem e esforço relativo, não datas rígidas. Algumas frentes poderão se sobrepor quando houver equipe. Para uma pessoa, só duas frentes devem estar ativas simultaneamente: uma principal e uma de manutenção/documentação.
+
+### Fase 0 — Fundação e preparação (meses 0–6)
+
+**Resultado:** projeto reproduzível, arquitetura documentada e primeiro binário UEFI.
+
+- [x] definir nome provisório, visão e público da versão 1.0 — *Nexo OS (provisório), PROJECT_CHARTER.md*;
+- [-] definir computador de desenvolvimento e computador de referência — *host macOS definido; PC de referência a escolher antes da Fase 7*;
+- [x] escolher licença do projeto — *MIT OR Apache-2.0, ADR-0012*;
+- [-] criar repositório, branches protegidas e convenções de commit — *repositório git local e convenções em CONTRIBUTING.md; remoto/branches protegidas pendentes*;
+- [x] configurar Rust bare-metal, linker, Assembly e QEMU;
+- [x] fixar versões do toolchain e registrar atualização controlada — *rust-toolchain.toml, docs/toolchain.md*;
+- [x] configurar UEFI para QEMU — *edk2 via tools/run-qemu*;
+- [x] gerar imagem de disco reproduzível — *make reproducible*;
+- [x] iniciar logs por porta serial;
+- [x] criar CI que compila e inicia a imagem em QEMU — *.github/workflows/ci.yml + make ci; execução hospedada depende de remoto*;
+- [x] criar teste que reconhece sucesso/falha pelo serial — *tools/test-qemu*;
+- [x] criar template de ADR e RFC;
+- [x] criar threat model v0 — *SECURITY.md*;
+- [-] concluir currículo básico de arquitetura de computadores — *guia em docs/study/; estudo pessoal contínuo*;
+- [-] publicar release `0.0.1-boot` — *tag local v0.0.1-boot e notas em docs/releases/; publicação exige remoto*.
+
+**Gate F0:** em um clone limpo, um único comando gera uma imagem que inicia em QEMU e o CI comprova a mensagem do kernel.
+
+### Fase 1 — Kernel mínimo confiável (meses 6–18)
+
+**Resultado:** kernel de 64 bits com memória, exceções, interrupções e multitarefa básica.
+
+- [ ] carregar mapa de memória fornecido pelo firmware;
+- [ ] abandonar corretamente os boot services UEFI;
+- [ ] inicializar GDT/TSS e estruturas x86_64 necessárias;
+- [ ] implementar IDT e handlers de exceção;
+- [ ] emitir panic com contexto e backtrace quando possível;
+- [ ] implementar alocador de páginas físicas;
+- [ ] implementar tabelas de páginas e espaços de endereçamento;
+- [x] implementar heap do kernel;
+- [ ] proteger regiões como read-only, NX e guard pages;
+- [ ] inicializar APIC, timer e interrupções externas;
+- [ ] descobrir CPUs e iniciar multiprocessamento SMP;
+- [ ] criar threads do kernel e troca de contexto;
+- [ ] criar escalonador simples preemptivo;
+- [ ] implementar relógio monotônico e timers;
+- [ ] adicionar locks, atomics e primitivas de sincronização;
+- [ ] criar testes de concorrência e stress em QEMU;
+- [ ] limitar e registrar todo uso de `unsafe`;
+- [ ] adicionar symbolication e dump mínimo de falhas;
+- [ ] publicar release `0.1-kernel`.
+
+**Gate F1:** 24 horas de stress em QEMU, múltiplas CPUs, memória virtual isolada, exceções tratadas e zero falha não explicada.
+
+### Fase 2 — Modo usuário, IPC e capabilities (ano 2)
+
+**Resultado:** aplicações sem privilégio executam isoladas e conversam por protocolos tipados.
+
+- [ ] entrar em ring 3 e retornar por syscall;
+- [ ] definir ABI de syscall e convenções de erro;
+- [ ] implementar processos, threads de usuário e jobs/domínios;
+- [ ] implementar handles e tabela por processo;
+- [ ] implementar direitos: ler, escrever, sinalizar, mapear, transferir e administrar;
+- [ ] implementar canais IPC e transferência de handles;
+- [ ] implementar espera múltipla, eventos e timers;
+- [ ] validar cópias entre usuário e kernel;
+- [ ] criar formato de protocolo tipado e gerador de código;
+- [ ] definir regras de compatibilidade do IPC;
+- [ ] criar `init` e `service-manager`;
+- [ ] criar políticas de reinício e dependências;
+- [ ] criar loader ELF de usuário;
+- [ ] criar runtime mínimo Rust e ABI C;
+- [ ] criar shell de diagnóstico no espaço de usuário;
+- [ ] testar isolamento e negação de capabilities;
+- [ ] fuzzar decodificador de IPC e syscalls;
+- [ ] publicar release `0.2-userspace`.
+
+**Gate F2:** três processos isolados executam simultaneamente, um servidor pode reiniciar sem reiniciar o kernel e acessos sem capability falham de forma testada.
+
+### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3)
+
+**Resultado:** sistema persistente com drivers isolados, VFS e recuperação de falhas.
+
+- [ ] implementar enumeração ACPI mínima;
+- [ ] implementar enumeração PCI/PCIe;
+- [ ] definir protocolo driver–device manager;
+- [ ] implementar binding por IDs e propriedades;
+- [ ] implementar VirtIO transport;
+- [ ] implementar VirtIO block;
+- [ ] implementar VirtIO input;
+- [ ] implementar VirtIO RNG;
+- [ ] implementar VirtIO console;
+- [ ] implementar drivers em processos isolados;
+- [ ] restringir MMIO, IRQ e DMA por capabilities;
+- [ ] criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro;
+- [ ] implementar cache de blocos e fila assíncrona;
+- [ ] definir VFS e namespace por sessão/processo;
+- [ ] implementar `ramfs`;
+- [ ] implementar FAT somente para EFI;
+- [ ] implementar leitura de um filesystem persistente de teste;
+- [ ] implementar escrita, flush e sincronização;
+- [ ] criar testes de imagem corrompida e corte de energia;
+- [ ] criar ferramenta de inspeção do disco no host;
+- [ ] publicar release `0.3-storage`.
+
+**Gate F3:** criar, ler, alterar e remover arquivos sobre VirtIO block; reiniciar preserva dados; um driver de armazenamento pode falhar sem corromper o kernel; testes simulam desligamentos abruptos.
+
+### Fase 4 — Rede e serviços básicos (anos 3–4)
+
+**Resultado:** sistema conectado com APIs de rede e controles de segurança.
+
+- [ ] implementar VirtIO net;
+- [ ] implementar Ethernet e ARP/NDP conforme a fase IPv6;
+- [ ] implementar IPv4;
+- [ ] implementar ICMP;
+- [ ] implementar UDP;
+- [ ] implementar TCP com suíte de testes e estados documentados;
+- [ ] implementar DHCP;
+- [ ] implementar DNS com cache e validação de entradas;
+- [ ] criar API de sockets nativa;
+- [ ] criar compatibilidade POSIX de sockets;
+- [ ] implementar IPv6;
+- [ ] implementar firewall por aplicativo e perfil;
+- [ ] expor permissões de rede por pacote;
+- [ ] portar uma biblioteca TLS auditada compatível com a licença;
+- [ ] criar armazenamento seguro de certificados;
+- [ ] implementar cliente HTTP para atualizações;
+- [ ] fuzzar pacotes, parsers e estados de protocolo;
+- [ ] criar captura de rede autorizada para diagnóstico;
+- [ ] publicar release `0.4-network`.
+
+**Gate F4:** obter endereço, resolver DNS, acessar um servidor TLS e sobreviver a tráfego malformado em testes de stress sem comprometer outros serviços.
+
+### Fase 5 — Gráficos, entrada e shell próprio (anos 3–5)
+
+**Resultado:** desktop gráfico funcional em QEMU, com estilo próprio e acessibilidade básica.
+
+- [ ] obter framebuffer UEFI e modos de vídeo;
+- [ ] criar renderer 2D por software;
+- [ ] implementar cores, composição alfa, clipping e transformações;
+- [ ] implementar rasterização de texto e fallback de fontes;
+- [ ] definir protocolo de superfícies e buffers;
+- [ ] implementar compositor em espaço de usuário;
+- [ ] implementar double/triple buffering e damage tracking;
+- [ ] integrar mouse e teclado pelo serviço de entrada;
+- [ ] implementar foco, atalhos e captura segura;
+- [ ] implementar janelas, redimensionamento, maximização e mosaico;
+- [ ] implementar múltiplos displays emulado;
+- [ ] criar toolkit UI nativo e tokens de design;
+- [ ] criar gerenciamento de temas claro/escuro e alto contraste;
+- [ ] criar login, bloqueio e sessão;
+- [ ] prototipar e testar o modelo de Contextos;
+- [ ] implementar Central de Ações;
+- [ ] implementar Faixa de Atividades;
+- [ ] criar notificações e controles de atenção;
+- [ ] implementar clipboard com mediação e histórico opt-in;
+- [ ] implementar drag-and-drop por grants;
+- [ ] implementar leitor de tela em arquitetura, ainda que simples;
+- [ ] implementar navegação completa por teclado;
+- [ ] implementar escala fracionária e redução de movimento;
+- [ ] testar usabilidade com usuários externos;
+- [ ] publicar release `0.5-desktop`.
+
+**Gate F5:** usuário inicia sessão, abre dois aplicativos, gerencia janelas/Contextos, usa teclado e mouse, reinicia a sessão e recupera o estado sem reiniciar o kernel.
+
+### Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6)
+
+**Resultado:** terceiros conseguem desenvolver, empacotar, instalar e atualizar aplicações.
+
+- [ ] estabilizar ABI nativa v1 experimental;
+- [ ] publicar SDK Rust;
+- [ ] publicar headers e toolchain C/C++;
+- [ ] criar gerador de projeto;
+- [ ] criar documentação e exemplos;
+- [ ] criar depurador remoto e integração com GDB/LLDB quando viável;
+- [ ] criar profiler e visualizador de traces;
+- [ ] definir formato de pacote e manifesto;
+- [ ] implementar assinatura e verificação de pacotes;
+- [ ] implementar instalação transacional;
+- [ ] implementar permissões declarativas e consentimento;
+- [ ] criar portal de arquivos, câmera, microfone e notificações;
+- [ ] criar repositório de pacotes de desenvolvimento;
+- [ ] criar processo de revisão e revogação;
+- [ ] portar toolchain e utilitários POSIX prioritários;
+- [ ] criar terminal e shell;
+- [ ] criar gerenciador de arquivos;
+- [ ] criar editor de texto;
+- [ ] criar configurações;
+- [ ] criar monitor de sistema;
+- [ ] criar visualizador de imagens e documentos básicos;
+- [ ] criar calculadora, calendário e utilitários;
+- [ ] portar um motor web existente com sandbox, se recursos permitirem;
+- [ ] criar APIs de compartilhamento entre aplicativos;
+- [ ] publicar release `0.6-sdk`.
+
+**Gate F6:** um desenvolvedor novo, seguindo apenas a documentação, cria um aplicativo gráfico, solicita uma capability, empacota, instala, executa, depura e atualiza o app.
+
+### Fase 7 — Áudio, mídia, USB e hardware real (anos 5–7)
+
+**Resultado:** o sistema funciona como desktop diário limitado em máquinas específicas.
+
+- [ ] implementar USB host controller escolhido para o hardware de referência;
+- [ ] implementar HID USB;
+- [ ] implementar armazenamento USB;
+- [ ] criar enumeração e autorização de dispositivos USB;
+- [ ] implementar NVMe ou AHCI conforme o computador de referência;
+- [ ] implementar teclado, touchpad e mouse reais;
+- [ ] implementar relógio, RTC e fusos horários;
+- [ ] implementar áudio no hardware de referência;
+- [ ] criar servidor de áudio, mixagem e controle de volume;
+- [ ] implementar permissão e indicador de microfone;
+- [ ] implementar câmera somente após isolamento e indicador confiável;
+- [ ] implementar Bluetooth em fase posterior e limitada;
+- [ ] implementar Ethernet real;
+- [ ] escolher um único chipset Wi-Fi inicial e documentá-lo;
+- [ ] implementar GPU/display mínimo do hardware de referência ou usar framebuffer compatível;
+- [ ] implementar suspensão, retomada e tampa do notebook;
+- [ ] implementar bateria, temperatura e política térmica;
+- [ ] criar daemon de firmware e política de blobs externos;
+- [ ] criar laboratório com inventário e testes repetíveis;
+- [ ] publicar release `0.7-hardware-alpha`.
+
+**Gate F7:** instalar em ao menos um computador de referência, usar armazenamento, entrada, tela, rede e áudio, suspender/retomar e executar a suíte de regressão repetidamente.
+
+### Fase 8 — Segurança, instalação, atualização e recuperação (anos 5–8)
+
+**Resultado:** sistema distribuível com cadeia de confiança e recuperação confiável.
+
+- [ ] revisar threat model por subsistema;
+- [ ] auditar syscalls e `unsafe` crítico;
+- [ ] implementar usuários, credenciais e bloqueio seguro;
+- [ ] implementar criptografia de disco;
+- [ ] integrar TPM quando disponível;
+- [ ] criar trust root offline e cerimônia de chaves;
+- [ ] implementar pacotes e imagens assinadas;
+- [ ] implementar proteção contra rollback;
+- [ ] implementar layout A/B;
+- [ ] implementar atualização atômica e health check pós-boot;
+- [ ] implementar rollback automático;
+- [ ] criar ambiente de recuperação independente;
+- [ ] criar instalador gráfico e particionamento protegido;
+- [ ] criar instalação em máquina vazia e dual boot documentado;
+- [ ] implementar Secure Boot depois da cadeia assinada interna;
+- [ ] criar backup e restauração de dados de usuário;
+- [ ] criar reset preservando arquivos quando possível;
+- [ ] implementar crash dumps protegidos e consentimento de envio;
+- [ ] montar fuzzing contínuo;
+- [ ] executar revisão independente de segurança;
+- [ ] realizar exercícios de chave comprometida e repositório malicioso;
+- [ ] publicar release `0.8-distributable-alpha`.
+
+**Gate F8:** falha de energia durante atualização, slot corrompido, pacote malicioso e chave online comprometida são detectados ou recuperados conforme testes documentados.
+
+### Fase 9 — Beta público controlado (anos 7–10)
+
+**Resultado:** comunidade pequena utiliza o sistema em hardware certificado.
+
+- [ ] definir lista fechada de hardware beta;
+- [ ] criar imagem de instalação assinada;
+- [ ] criar canais nightly, alpha, beta e stable;
+- [ ] implantar servidor de símbolos e bugs;
+- [ ] implantar crash reporting opt-in;
+- [ ] criar triagem de segurança e SLA interno;
+- [ ] manter matriz de regressão por hardware;
+- [ ] executar testes de atualização desde versões anteriores;
+- [ ] testar internacionalização em português e inglês;
+- [ ] concluir acessibilidade AA nas interfaces essenciais;
+- [ ] criar documentação para usuários;
+- [ ] criar documentação para fabricantes e drivers;
+- [ ] criar portal para desenvolvedores;
+- [ ] distribuir SDK versionado;
+- [ ] medir crash-free sessions, boot, RAM e bateria;
+- [ ] formar grupo de 20 testadores;
+- [ ] ampliar para 100 testadores após gates de estabilidade;
+- [ ] corrigir bloqueadores de uso diário;
+- [ ] congelar ABI candidata a 1.0;
+- [ ] publicar release `0.9-beta`.
+
+**Gate F9:** taxa de instalação e atualização bem-sucedida acima da meta definida, nenhuma corrupção conhecida, falhas críticas abaixo do limite e uso diário comprovado no hardware certificado.
+
+### Fase 10 — Versão 1.0 e expansão (anos 8–12+)
+
+**Resultado:** sistema estável dentro de um contrato de suporte explícito.
+
+- [ ] publicar contrato de compatibilidade da ABI 1.x;
+- [ ] publicar política de suporte e fim de vida;
+- [ ] concluir auditoria externa prioritária;
+- [ ] garantir atualização e rollback desde a última beta;
+- [ ] garantir instalação limpa e recuperação;
+- [ ] certificar 1 a 3 modelos de computador;
+- [ ] publicar SDK, documentação e exemplos finais;
+- [ ] manter aplicativos essenciais atualizáveis;
+- [ ] publicar repositório stable assinado;
+- [ ] publicar SBOM das imagens e pacotes próprios;
+- [ ] publicar notas de segurança e limitações conhecidas;
+- [ ] estabelecer governança de releases;
+- [ ] publicar `[NOME] OS 1.0`;
+- [ ] iniciar porta `aarch64` somente com abstrações maduras;
+- [ ] expandir drivers por prioridade e dados de usuários;
+- [ ] pesquisar aceleração GPU e compatibilidade Vulkan plena;
+- [ ] pesquisar VM Linux integrada;
+- [ ] fomentar ecossistema de aplicativos e fabricantes.
+
+**Gate 1.0:** todas as promessas públicas são testáveis, a lista de hardware é explícita, atualização e recuperação são confiáveis, e não há bloqueador crítico conhecido para os cenários oficialmente suportados.
+
+---
+
+## 6. Checklists por frente permanente
+
+Estas listas atravessam várias fases e devem ser revisadas a cada release.
+
+### 6.1 Kernel e baixo nível
+
+- [x] especificação da ABI de boot — *docs/spec/boot-abi.md*;
+- [-] memória física e virtual — *0.0.1-boot: bitmap + paginação 4 níveis; falta SMP/afinidade*;
+- [ ] SMP e afinidade;
+- [ ] preempção e prioridades;
+- [ ] temporizadores de alta resolução;
+- [ ] isolamento usuário/kernel;
+- [ ] syscalls versionadas;
+- [ ] IPC com transferência de capabilities;
+- [ ] contabilidade e limites de recursos;
+- [-] panic, dump e symbolication — *panic/backtrace/símbolos prontos; dump completo pendente*;
+- [ ] mitigação de classes de exploração;
+- [ ] benchmarks de contexto, syscall e IPC;
+- [ ] stress de 24h e posteriormente 7 dias;
+- [ ] documentação de todas as invariantes `unsafe`.
+
+### 6.2 Drivers
+
+- [ ] modelo e lifecycle de driver;
+- [ ] descoberta e binding;
+- [ ] isolamento por host de driver;
+- [ ] PCI/PCIe;
+- [ ] ACPI;
+- [ ] VirtIO block, net, input, console e RNG;
+- [ ] USB e HID;
+- [ ] NVMe/AHCI;
+- [ ] display/GPU;
+- [ ] áudio;
+- [ ] Ethernet e Wi-Fi limitado;
+- [ ] energia e bateria;
+- [ ] DMA/IOMMU;
+- [ ] hotplug;
+- [ ] assinatura e distribuição de drivers;
+- [ ] suíte de conformidade por classe de dispositivo.
+
+### 6.3 Armazenamento
+
+- [ ] VFS e namespaces;
+- [ ] cache e writeback;
+- [ ] permissões e ACLs/capabilities;
+- [ ] arquivos mapeados em memória;
+- [ ] mounts e mídia removível;
+- [ ] filesystem persistente;
+- [ ] ferramenta de verificação e reparo;
+- [ ] snapshots;
+- [ ] criptografia;
+- [ ] quotas;
+- [ ] testes de corrupção;
+- [ ] testes de queda de energia;
+- [ ] migração de formato;
+- [ ] backup e restauração.
+
+### 6.4 Rede
+
+- [ ] Ethernet;
+- [ ] IPv4 e IPv6;
+- [ ] ICMP, UDP e TCP;
+- [ ] DHCP e DNS;
+- [ ] sockets nativos e POSIX;
+- [ ] TLS;
+- [ ] certificados e relógio confiável;
+- [ ] firewall;
+- [ ] permissões por aplicativo;
+- [ ] VPN em fase posterior;
+- [ ] Wi-Fi e gerenciamento de redes;
+- [ ] captive portal;
+- [ ] diagnósticos;
+- [ ] fuzzing contínuo.
+
+### 6.5 Desktop e experiência
+
+- [ ] linguagem visual original;
+- [ ] tokens de cor, tipografia, espaçamento e movimento;
+- [ ] compositor;
+- [ ] janelas flutuantes e mosaico;
+- [ ] Contextos persistentes;
+- [ ] Central de Ações;
+- [ ] Faixa de Atividades;
+- [ ] login e bloqueio;
+- [ ] notificações;
+- [ ] multi-monitor;
+- [ ] escala e alta densidade;
+- [ ] clipboard e drag-and-drop seguros;
+- [ ] temas e personalização;
+- [ ] atalhos consistentes;
+- [ ] onboarding e recuperação de erro;
+- [ ] testes de usabilidade desktop e notebook.
+
+### 6.6 Aplicativos e SDK
+
+- [ ] ABI C;
+- [ ] SDK Rust;
+- [ ] toolkit UI;
+- [ ] runtime e biblioteca padrão;
+- [ ] CLI de build, run, test, debug e package;
+- [ ] templates e exemplos;
+- [ ] documentação gerada;
+- [ ] pacotes e manifests;
+- [ ] capabilities/portals;
+- [ ] repositório e atualização;
+- [ ] terminal;
+- [ ] arquivos;
+- [ ] configurações;
+- [ ] monitor do sistema;
+- [ ] editor;
+- [ ] visualizadores;
+- [ ] motor web portado;
+- [ ] compatibilidade POSIX progressiva.
+
+### 6.7 Segurança e privacidade
+
+- [-] threat model atualizado — *v0 em SECURITY.md*;
+- [ ] privilégio mínimo;
+- [ ] isolamento de drivers e serviços;
+- [-] W^X, NX, ASLR e guard pages — *W^X, NX e guard pages ativos; ASLR pendente*;
+- [ ] IOMMU;
+- [ ] consentimento de câmera/microfone/rede/arquivos;
+- [ ] indicadores de privacidade resistentes a falsificação;
+- [ ] cofre de credenciais;
+- [ ] criptografia de disco;
+- [ ] Secure/Measured Boot;
+- [ ] pacotes e updates assinados;
+- [ ] proteção contra rollback;
+- [ ] rotação e revogação de chaves;
+- [ ] fuzzing e sanitizers onde aplicável;
+- [ ] SBOM e análise de dependências;
+- [ ] política de vulnerabilidades;
+- [ ] auditoria externa.
+
+### 6.8 Qualidade e confiabilidade
+
+- [x] build reproduzível;
+- [x] testes unitários no host;
+- [x] testes kernel/QEMU;
+- [ ] testes de integração de serviços;
+- [ ] testes end-to-end de boot/login/app/update;
+- [ ] property tests;
+- [ ] fuzzing;
+- [ ] fault injection;
+- [ ] testes de corte de energia;
+- [ ] testes SMP e race conditions;
+- [ ] testes de longa duração;
+- [ ] matriz de hardware;
+- [ ] performance regression gates;
+- [ ] crash dumps e símbolos;
+- [ ] métricas respeitando privacidade;
+- [ ] processo de triagem e regressão.
+
+### 6.9 Acessibilidade e internacionalização
+
+- [ ] toda ação essencial acessível por teclado;
+- [ ] árvore semântica de acessibilidade;
+- [ ] leitor de tela;
+- [ ] ampliação e escala;
+- [ ] alto contraste;
+- [ ] redução de movimento;
+- [ ] legendas e indicadores visuais para áudio;
+- [ ] tamanhos de texto ajustáveis;
+- [ ] métodos de entrada;
+- [ ] Unicode completo nas camadas fundamentais;
+- [ ] localização pt-BR e en-US;
+- [ ] formatos de data, hora, número e moeda;
+- [ ] layouts da direita para a esquerda em fase posterior;
+- [ ] testes com pessoas e tecnologias assistivas.
+
+### 6.10 Distribuição e operação
+
+- [-] image builder — *tools/build-image (GPT + ESP); instalador/assinatura pendentes*;
+- [ ] instalador;
+- [ ] recovery;
+- [ ] canais de release;
+- [ ] A/B e rollback;
+- [ ] repositório assinado;
+- [ ] servidor de símbolos;
+- [ ] espelhos e CDN quando necessário;
+- [ ] status público;
+- [ ] política de suporte;
+- [ ] compatibilidade de upgrades;
+- [ ] documentação de dual boot;
+- [ ] política de coleta opt-in;
+- [ ] plano de resposta a incidentes.
+
+---
+
+## 7. Marcos executáveis e versões
+
+| Versão | Demonstração obrigatória | Condição de saída |
+|---|---|---|
+| `0.0.1-boot` | Boot UEFI em QEMU e log serial | Build limpo reproduz o boot no CI |
+| `0.1-kernel` | Memória, interrupções, SMP e threads | Stress sem falha inexplicada |
+| `0.2-userspace` | Processos, syscalls, IPC e capabilities | Isolamento e reinício de serviço comprovados |
+| `0.3-storage` | Driver block, VFS e persistência | Testes de corrupção e corte de energia |
+| `0.4-network` | DHCP, DNS, TCP/IP e TLS | Rede malformada não derruba o sistema |
+| `0.5-desktop` | Login, compositor, janelas e Contextos | Fluxo gráfico end-to-end utilizável |
+| `0.6-sdk` | App externo criado e empacotado | Tutorial funciona em ambiente limpo |
+| `0.7-hardware-alpha` | Boot em PC de referência | Entrada, disco, rede, vídeo e áudio essenciais |
+| `0.8-distributable-alpha` | Instalar, atualizar, falhar e recuperar | Rollback e cadeia de confiança testados |
+| `0.9-beta` | Uso diário por grupo controlado | Metas de estabilidade e compatibilidade atendidas |
+| `1.0` | Produto documentado e suportado | Contratos públicos testados e auditados |
+
+### 7.1 Regra de avanço
+
+Não iniciar uma versão principal porque “o calendário chegou”. Avançar quando o gate técnico da versão anterior estiver atendido. É aceitável desenvolver protótipos da fase seguinte, mas eles não podem ocultar dívida crítica da base.
+
+---
+
+## 8. Plano dos primeiros 90 dias
+
+### Semanas 1–2 — Contrato do projeto
+
+- [x] preencher nome provisório, público e promessa de 1.0;
+- [x] escolher licença;
+- [x] escolher x86_64 + UEFI como plataforma 1;
+- [x] registrar ADR-0001 a ADR-0004;
+- [x] criar repositório e estrutura mínima;
+- [x] configurar board de tarefas e milestones;
+- [x] instalar Rust, LLVM/binutils, QEMU, GDB/LLDB e firmware UEFI;
+- [x] registrar versões exatas e comando de setup.
+
+**Entrega:** `PROJECT_CHARTER.md`, quatro ADRs e ambiente validado.
+
+### Semanas 3–4 — Imagem inicializável
+
+- [x] compilar um binário UEFI;
+- [x] criar imagem GPT com partição EFI;
+- [x] inicializar no QEMU;
+- [x] escrever no console/framebuffer;
+- [x] escrever no serial;
+- [x] criar comando único `build-image`;
+- [x] criar comando único `run-qemu`.
+
+**Entrega:** vídeo ou log do primeiro boot e imagem reproduzível.
+
+### Semanas 5–6 — Kernel e erros
+
+- [x] separar loader e kernel;
+- [x] transferir mapa de memória e framebuffer;
+- [x] configurar entry point de 64 bits;
+- [x] implementar logger estruturado mínimo;
+- [x] implementar panic;
+- [x] causar e tratar exceção de teste;
+- [x] gerar símbolos e localizar endereço de falha.
+
+**Entrega:** kernel identifica uma falha deliberada e fornece contexto útil.
+
+### Semanas 7–8 — Memória física
+
+- [x] normalizar mapa de memória;
+- [x] marcar regiões reservadas;
+- [x] implementar frame allocator;
+- [x] testar alocação, liberação e exaustão;
+- [x] criar invariantes e testes no host;
+- [x] mapear framebuffer e regiões necessárias.
+
+**Entrega:** relatório de memória e testes de exaustão.
+
+### Semanas 9–10 — Memória virtual e heap
+
+- [x] criar abstração de page tables;
+- [x] mapear/desmapear páginas;
+- [x] aplicar permissões RW/NX;
+- [x] criar guard page;
+- [ ] implementar heap do kernel;
+- [x] testar page fault intencional;
+- [x] medir e registrar alocações.
+
+**Entrega:** heap funcional e falhas de permissão detectadas.
+
+### Semanas 11–12 — Interrupções e release inicial
+
+- [x] configurar IDT completa para exceções relevantes;
+- [x] configurar timer;
+- [x] contar ticks e tempo monotônico inicial;
+- [x] executar duas tarefas cooperativas simples;
+- [x] automatizar boot no CI;
+- [x] automatizar timeout e resultado via serial;
+- [-] revisar documentação e publicar `0.0.1-boot` — *documentação revisada; release tagueada localmente, publicação pendente de remoto*.
+
+**Entrega:** primeira release e relatório do que foi aprendido.
+
+### Critério dos 90 dias
+
+Ao final, não é necessário possuir GUI ou shell. O sucesso é ter uma fundação reproduzível, observável e testada. Se a imagem ainda depender de passos manuais ou falhas não puderem ser diagnosticadas, o projeto permanece nesta fase.
+
+---
+
+## 9. Currículo paralelo de estudo
+
+### Nível A — Antes e durante o primeiro boot
+
+- [ ] binário, hexadecimal, endianness e complemento de dois;
+- [ ] CPU, registradores, pilha, chamadas e ABI;
+- [ ] memória virtual, páginas e TLB;
+- [ ] Rust ownership, lifetimes, atomics, `no_std` e `unsafe`;
+- [ ] Assembly x86_64 básico;
+- [ ] linker, seções, símbolos, relocation e ELF;
+- [ ] UEFI e mapa de memória;
+- [ ] GDB/LLDB e leitura de disassembly;
+- [ ] Git, CI e builds reproduzíveis.
+
+### Nível B — Kernel e concorrência
+
+- [ ] interrupções, exceções, APIC e temporizadores;
+- [ ] processos, threads e troca de contexto;
+- [ ] schedulers;
+- [ ] locks, atomics, memory ordering e race conditions;
+- [ ] IPC e passagem de mensagens;
+- [ ] capabilities e modelos de acesso;
+- [ ] DMA, MMIO e IOMMU;
+- [ ] property testing e fuzzing.
+
+### Nível C — Sistema completo
+
+- [ ] VFS e filesystems;
+- [ ] Ethernet, IP, TCP, DNS e TLS;
+- [ ] PCIe, USB, NVMe e classes de dispositivos;
+- [ ] composição, rasterização, fontes e color management;
+- [ ] áudio digital e sincronização;
+- [ ] energia, ACPI e suspensão;
+- [ ] criptografia aplicada e gestão de chaves;
+- [ ] atualização segura e recuperação;
+- [ ] ABI/API design e compatibilidade;
+- [ ] acessibilidade, internacionalização e UX research.
+
+### Projetos de estudo auxiliares
+
+- [ ] escrever um alocador em user space;
+- [ ] criar um executor de threads simples;
+- [ ] criar um filesystem em um arquivo de imagem;
+- [ ] criar um protocolo RPC tipado entre processos normais;
+- [ ] criar um renderer 2D por software;
+- [ ] implementar cliente TCP/HTTP educacional em user space;
+- [ ] fuzzar um parser binário próprio;
+- [ ] analisar a arquitetura de Redox, seL4, Fuchsia e Linux sem copiá-las cegamente.
+
+---
+
+## 10. Métricas e gates quantitativos
+
+As metas numéricas devem ser definidas após obter baseline. Não escolher números apenas para parecer competitivo.
+
+| Área | Métrica | Primeira medição | Gate futuro |
+|---|---|---|---|
+| Boot | tempo firmware→login | `0.5` | meta para `0.9` |
+| Memória | RAM ociosa e por serviço | `0.2` | orçamento por release |
+| Kernel | latência de syscall/IPC/context switch | `0.2` | regressão máxima definida |
+| Estabilidade | horas de stress sem crash | `0.1` | 24h, depois 7 dias |
+| Arquivos | operações e recuperação após falha | `0.3` | zero corrupção conhecida |
+| Rede | throughput, latência e perda | `0.4` | baseline por driver |
+| Gráficos | frame time, input latency e memória | `0.5` | 60 FPS no hardware-alvo quando aplicável |
+| Atualização | sucesso e rollback | `0.8` | 100% nos cenários de fault injection definidos |
+| Segurança | superfície `unsafe`, fuzz coverage e findings | contínuo | nenhum crítico aberto em stable |
+| Energia | autonomia, suspensão e retomada | `0.7` | meta por dispositivo certificado |
+| UX | conclusão de tarefas e erros | `0.5` | metas após testes com usuários |
+| Acessibilidade | fluxos essenciais completos | `0.5` | 100% antes de 1.0 |
+
+### Painel mensal
+
+```text
+Release atual:
+Marco ativo:
+Horas disponíveis/semana:
+Itens concluídos:
+Itens bloqueados:
+Cobertura de testes relevante:
+Tempo de boot:
+RAM ociosa:
+Crash mais recente:
+Maior risco atual:
+Decisão necessária:
+Próxima demonstração pública:
+```
+
+---
+
+## 11. Riscos principais e respostas
+
+| Risco | Sinal de alerta | Resposta planejada |
+|---|---|---|
+| Escopo infinito | muitas frentes abertas e nenhuma release | limitar WIP a duas frentes e aplicar gates |
+| Drivers consumirem o projeto | tentativa de suportar hardware aleatório | QEMU + 1 PC de referência até `0.8` |
+| GUI antes da base | interface bonita sobre kernel instável | manter GUI como cliente dos contratos reais |
+| Filesystem corromper dados | escrita sem fault injection | usar formato simples primeiro e testes de energia |
+| ABI quebrar aplicativos | mudanças silenciosas | versionamento, geradores e testes de compatibilidade |
+| `unsafe` crescer sem controle | blocos sem invariantes | orçamento, revisão e documentação obrigatória |
+| Microkernel ficar lento | cópias/IPC excessivos | shared memory controlada, batching e fast paths medidos |
+| Segurança tardia | permissões adicionadas após APIs | capabilities e threat model desde `0.2` |
+| Atualizador comprometer sistema | chave única online | trust root offline, papéis, threshold e rollback protection |
+| Navegador dominar recursos | tentativa de criar engine própria | portar engine existente após SDK e sandbox |
+| Falta de aplicativos | ABI e toolkit instáveis | SDK pequeno, exemplos e compatibilidade POSIX/Web |
+| Licença incompatível | código copiado sem inventário | revisão antes de merge e SBOM |
+| Burnout | meses sem demonstração | release visível a cada 8–12 semanas |
+| Falta de usuários reais | decisões de UX por gosto pessoal | protótipos e testes antes de congelar shell |
+| Dependência de uma pessoa | conhecimento apenas na memória | especificações, ADRs, testes e runbooks |
+
+---
+
+## 12. Rotina de execução
+
+### Semanal
+
+- [ ] escolher no máximo um objetivo principal;
+- [ ] reservar bloco de estudo e bloco de implementação;
+- [ ] escrever testes antes ou junto do comportamento crítico;
+- [ ] registrar decisões e descobertas;
+- [ ] executar CI completo;
+- [ ] produzir uma demonstração curta ou evidência;
+- [ ] atualizar checklist e bloqueios;
+- [ ] revisar o próximo risco técnico.
+
+### A cada 4 semanas
+
+- [ ] atualizar métricas;
+- [ ] fechar issues antigas ou replanejá-las explicitamente;
+- [ ] revisar dependências e licenças;
+- [ ] revisar `unsafe` novo;
+- [ ] testar imagem em ambiente limpo;
+- [ ] fazer restauração de backup do projeto;
+- [ ] escrever relatório de progresso de uma página.
+
+### A cada trimestre
+
+- [ ] realizar demo end-to-end;
+- [ ] revisar arquitetura e ADRs;
+- [ ] executar threat-model review;
+- [ ] realizar stress/fuzzing prolongado;
+- [ ] rever computador de referência sem ampliar por impulso;
+- [ ] ajustar cronograma conforme horas reais;
+- [ ] publicar release ou explicar objetivamente o gate faltante.
+
+### Anualmente
+
+- [ ] rever visão, público e diferenciais;
+- [ ] atualizar snapshot de UEFI, ACPI, VirtIO, POSIX e Vulkan;
+- [ ] revisar licença e cadeia de fornecedores;
+- [ ] revisar política criptográfica;
+- [ ] executar auditoria externa possível;
+- [ ] arquivar e testar recuperação de repositório, chaves e artefatos;
+- [ ] decidir continuar, reduzir escopo, formar equipe ou buscar financiamento.
+
+---
+
+## 13. Estimativa de esforço
+
+Esta é uma estimativa de planejamento, não uma promessa:
+
+| Dedicação | Resultado provável |
+|---|---|
+| 5–10 h/semana | kernel educacional e desktop em VM ao longo de vários anos; 1.0 pode exigir 10–15+ anos |
+| 15–25 h/semana | alpha coerente em 4–7 anos; 1.0 focada em 7–12 anos |
+| 40 h/semana, uma pessoa | alpha em 2–4 anos; 1.0 focada em 5–8 anos, com grandes limitações de drivers/apps |
+| equipe de 5–10 especialistas | frentes paralelas; beta em 3–5 anos ainda depende do escopo e hardware |
+
+Mesmo após 1.0, compatibilidade ampla, segurança e manutenção nunca ficam “prontas”. O projeto torna-se uma operação permanente.
+
+### 13.1 Perfis necessários ao crescer a equipe
+
+- kernel/arquitetura;
+- drivers e hardware;
+- storage/filesystems;
+- rede e segurança;
+- gráficos/compositor;
+- UI toolkit e desktop;
+- SDK/toolchain/compatibilidade;
+- QA, fuzzing e infraestrutura;
+- UX, design e acessibilidade;
+- release, atualizações e operação.
+
+---
+
+## 14. Critérios de decisão: continuar ou mudar o caminho
+
+### Após 6 meses
+
+Continuar se:
+
+- build e boot forem reproduzíveis;
+- houver rotina sustentável;
+- o baixo nível ainda fizer sentido como objetivo.
+
+Reduzir escopo se:
+
+- não houver tempo regular;
+- toda sessão for gasta reparando o ambiente;
+- a motivação real for apenas criar uma interface diferenciada.
+
+### Após 2 anos
+
+Continuar rumo ao sistema completo se:
+
+- user mode, IPC e isolamento forem demonstráveis;
+- testes forem parte normal do projeto;
+- documentação permitir retomar após pausas.
+
+Considerar base existente se o objetivo principal tiver se tornado lançar um produto rapidamente.
+
+### Antes de hardware real
+
+Somente avançar se:
+
+- QEMU estiver estável;
+- drivers virtuais estiverem isolados;
+- logs e dumps forem suficientes;
+- o dispositivo de referência estiver congelado e documentado.
+
+### Antes de beta público
+
+Somente avançar se:
+
+- existir instalador e recovery;
+- atualizações tiverem rollback;
+- chaves e repositório possuírem threat model;
+- o escopo de hardware estiver explícito;
+- dados do usuário sobreviverem aos testes de falha definidos.
+
+---
+
+## 15. Checklist de início imediato
+
+Use esta como a primeira página operacional do projeto:
+
+- [x] escolher nome provisório — *Nexo OS*;
+- [x] escrever em uma frase quem usará a versão 1.0;
+- [-] escolher dedicação semanal sustentável — *meta provisória 10–15 h/semana no charter; confirmar*;
+- [x] definir QEMU `x86_64/q35/UEFI` como alvo inicial;
+- [-] escolher um único computador de referência futuro — *regra definida; modelo a escolher*;
+- [x] escolher Rust `no_std` + Assembly mínimo;
+- [x] escolher licença — *MIT OR Apache-2.0*;
+- [-] criar repositório — *local; remoto pendente*;
+- [x] criar board com Fase 0 e primeiros 90 dias — *docs/board.md*;
+- [x] criar `PROJECT_CHARTER.md`;
+- [x] escrever ADR-0001 a ADR-0004;
+- [x] instalar e fixar toolchain;
+- [x] gerar o primeiro binário UEFI;
+- [ ] inicializar no QEMU;
+- [x] obter log serial no CI — *tools/test-qemu; make ci*;
+- [-] publicar `0.0.1-boot` — *tag local; publicação pendente*;
+- [x] não começar GUI antes de memória, erros e testes básicos — *respeitado: só console de diagnóstico*;
+- [ ] revisar este plano no final de cada trimestre.
+
+---
+
+## 16. Referências técnicas oficiais
+
+O projeto deve trabalhar a partir de especificações e documentação primária, mantendo versões congeladas por release.
+
+- [UEFI Specifications](https://uefi.org/specifications) — boot, firmware e Secure Boot. Na data deste plano, a página oficial lista UEFI 2.11 e ACPI 6.6.
+- [ACPI 6.6](https://uefi.org/specs/ACPI/6.6/) — descoberta, energia e configuração da plataforma.
+- [Rust Embedded Book](https://doc.rust-lang.org/embedded-book/) — fundamentos de Rust bare-metal e `no_std`.
+- [QEMU System Emulation](https://www.qemu.org/docs/master/system/index.html) — emulação completa e dispositivos de teste.
+- [VirtIO 1.4](https://docs.oasis-open.org/virtio/virtio/v1.4/) — dispositivos virtuais padronizados.
+- [POSIX.1-2024, Issue 8](https://pubs.opengroup.org/onlinepubs/9799919799/) — interfaces e ambiente de compatibilidade.
+- [The Update Framework](https://theupdateframework.io/) — modelo de atualização resistente a comprometimento e rollback.
+- [Linux Kernel Self-Protection](https://docs.kernel.org/security/self-protection.html) — catálogo de princípios de autoproteção a estudar, não uma arquitetura a copiar integralmente.
+- [seL4](https://sel4.systems/) — capabilities, isolamento e microkernel de alta garantia.
+- [Fuchsia Concepts](https://fuchsia.dev/fuchsia-src/concepts) — componentes, sandbox, atualizações modulares e ABI como material comparativo.
+- [Redox OS Book](https://doc.redox-os.org/book/) — sistema em Rust e arquitetura microkernel como estudo comparativo.
+- [Vulkan Registry](https://registry.khronos.org/vulkan/) — API e especificação gráfica para a etapa de aceleração.
+
+---
+
+## 17. Registro de progresso inicial
+
+| Campo | Valor |
+|---|---|
+| Nome provisório | `Nexo OS` (crates `nexo-*`) |
+| Início | 2026-08-29 |
+| Horas por semana | meta provisória 10–15 (confirmar) |
+| Alvo atual | `Fase 1 / 0.1-kernel` (Fase 0 e 90 dias concluídos) |
+| Host de desenvolvimento | macOS 26 (Apple Silicon), Rust 1.98.0, QEMU 11.1.1; CI Ubuntu 24.04 |
+| PC de referência futuro | a escolher antes da Fase 7 (regra em PROJECT_CHARTER.md) |
+| Última release | `0.0.1-boot` (tag local `v0.0.1-boot`, 2026-08-29) |
+| Maior risco | escopo e continuidade |
+| Próxima entrega | `0.1-kernel`: APIC/SMP, preempção, relógio monotônico, stress 24 h |
+| Próxima revisão do plano | 2026-11-29 (trimestral) |
+
+---
+
+## 18. Regra final do projeto
+
+O objetivo de cada etapa não é “ter mais funcionalidades”; é reduzir uma incerteza de engenharia e deixar uma fundação verificável para a próxima etapa. Um boot simples, repetível e testado vale mais do que uma interface impressionante construída sobre comportamento indefinido.
+
+O sistema será considerado próprio não porque evita todo padrão existente, mas porque possui decisões coerentes sobre kernel, segurança, serviços, aplicativos e experiência — documentadas, testadas e mantidas ao longo do tempo.

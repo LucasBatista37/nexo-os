@@ -1,0 +1,12 @@
+[package]
+name = "nexo-mm"
+description = "Gerenciamento de memoria fisica independente de arquitetura (enderecos, mapa, frame allocator)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexo-boot-abi = { path = "../../../abi/boot" }
+
+[lints]
+workspace = true

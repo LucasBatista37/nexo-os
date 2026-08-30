@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""check-toolchain — verifica e imprime as versoes exatas do ambiente (ver docs/toolchain.md)."""
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nexo_common import ROOT, cargo_env, find_ovmf
+
+CHECKS = [
+    ("rustc", ["rustc", "--version"]),
+    ("cargo", ["cargo", "--version"]),
+    ("rustup", ["rustup", "--version"]),
+    ("qemu-system-x86_64", ["qemu-system-x86_64", "--version"]),
+    ("mtools", ["mtools", "--version"]),
+    ("python3", [sys.executable, "--version"]),
+    ("git", ["git", "--version"]),
+]
+
+
+def main() -> int:
+    ok = True
+    for name, cmd in CHECKS:
+        try:
+            out = subprocess.run(cmd, env=cargo_env(), capture_output=True, text=True, timeout=30)
+            line = (out.stdout or out.stderr).strip().splitlines()[0]
+            print(f"  ok    {name:22s} {line}")
+        except Exception as e:  # noqa: BLE001
+            print(f"  FALTA {name:22s} ({e})")
+            ok = False
+    try:
+        print(f"  ok    {'firmware UEFI':22s} {find_ovmf()}")
+    except SystemExit:
+        ok = False
+    channel = next(l for l in (ROOT / "rust-toolchain.toml").read_text().splitlines() if l.startswith("channel"))
+    print(f"  info  rust-toolchain.toml: {channel.strip()}")
+    targets = subprocess.run(["rustup", "target", "list", "--installed"], env=cargo_env(),
+                             capture_output=True, text=True).stdout.split()
+    for t in ("x86_64-unknown-none", "x86_64-unknown-uefi"):
+        present = t in targets
+        print(f"  {'ok   ' if present else 'FALTA'} target {t}")
+        ok = ok and present
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

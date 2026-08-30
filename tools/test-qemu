@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""test-qemu — executa os cenarios de boot em QEMU headless e valida a saida serial.
+
+Cada cenario gera uma imagem com boot.cfg proprio, roda com timeout e verifica:
+  * codigo de saida do QEMU (isa-debug-exit): 33 = sucesso, 35 = falha esperada;
+  * marcadores obrigatorios na serial; ausencia de marcadores proibidos.
+Uso: tools/test-qemu [--scenario nome] [--timeout 120] [--no-build]
+"""
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from nexo_common import BUILD, ROOT, log, run
+
+SCENARIOS = {
+    "boot": {
+        "cmdline": "exit",
+        "exit_code": 33,
+        "expect": [
+            r"nexo-loader: v\S+ iniciando",
+            r"nexo-loader: .*saltando para o kernel",
+            r"Nexo OS kernel 0\.0\.1-boot \(x86_64\) iniciando",
+            r"gdt: carregada",
+            r"idt: 256 vetores instalados",
+            r"virt: CR0\.WP ativo, EFER\.NXE=true",
+            r"heap: \d+ KiB em 0x",
+            r"time: PIT 1000 Hz",
+            r"\[TEST\] breakpoint \.\.\. ok",
+            r"\[TEST\] frame_alloc \.\.\. ok",
+            r"\[TEST\] paging_map_unmap \.\.\. ok",
+            r"\[TEST\] section_permissions \.\.\. ok",
+            r"\[TEST\] page_fault_recovery \.\.\. ok",
+            r"\[TEST\] guard_page \.\.\. ok",
+            r"\[TEST\] write_protect \.\.\. ok",
+            r"\[TEST\] nx \.\.\. ok",
+            r"\[TEST\] heap \.\.\. ok",
+            r"\[TEST\] heap_grow \.\.\. ok",
+            r"\[TEST\] timer \.\.\. ok",
+            r"\[TEST\] coop_tasks .*ok",
+            r"\[TEST\] symbols \.\.\. ok",
+            r"\[RESULT\] PASS \d+/\d+",
+            r"NEXO: boot completo",
+        ],
+        "forbid": [r"FAIL", r"KERNEL PANIC", r"EXCEPTION"],
+    },
+    "panic": {
+        "cmdline": "test=panic selftest=0",
+        "exit_code": 35,
+        "expect": [
+            r"KERNEL PANIC",
+            r"mensagem : panic deliberado solicitado por test=panic",
+            r"local\s+: src/main\.rs:\d+:\d+",
+            r"backtrace:",
+            r"#\d+\s+0x[0-9a-f]{16} <.*kmain.*\+0x[0-9a-f]+>",
+        ],
+        "forbid": [r"\[RESULT\] FAIL", r"NEXO: boot completo"],
+    },
+    "fault": {
+        "cmdline": "test=fault selftest=0",
+        "exit_code": 35,
+        "expect": [
+            r"PAGE FAULT em 0xffffffffd0007000: nao-presente leitura kernel",
+            r"rip\s+: 0x[0-9a-f]{16} <.*deliberate_fault.*>",
+            r"cr2 0xffffffffd0007000",
+            r"backtrace:",
+            r"#\d+\s+0x[0-9a-f]{16} <.*kmain.*>",
+        ],
+        "forbid": [r"KERNEL PANIC", r"NEXO: boot completo"],
+    },
+    "overflow": {
+        "cmdline": "test=overflow selftest=0",
+        "exit_code": 35,
+        "expect": [
+            r"DOUBLE FAULT \(rsp=0x[0-9a-f]+\) — provavel estouro de pilha",
+            r"vetor\s+: 8 \(Double Fault\)",
+        ],
+        "forbid": [r"KERNEL PANIC", r"NEXO: boot completo"],
+    },
+}
+
+
+def run_scenario(name: str, timeout: float) -> bool:
+    sc = SCENARIOS[name]
+    image = BUILD / f"nexo-{name}.img"
+    logfile = BUILD / "logs" / f"{name}.log"
+    logfile.parent.mkdir(parents=True, exist_ok=True)
+    run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline", sc["cmdline"], "--out", image],
+        stdout=subprocess.DEVNULL)
+    log(f"=== cenario '{name}' (cmdline: {sc['cmdline']!r}) ===")
+    rc = subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
+                          "--timeout", str(timeout), "--log", logfile])
+    text = logfile.read_bytes().decode("utf-8", errors="replace")
+    ok = True
+    if rc != sc["exit_code"]:
+        log(f"FALHA: codigo de saida {rc}, esperado {sc['exit_code']}")
+        ok = False
+    for pat in sc["expect"]:
+        if not re.search(pat, text):
+            log(f"FALHA: marcador ausente: /{pat}/")
+            ok = False
+    for pat in sc["forbid"]:
+        if re.search(pat, text):
+            log(f"FALHA: marcador proibido presente: /{pat}/")
+            ok = False
+    log(f"=== cenario '{name}': {'PASS' if ok else 'FAIL'} (log: {logfile}) ===")
+    return ok
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--scenario", choices=sorted(SCENARIOS), default=None)
+    ap.add_argument("--timeout", type=float, default=120.0)
+    ap.add_argument("--no-build", action="store_true", help="nao recompila loader/kernel")
+    a = ap.parse_args()
+    if not a.no_build:
+        run([sys.executable, ROOT / "tools" / "build-image", "--cmdline", "exit"])
+    names = [a.scenario] if a.scenario else list(SCENARIOS)
+    results = {n: run_scenario(n, a.timeout) for n in names}
+    log("resumo: " + ", ".join(f"{n}={'PASS' if ok else 'FAIL'}" for n, ok in results.items()))
+    return 0 if all(results.values()) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

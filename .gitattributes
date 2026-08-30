@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.rs text
+*.md text
+*.toml text
+*.ld text
+*.txt text
+Makefile text
+tools/* text

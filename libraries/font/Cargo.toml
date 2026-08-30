@@ -1,0 +1,9 @@
+[package]
+name = "nexo-font"
+description = "Fonte bitmap 8x8 propria do Nexo OS, definida em texto e parseada em tempo de compilacao"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

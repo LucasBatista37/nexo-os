@@ -1,0 +1,40 @@
+[package]
+name = "nexo-kernel"
+description = "Kernel do Nexo OS (x86_64, no_std)"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.98"
+build = "build.rs"
+
+# Workspace proprio: alvo x86_64-unknown-none (ver .cargo/config.toml).
+# As bibliotecas em lib/ pertencem ao workspace raiz (testaveis no host).
+[workspace]
+exclude = ["lib/mm", "lib/heap", "lib/sync", "lib/symbols"]
+
+[dependencies]
+nexo-boot-abi = { path = "../abi/boot" }
+nexo-mm = { path = "lib/mm" }
+nexo-heap = { path = "lib/heap" }
+nexo-sync = { path = "lib/sync" }
+nexo-symbols = { path = "lib/symbols" }
+nexo-font = { path = "../libraries/font" }
+nexo-arch-x86_64 = { path = "../arch/x86_64" }
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+codegen-units = 1
+debug = "line-tables-only"
+strip = false
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+static_mut_refs = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"

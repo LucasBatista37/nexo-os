@@ -1,0 +1,9 @@
+[package]
+name = "nexo-sync"
+description = "Primitivas de sincronizacao do kernel Nexo (spinlock, once)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

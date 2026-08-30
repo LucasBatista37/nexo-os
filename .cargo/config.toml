@@ -1,0 +1,9 @@
+# Flags por alvo. Valem para qualquer `cargo` executado dentro do repositório;
+# o alvo padrão de cada workspace bare-metal é definido em seu próprio .cargo/config.toml.
+[target.x86_64-unknown-none]
+rustflags = [
+    "-C", "relocation-model=static",
+    "-C", "code-model=kernel",
+    "-C", "force-frame-pointers=yes",
+    "-C", "link-arg=--no-pie",
+]
