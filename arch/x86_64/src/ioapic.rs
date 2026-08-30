@@ -16,6 +16,7 @@ pub struct IoApic {
 
 // SAFETY: acesso serializado pelo chamador (lock no kernel).
 unsafe impl Send for IoApic {}
+// SAFETY: idem.
 unsafe impl Sync for IoApic {}
 
 /// Configuração de uma entrada de redirecionamento.

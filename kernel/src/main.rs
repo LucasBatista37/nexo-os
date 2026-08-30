@@ -55,8 +55,10 @@ fn kmain(bi: &'static BootInfo) -> ! {
     mm::init();
     console::init();
     acpi::init();
+    x86::percpu::init_bsp();
     x86::apic::init_bsp();
     time::init();
+    x86::smp::boot_aps();
     task::init();
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());
 

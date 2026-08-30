@@ -151,6 +151,13 @@ pub fn exit_current() -> ! {
     unreachable!("tarefa finalizada foi reescalonada");
 }
 
+/// Laço ocioso das APs até o escalonador preemptivo assumir.
+pub fn ap_idle_loop() -> ! {
+    loop {
+        cpu::halt();
+    }
+}
+
 /// Recolhe tarefas finalizadas (libera pilhas). Devolve quantas.
 pub fn reap() -> usize {
     cpu::without_interrupts(|| {

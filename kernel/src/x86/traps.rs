@@ -49,6 +49,15 @@ pub fn init() {
     );
 }
 
+/// Carrega a IDT (compartilhada) na CPU atual — usado pelas APs.
+///
+/// # Safety
+/// `init` deve ter sido executado pela BSP.
+pub unsafe fn load_idt() {
+    // SAFETY: tabela preenchida por `init`, nunca mais escrita.
+    unsafe { (*IDT.as_ptr()).load() };
+}
+
 /// Interrupções recebidas pela entrada de teste do I/O APIC.
 pub fn ioapic_test_count() -> u64 {
     IOAPIC_TEST_IRQS.load(Ordering::Relaxed)
@@ -91,7 +100,15 @@ fn handle_trap(frame: &mut TrapFrame) {
         8 => double_fault(frame),
         vectors::TIMER => {
             TIMER_IRQS.fetch_add(1, Ordering::Relaxed);
-            crate::time::tick();
+            match super::percpu::try_current() {
+                Some(c) => {
+                    c.timer_irqs.fetch_add(1, Ordering::Relaxed);
+                    if c.index == 0 {
+                        crate::time::tick();
+                    }
+                }
+                None => crate::time::tick(),
+            }
             super::apic::eoi();
         }
         vectors::IOAPIC_TEST => {
@@ -100,10 +117,16 @@ fn handle_trap(frame: &mut TrapFrame) {
         }
         vectors::RESCHED => {
             IPIS.fetch_add(1, Ordering::Relaxed);
+            if let Some(c) = super::percpu::try_current() {
+                c.ipis.fetch_add(1, Ordering::Relaxed);
+            }
             super::apic::eoi();
         }
         vectors::TLB_FLUSH => {
             IPIS.fetch_add(1, Ordering::Relaxed);
+            if let Some(c) = super::percpu::try_current() {
+                c.ipis.fetch_add(1, Ordering::Relaxed);
+            }
             cpu::flush_tlb_all();
             super::apic::eoi();
         }
@@ -219,6 +242,11 @@ fn fatal(frame: &mut TrapFrame, why: &str) -> ! {
 }
 
 fn dump_and_stop(frame: &TrapFrame) -> ! {
+    super::smp::halt_others();
+    kprint!(
+        "cpu      : {}\n",
+        super::percpu::try_current().map_or(0, |c| c.index)
+    );
     kprint!(
         "vetor    : {} ({})\n",
         frame.vector,

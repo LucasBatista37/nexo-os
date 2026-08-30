@@ -51,7 +51,7 @@ pub type TaskEntry = extern "C" fn(usize) -> !;
 /// # Safety
 /// `[stack_top - 64, stack_top)` deve ser memória gravável exclusiva da tarefa.
 pub unsafe fn prepare_stack(stack_top: u64, entry: TaskEntry, arg: usize) -> u64 {
-    debug_assert!(stack_top % 16 == 0);
+    debug_assert!(stack_top.is_multiple_of(16));
     let sp = stack_top - 7 * 8;
     let frame = sp as *mut u64;
     // SAFETY: contrato da função; layout casado com os `pop`s do assembly.

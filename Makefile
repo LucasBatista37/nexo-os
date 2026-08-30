@@ -33,6 +33,7 @@ lint:
 	cd kernel && cargo fmt --check
 	cd boot/loader && cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy --workspace --lib --target x86_64-unknown-none -- -D warnings
 	cd kernel && cargo clippy --release -- -D warnings
 	cd boot/loader && cargo clippy --release -- -D warnings
 

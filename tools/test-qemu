@@ -46,6 +46,8 @@ SCENARIOS = {
             r"\[TEST\] tsc_clock \.\.\. ok",
             r"\[TEST\] ioapic .*ok",
             r"\[TEST\] ipi_self \.\.\. ok",
+            r"\[TEST\] smp .*ok",
+            r"smp: \d+ de \d+ CPU\(s\) online",
             r"\[TEST\] coop_tasks .*ok",
             r"\[TEST\] symbols \.\.\. ok",
             r"\[RESULT\] PASS \d+/\d+",

@@ -78,6 +78,7 @@ pub struct LocalApic {
 // SAFETY: registradores MMIO por CPU; cada CPU acessa o próprio LAPIC pelo
 // mesmo endereço virtual.
 unsafe impl Send for LocalApic {}
+// SAFETY: idem; escritas são operações atômicas de 32 bits no MMIO local.
 unsafe impl Sync for LocalApic {}
 
 impl LocalApic {

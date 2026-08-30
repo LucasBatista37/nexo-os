@@ -124,6 +124,11 @@ pub fn lapic() -> &'static LocalApic {
     LAPIC.get().expect("apic::init_bsp nao foi chamado")
 }
 
+/// LAPIC, se já inicializado.
+pub fn try_lapic() -> Option<&'static LocalApic> {
+    LAPIC.get()
+}
+
 /// Fim de interrupção.
 #[inline]
 pub fn eoi() {

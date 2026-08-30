@@ -48,6 +48,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("tsc_clock", test_tsc_clock),
     ("ioapic", test_ioapic),
     ("ipi_self", test_ipi_self),
+    ("smp", test_smp),
     ("coop_tasks", test_coop_tasks),
     ("symbols", test_symbols),
 ];
@@ -113,6 +114,12 @@ fn report_memory() {
         crate::x86::traps::exception_count(),
         crate::task::switches(),
         crate::x86::traps::spurious_count()
+    );
+    kprint!(
+        "[SMP] cpus_online={} timer_irqs_total={} ipis_total={}\n",
+        crate::x86::percpu::online_count(),
+        crate::x86::traps::timer_irq_count(),
+        crate::x86::traps::ipi_count()
     );
 }
 
@@ -450,11 +457,13 @@ fn test_acpi() -> TestResult {
 fn test_apic_timer() -> TestResult {
     let hz = crate::time::apic_timer_hz();
     check!(hz > 1_000_000, "timer LAPIC lento demais: {hz} Hz");
-    let irqs0 = crate::x86::traps::timer_irq_count();
+    // Contador desta CPU (a BSP): o global soma os timers de todas as CPUs.
+    let me = crate::x86::percpu::current();
+    let irqs0 = me.timer_irqs.load(Ordering::Relaxed);
     let t0 = crate::time::ticks();
     let c0 = crate::x86::apic::lapic().timer_current();
     crate::time::sleep_ms(30);
-    let irqs1 = crate::x86::traps::timer_irq_count();
+    let irqs1 = me.timer_irqs.load(Ordering::Relaxed);
     // Em TCG as expiracoes coalescem durante `hlt`: exige-se progresso, nao contagem exata.
     check!(irqs1 > irqs0, "nenhuma interrupcao do timer em 30 ms");
     check!(
@@ -543,6 +552,59 @@ fn test_ipi_self() -> TestResult {
         crate::x86::traps::ipi_count() == before + 2,
         "IPI TLB_FLUSH para si nao chegou"
     );
+    Ok(())
+}
+
+fn test_smp() -> TestResult {
+    let expected = crate::acpi::info().cpus().len();
+    let online = crate::x86::percpu::online_count();
+    check!(online == expected, "{online} de {expected} CPUs online");
+    let me = crate::x86::percpu::current();
+    check!(
+        me.index == 0,
+        "auto-teste nao esta na BSP (cpu{})",
+        me.index
+    );
+    check!(
+        me.apic_id == crate::acpi::info().bsp_apic_id,
+        "apic_id da BSP"
+    );
+    if online > 1 {
+        let before: Vec<u64> = (1..online)
+            .map(|i| crate::x86::percpu::get(i).map_or(0, |c| c.ipis.load(Ordering::Relaxed)))
+            .collect();
+        crate::x86::smp::broadcast_resched();
+        crate::time::sleep_ms(20);
+        for i in 1..online {
+            let c = crate::x86::percpu::get(i).ok_or("cpu ausente")?;
+            check!(c.online.load(Ordering::Relaxed), "cpu{i} offline");
+            let ipis = c.ipis.load(Ordering::Relaxed);
+            check!(
+                ipis > before[i - 1],
+                "cpu{i} nao recebeu a IPI de broadcast"
+            );
+            check!(
+                c.timer_irqs.load(Ordering::Relaxed) > 0,
+                "timer local da cpu{i} parado"
+            );
+        }
+        // TLB shootdown: unmap gera IPI para as outras CPUs.
+        let v = VirtAddr::new(TEST_VIRT + 0x9000);
+        virt::alloc_and_map(v, PageFlags::KERNEL_RW).map_err(|e| alloc::format!("{e}"))?;
+        let sum = || -> u64 {
+            (1..online)
+                .map(|i| crate::x86::percpu::get(i).map_or(0, |c| c.ipis.load(Ordering::Relaxed)))
+                .sum()
+        };
+        let before_flush = sum();
+        virt::unmap_and_free(v).map_err(|e| alloc::format!("{e}"))?;
+        crate::time::sleep_ms(5);
+        check!(
+            sum() >= before_flush + (online as u64 - 1),
+            "shootdown de TLB nao chegou a todas as CPUs"
+        );
+    }
+    kprint!("({online} CPUs online) ");
     Ok(())
 }
 

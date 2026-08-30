@@ -102,6 +102,7 @@ pub fn unmap_page(virt: VirtAddr) -> Result<PhysAddr, MapError> {
         let _g = LOCK.lock();
         let p = kernel_mapper().unmap_4k(virt)?;
         cpu::invlpg(virt.as_u64());
+        crate::x86::smp::flush_tlb_others();
         Ok(p)
     })
 }
@@ -112,6 +113,7 @@ pub fn update_flags(virt: VirtAddr, flags: PageFlags) -> Result<(), MapError> {
         let _g = LOCK.lock();
         kernel_mapper().update_flags_4k(virt, flags)?;
         cpu::invlpg(virt.as_u64());
+        crate::x86::smp::flush_tlb_others();
         Ok(())
     })
 }

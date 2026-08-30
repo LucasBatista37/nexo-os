@@ -16,12 +16,17 @@ fn panic(info: &PanicInfo) -> ! {
         kprint!("\n!!! panic aninhado; parando a CPU !!!\n");
         cpu::halt_forever();
     }
+    crate::x86::smp::halt_others();
     // SAFETY: o detentor de qualquer lock de saída não voltará a executar.
     unsafe {
         crate::klog::force_unlock();
         crate::console::force_unlock();
     }
     kprint!("\n==================== KERNEL PANIC ====================\n");
+    kprint!(
+        "cpu      : {}\n",
+        crate::x86::percpu::try_current().map_or(0, |c| c.index)
+    );
     kprint!("mensagem : {}\n", info.message());
     if let Some(l) = info.location() {
         kprint!("local    : {}:{}:{}\n", l.file(), l.line(), l.column());
@@ -50,6 +55,12 @@ fn stack_bounds(addr: u64) -> Option<(u64, u64)> {
     let df = crate::x86::gdt::double_fault_stack_bounds();
     if (df.0..df.1).contains(&addr) {
         return Some(df);
+    }
+    if let Some(b) = crate::x86::percpu::df_stack_bounds_containing(addr) {
+        return Some(b);
+    }
+    if let Some(b) = crate::x86::percpu::stack_bounds_containing(addr) {
+        return Some(b);
     }
     crate::task::stack_bounds_containing(addr)
 }

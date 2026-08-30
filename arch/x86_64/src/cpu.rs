@@ -15,6 +15,10 @@ pub const CR0_WP: u64 = 1 << 16;
 pub const CR0_PG: u64 = 1 << 31;
 /// CR4.PGE — páginas globais.
 pub const CR4_PGE: u64 = 1 << 7;
+/// MSR com a base do segmento GS (dados por CPU).
+pub const IA32_GS_BASE: u32 = 0xC000_0101;
+/// MSR com a base de GS alternativa (`swapgs`).
+pub const IA32_KERNEL_GS_BASE: u32 = 0xC000_0102;
 
 /// Escreve um byte em uma porta.
 ///
@@ -250,6 +254,32 @@ pub fn read_rsp() -> u64 {
     let v: u64;
     // SAFETY: leitura de registrador.
     unsafe { asm!("mov {}, rsp", out(reg) v, options(nomem, nostack, preserves_flags)) };
+    v
+}
+
+/// Define a base de GS (ponteiro para os dados desta CPU).
+///
+/// # Safety
+/// Código que usa `gs:` passa a ler a partir de `base`.
+#[inline]
+pub unsafe fn write_gs_base(base: u64) {
+    // SAFETY: contrato da função.
+    unsafe { wrmsr(IA32_GS_BASE, base) };
+}
+
+/// Lê a base de GS.
+#[inline]
+pub fn read_gs_base() -> u64 {
+    // SAFETY: leitura de MSR sempre válida em modo longo.
+    unsafe { rdmsr(IA32_GS_BASE) }
+}
+
+/// Lê o `u64` em `gs:[0]` (ponteiro `self` da estrutura por CPU).
+#[inline(always)]
+pub fn read_gs_self() -> u64 {
+    let v: u64;
+    // SAFETY: leitura relativa a GS; o chamador garante base configurada.
+    unsafe { asm!("mov {}, gs:[0]", out(reg) v, options(nostack, preserves_flags, readonly)) };
     v
 }
 

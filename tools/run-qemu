@@ -36,11 +36,11 @@ def ovmf_vars_for(code: Path):
 FAILURE_EXIT = 35  # (0x11 << 1) | 1
 
 
-def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list) -> list:
+def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4) -> list:
     qemu = require("qemu-system-x86_64", "Instale QEMU (macOS: brew install qemu; Debian: apt install qemu-system-x86)")
     ovmf = find_ovmf()
     cmd = [
-        qemu, "-machine", "q35", "-cpu", "qemu64", "-m", "512M", "-smp", "1",
+        qemu, "-machine", "q35", "-cpu", "qemu64", "-m", "512M", "-smp", str(smp),
         "-drive", f"if=pflash,format=raw,readonly=on,file={ovmf}",
     ]
     # NVRAM gravável (cópia por execução): OVMF de distribuições Linux exige.
@@ -70,12 +70,13 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--log", default=None, help="grava a saida serial neste arquivo")
     ap.add_argument("--gdb", action="store_true")
+    ap.add_argument("--smp", type=int, default=int(os.environ.get("NEXO_SMP", "4")), help="numero de CPUs (padrao 4)")
     ap.add_argument("extra", nargs="*", help="argumentos extras para o QEMU (apos --)")
     a = ap.parse_args()
     image = Path(a.image)
     if not image.exists():
         die(f"imagem nao encontrada: {image} (rode tools/build-image)")
-    cmd = qemu_cmd(image, a.test, a.gdb, a.extra)
+    cmd = qemu_cmd(image, a.test, a.gdb, a.extra, a.smp)
     log("$ " + " ".join(cmd))
     if not a.test and not a.log:
         return subprocess.call(cmd)
