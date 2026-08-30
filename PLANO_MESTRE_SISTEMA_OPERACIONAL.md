@@ -472,9 +472,9 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 **Resultado:** sistema conectado com APIs de rede e controles de segurança.
 
 - [x] implementar VirtIO net — *`services/netdev` (nexo.net tipado, MSI-X); cenário `net` troca ARP de verdade com o slirp*;
-- [ ] implementar Ethernet e ARP/NDP conforme a fase IPv6;
-- [ ] implementar IPv4;
-- [ ] implementar ICMP;
+- [-] implementar Ethernet e ARP/NDP conforme a fase IPv6 — *Ethernet e ARP (request/reply) em `nexo-netstack`, exercitados no cenário `net`; NDP vem com o IPv6*;
+- [-] implementar IPv4 — *cabeçalho + checksum com validação (`nexo-netstack`), usado no ping do cenário `net`; sem roteamento/fragmentação/pilha residente*;
+- [-] implementar ICMP — *echo request/reply completos no cenário `net` (ping real ao slirp); demais tipos pendentes*;
 - [ ] implementar UDP;
 - [ ] implementar TCP com suíte de testes e estados documentados;
 - [ ] implementar DHCP;

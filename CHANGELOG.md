@@ -89,6 +89,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `services/netdev`: driver VirtIO-net em modo usuário (filas rx/tx, cabeçalho `virtio_net_hdr` de 12 B, MAC da configuração via `VIRTIO_NET_F_MAC`, MSI-X, fila local de 8 quadros recebidos); protocolo tipado `nexo.net` v1.0 (`idl/net.idl`: `mac`/`send`/`recv`).
 - `run-qemu --net` (virtio-net-pci + slirp) e cenário `net`: o `utest` (modo 14) monta um ARP request pelo canal do driver e confere o ARP reply do gateway 10.0.2.2 — o primeiro pacote de rede de verdade indo e voltando por um driver em ring 3.
 
+### Adicionado (Fase 4, bloco 2 — Ethernet/ARP/IPv4/ICMP)
+- `libraries/net` (`nexo-netstack`): montagem e leitura de Ethernet, ARP (request/reply), IPv4 (cabeçalho + checksum RFC 1071, validação de versão/IHL/tamanho) e ICMP echo — `no_std`, sem alocação, `forbid(unsafe_code)`; testes de host com vetores conhecidos e fuzz-lite de 20 000 mutações.
+- Cenário `net` agora faz um **ping de verdade**: ARP para resolver o gateway do slirp e ICMP echo request/reply (ident/seq/checksum conferidos, ttl reportado).
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

@@ -16,6 +16,7 @@ nexofs = { path = "../libraries/nexofs" }
 nexo-virtio = { path = "../libraries/virtio" }
 nexo-fat = { path = "../libraries/fat" }
 nexo-proto = { path = "../abi/proto" }
+nexo-netstack = { path = "../libraries/net" }
 
 [profile.dev]
 panic = "abort"

@@ -1237,20 +1237,88 @@ fn net_client() -> ! {
             && frame[20..22] == 2u16.to_be_bytes()
             && frame[28..32] == [10, 0, 2, 2]
         {
+            let mut gw = [0u8; 6];
+            gw.copy_from_slice(&frame[22..28]);
             nexo_rt::log!(
-                "utest: net ok — ARP reply de 10.0.2.2 ({:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x})",
-                frame[22],
-                frame[23],
-                frame[24],
-                frame[25],
-                frame[26],
-                frame[27]
+                "utest: net: ARP reply de 10.0.2.2 ({:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x})",
+                gw[0],
+                gw[1],
+                gw[2],
+                gw[3],
+                gw[4],
+                gw[5]
             );
-            nexo_sys::exit(0)
+            net_ping(mac, gw);
         }
         if nexo_sys::time_now() - start > 20_000_000_000 {
             nexo_rt::log!("utest: net: sem ARP reply em 20 s");
             nexo_sys::exit(257)
+        }
+        nexo_sys::sleep_ns(20_000_000);
+    }
+}
+
+/// Ping ICMP ao gateway do slirp com a biblioteca `nexo-netstack`; sai com 0 no echo reply.
+fn net_ping(mac: [u8; 6], gw: [u8; 6]) -> ! {
+    use nexo_netstack as nsk;
+    use nexo_proto::net::{RecvRequest, SendRequest, decode_recv_response, decode_send_response};
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    let mut send = SendRequest {
+        frame: [0; 1514],
+        frame_len: 0,
+    };
+    let n = nsk::icmp_echo_request(
+        &mut send.frame,
+        mac,
+        gw,
+        [10, 0, 2, 15],
+        [10, 0, 2, 2],
+        0x4e58,
+        1,
+        b"nexo-ping",
+    );
+    send.frame_len = n as u32;
+    let m = send.encode_msg(&mut msg).unwrap_or(0);
+    if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+        nexo_sys::exit(258);
+    }
+    match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+        Ok((n, _)) if decode_send_response(&msg[..n]).is_ok() => {}
+        _ => nexo_sys::exit(259),
+    }
+    let start = nexo_sys::time_now();
+    loop {
+        let m = RecvRequest {}.encode_msg(&mut msg).unwrap_or(0);
+        if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(260);
+        }
+        let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+            Ok((n, _)) => n,
+            _ => nexo_sys::exit(261),
+        };
+        let mut frame = [0u8; 1514];
+        let flen = match decode_recv_response(&msg[..n]) {
+            Ok(r) => {
+                let l = r.frame().len();
+                frame[..l].copy_from_slice(r.frame());
+                l
+            }
+            Err(_) => nexo_sys::exit(262),
+        };
+        if let Some((ttl, data)) = nsk::icmp_echo_reply(&frame[..flen], [10, 0, 2, 2], 0x4e58, 1) {
+            if data == b"nexo-ping" {
+                nexo_rt::log!(
+                    "utest: net ok — echo reply de 10.0.2.2 (ttl={}, 9 bytes)",
+                    ttl
+                );
+                nexo_sys::exit(0)
+            }
+            nexo_sys::exit(263)
+        }
+        if nexo_sys::time_now() - start > 20_000_000_000 {
+            nexo_rt::log!("utest: net: sem echo reply em 20 s");
+            nexo_sys::exit(264)
         }
         nexo_sys::sleep_ns(20_000_000);
     }
