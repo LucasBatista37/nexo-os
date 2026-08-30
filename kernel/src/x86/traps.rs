@@ -16,7 +16,7 @@ use nexo_arch_x86_64::idt::InterruptDescriptorTable;
 use nexo_arch_x86_64::trap::{self, PageFaultError, TrapFrame, exception_name};
 
 use super::apic::vectors;
-use nexo_sync::SpinLock;
+use crate::sync::IrqLock;
 
 use crate::cell::StaticCell;
 use crate::symbols::Symbolized;
@@ -110,6 +110,7 @@ fn handle_trap(frame: &mut TrapFrame) {
                 None => crate::time::tick(),
             }
             super::apic::eoi();
+            crate::sched::on_tick();
         }
         vectors::IOAPIC_TEST => {
             IOAPIC_TEST_IRQS.fetch_add(1, Ordering::Relaxed);
@@ -121,6 +122,7 @@ fn handle_trap(frame: &mut TrapFrame) {
                 c.ipis.fetch_add(1, Ordering::Relaxed);
             }
             super::apic::eoi();
+            crate::sched::on_resched_ipi();
         }
         vectors::TLB_FLUSH => {
             IPIS.fetch_add(1, Ordering::Relaxed);
@@ -214,7 +216,7 @@ fn double_fault(frame: &mut TrapFrame) {
     kprint!(
         "DOUBLE FAULT (rsp={:#x}){}\n",
         frame.rsp,
-        if in_guard || crate::task::stack_bounds_containing(frame.rsp).is_none() {
+        if in_guard || crate::sched::stack_bounds_containing(frame.rsp).is_none() {
             " — provavel estouro de pilha (guard page atingida)"
         } else {
             ""
@@ -295,9 +297,9 @@ fn dump_and_stop(frame: &TrapFrame) -> ! {
         cpu::read_cr0()
     );
     kprint!(
-        "uptime   : {} ms   tarefa: {}\n",
+        "uptime   : {} ms   thread: {}\n",
         crate::time::uptime_ms(),
-        crate::task::current_name()
+        crate::sched::current_name()
     );
     crate::panic::backtrace(frame.rbp, Some(frame.rip));
     kprint!("===================================================\n");
@@ -333,7 +335,7 @@ struct Probe {
     hit: Option<Hit>,
 }
 
-static PROBE: SpinLock<Option<Probe>> = SpinLock::new(None);
+static PROBE: IrqLock<Option<Probe>> = IrqLock::new(None);
 static RESUME_RIP: AtomicU64 = AtomicU64::new(0);
 
 /// Resultado de uma sonda.

@@ -6,16 +6,17 @@
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use nexo_arch_x86_64::cpu;
 use nexo_arch_x86_64::gdt::{KERNEL_CODE_SELECTOR, KERNEL_DATA_SELECTOR};
 use nexo_arch_x86_64::paging::PageFlags;
 use nexo_boot_abi::{KERNEL_STACK_BASE, KERNEL_STACK_TOP};
 use nexo_mm::{PAGE_SIZE, PhysAddr, VirtAddr};
-use nexo_sync::SpinLock;
 
 use crate::mm::heap::HeapStatsExt;
 use crate::mm::{heap, phys, virt};
+use crate::sched;
+use crate::sync::IrqLock;
 use crate::x86::traps::{ProbeKind, probe};
 
 type TestResult = Result<(), String>;
@@ -49,7 +50,11 @@ const TESTS: &[(&str, TestFn)] = &[
     ("ioapic", test_ioapic),
     ("ipi_self", test_ipi_self),
     ("smp", test_smp),
-    ("coop_tasks", test_coop_tasks),
+    ("threads_yield", test_threads_yield),
+    ("threads_preempt", test_threads_preempt),
+    ("threads_sleep_join", test_threads_sleep_join),
+    ("threads_spawn_churn", test_threads_spawn_churn),
+    ("threads_multi_cpu", test_threads_multi_cpu),
     ("symbols", test_symbols),
 ];
 
@@ -112,7 +117,7 @@ fn report_memory() {
         crate::time::tsc_hz(),
         crate::time::apic_timer_hz(),
         crate::x86::traps::exception_count(),
-        crate::task::switches(),
+        sched::switches(),
         crate::x86::traps::spurious_count()
     );
     kprint!(
@@ -120,6 +125,20 @@ fn report_memory() {
         crate::x86::percpu::online_count(),
         crate::x86::traps::timer_irq_count(),
         crate::x86::traps::ipi_count()
+    );
+    let s = sched::stats();
+    let cur = sched::current();
+    kprint!(
+        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} atual={} estado={:?} pilha_propria={}\n",
+        s.alive,
+        s.ready,
+        s.sleeping,
+        s.spawned,
+        s.reaped,
+        s.preemptions,
+        cur.as_ref().map_or("?", |t| t.name),
+        cur.as_ref().map(|t| t.state()),
+        cur.as_ref().is_some_and(|t| t.stack_bounds().is_some())
     );
 }
 
@@ -608,41 +627,174 @@ fn test_smp() -> TestResult {
     Ok(())
 }
 
-static SEQUENCE: SpinLock<Vec<u8>> = SpinLock::new(Vec::new());
+static SEQUENCE: IrqLock<Vec<u8>> = IrqLock::new(Vec::new());
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn worker(tag: usize) {
     for _ in 0..3 {
         SEQUENCE.lock().push(tag as u8);
         COUNTER.fetch_add(1, Ordering::Relaxed);
-        crate::task::yield_now();
+        sched::yield_now();
     }
 }
 
-fn test_coop_tasks() -> TestResult {
+fn test_threads_yield() -> TestResult {
     SEQUENCE.lock().clear();
-    let a = crate::task::spawn("worker-a", worker, b'A' as usize);
-    let b = crate::task::spawn("worker-b", worker, b'B' as usize);
-    let mut rounds = 0;
-    while !(crate::task::is_finished(a) && crate::task::is_finished(b)) {
-        crate::task::yield_now();
-        rounds += 1;
-        check!(rounds < 100, "tarefas nao terminaram");
-    }
+    COUNTER.store(0, Ordering::Relaxed);
+    let a = sched::spawn("worker-a", worker, b'A' as usize);
+    let b = sched::spawn("worker-b", worker, b'B' as usize);
+    check!(sched::join(a) && sched::join(b), "join falhou");
     let seq = SEQUENCE.lock().clone();
     check!(
-        seq == b"ABABAB",
+        seq.len() == 6,
         "sequencia {:?}",
         core::str::from_utf8(&seq).unwrap_or("?")
     );
+    check!(
+        seq.iter().filter(|&&c| c == b'A').count() == 3,
+        "A executou {} vezes",
+        seq.iter().filter(|&&c| c == b'A').count()
+    );
     check!(COUNTER.load(Ordering::Relaxed) == 6, "contador");
-    let reaped = crate::task::reap();
+    let reaped = sched::reap();
     check!(reaped == 2, "recolhidas {reaped}");
     kprint!(
-        "(intercalacao {}; {} trocas) ",
-        core::str::from_utf8(&seq).unwrap(),
-        crate::task::switches()
+        "({}; {} trocas) ",
+        core::str::from_utf8(&seq).unwrap_or("?"),
+        sched::switches()
     );
+    Ok(())
+}
+
+static SPIN_COUNTS: [AtomicUsize; 8] = [const { AtomicUsize::new(0) }; 8];
+static SPIN_STOP: AtomicBool = AtomicBool::new(false);
+
+fn spinner(i: usize) {
+    while !SPIN_STOP.load(Ordering::Relaxed) {
+        SPIN_COUNTS[i].fetch_add(1, Ordering::Relaxed);
+        core::hint::spin_loop();
+    }
+}
+
+fn test_threads_preempt() -> TestResult {
+    // Mais threads que CPUs, todas girando sem ceder: so a preempcao pelo timer as intercala.
+    let n = (crate::x86::percpu::online_count() + 1).min(8);
+    for c in &SPIN_COUNTS {
+        c.store(0, Ordering::Relaxed);
+    }
+    SPIN_STOP.store(false, Ordering::Relaxed);
+    let p0 = sched::stats().preemptions;
+    let ids: Vec<_> = (0..n)
+        .map(|i| sched::spawn("spinner", spinner, i))
+        .collect();
+    sched::sleep_ms(150);
+    SPIN_STOP.store(true, Ordering::Relaxed);
+    for id in &ids {
+        check!(sched::join(*id), "join do spinner");
+    }
+    for i in 0..n {
+        let c = SPIN_COUNTS[i].load(Ordering::Relaxed);
+        check!(c > 0, "spinner {i} nunca executou (preempcao falhou)");
+    }
+    let p1 = sched::stats().preemptions;
+    check!(p1 > p0, "nenhuma preempcao registrada");
+    sched::reap();
+    kprint!("({n} spinners, {} preempcoes) ", p1 - p0);
+    Ok(())
+}
+
+static FLAG: AtomicBool = AtomicBool::new(false);
+
+fn sleeper(ms: usize) {
+    sched::sleep_ms(ms as u64);
+    FLAG.store(true, Ordering::Release);
+}
+
+fn test_threads_sleep_join() -> TestResult {
+    FLAG.store(false, Ordering::Relaxed);
+    let t0 = crate::time::monotonic_ns();
+    let id = sched::spawn("sleeper", sleeper, 30);
+    check!(!sched::is_finished(id), "terminou cedo demais");
+    check!(sched::join(id), "join");
+    let dt = (crate::time::monotonic_ns() - t0) / 1_000_000;
+    check!(FLAG.load(Ordering::Acquire), "flag nao setada");
+    check!(dt >= 30, "join voltou apos {dt} ms (< 30)");
+    check!(dt < 2000, "join demorou {dt} ms");
+    check!(sched::join(id), "join repetido deve ser verdadeiro");
+    check!(!sched::join(usize::MAX), "join de id inexistente");
+    sched::reap();
+    Ok(())
+}
+
+fn short_lived(arg: usize) {
+    let v = alloc::vec![arg as u8; 128];
+    core::hint::black_box(&v);
+}
+
+fn test_threads_spawn_churn() -> TestResult {
+    sched::reap();
+    let frames0 = phys::stats().free;
+    let heap0 = heap::stats().used_bytes;
+    let slots0 = sched::stack::in_use();
+    for round in 0..10 {
+        let ids: Vec<_> = (0..8)
+            .map(|k| sched::spawn("churn", short_lived, round * 8 + k))
+            .collect();
+        for id in ids {
+            check!(sched::join(id), "join na rodada {round}");
+        }
+        sched::reap();
+    }
+    let s = sched::stats();
+    check!(s.reaped >= 80, "recolhidas {}", s.reaped);
+    check!(
+        sched::stack::in_use() == slots0,
+        "slots de pilha vazando: {} -> {}",
+        slots0,
+        sched::stack::in_use()
+    );
+    let frames1 = phys::stats().free;
+    check!(
+        frames1 + 4 >= frames0,
+        "quadros vazando: {frames0} -> {frames1}"
+    );
+    let heap1 = heap::stats().used_bytes;
+    check!(heap1 <= heap0 + 4096, "heap vazando: {heap0} -> {heap1}");
+    Ok(())
+}
+
+static CPU_SEEN: AtomicU64 = AtomicU64::new(0);
+
+fn cpu_recorder(_: usize) {
+    for _ in 0..50 {
+        if let Some(c) = crate::x86::percpu::try_current() {
+            CPU_SEEN.fetch_or(1 << c.index.min(63), Ordering::Relaxed);
+        }
+        sched::yield_now();
+        crate::time::delay_us(200);
+    }
+}
+
+fn test_threads_multi_cpu() -> TestResult {
+    CPU_SEEN.store(0, Ordering::Relaxed);
+    let n = crate::x86::percpu::online_count() * 2;
+    let ids: Vec<_> = (0..n)
+        .map(|i| sched::spawn("recorder", cpu_recorder, i))
+        .collect();
+    for id in ids {
+        check!(sched::join(id), "join");
+    }
+    sched::reap();
+    let mask = CPU_SEEN.load(Ordering::Relaxed);
+    if crate::x86::percpu::online_count() > 1 {
+        check!(
+            mask.count_ones() >= 2,
+            "threads executaram apenas em cpus {mask:#b}"
+        );
+    } else {
+        check!(mask == 1, "mascara {mask:#b}");
+    }
+    kprint!("(cpus {mask:#b}) ");
     Ok(())
 }
 

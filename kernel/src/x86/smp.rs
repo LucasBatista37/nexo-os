@@ -42,7 +42,7 @@ extern "sysv64" fn ap_entry(arg: usize) -> ! {
     );
     // SAFETY: IDT carregada e LAPIC configurado nesta CPU.
     unsafe { cpu::enable_interrupts() };
-    crate::task::ap_idle_loop()
+    crate::sched::ap_idle_loop()
 }
 
 /// Inicia todas as APs listadas pela ACPI. Devolve quantas ficaram online.

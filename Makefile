@@ -4,7 +4,11 @@
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress
+
+# Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
+DURATION ?= 600
+SMP ?= 4
 
 all: image
 
@@ -48,6 +52,11 @@ reproducible:
 	@cmp build/repro-a.img build/repro-b.img && echo "[nexo] imagem reproduzivel: OK" || (echo "[nexo] imagem NAO reproduzivel; primeiras diferencas (offset, a, b):"; cmp -l build/repro-a.img build/repro-b.img | head -20; exit 1)
 
 ci: lint test-host image test-qemu reproducible
+
+stress: image
+	tools/build-image --no-build --cmdline "selftest=0 stress=$(DURATION) exit" --out build/nexo-stress.img
+	mkdir -p build/logs
+	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress.log
 
 clean:
 	rm -rf build target kernel/target boot/loader/target

@@ -18,13 +18,15 @@ mod cell;
 mod console;
 mod mm;
 mod panic;
+mod sched;
 mod selftest;
+mod stress;
 mod symbols;
-mod task;
+mod sync;
 mod time;
 mod x86;
 
-use nexo_arch_x86_64::{cpu, qemu};
+use nexo_arch_x86_64::qemu;
 use nexo_boot_abi::{BootInfo, cmdline_value};
 
 /// Versão do kernel (casa com a tag de release).
@@ -59,13 +61,16 @@ fn kmain(bi: &'static BootInfo) -> ! {
     x86::apic::init_bsp();
     time::init();
     x86::smp::boot_aps();
-    task::init();
+    sched::init();
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());
 
     let cmdline = boot::cmdline();
     let mut ok = true;
     if cmdline_value(cmdline, "selftest") != Some("0") {
         ok = selftest::run();
+    }
+    if let Some(secs) = cmdline_value(cmdline, "stress").and_then(|v| v.parse::<u64>().ok()) {
+        ok = stress::run(secs) && ok;
     }
     match cmdline_value(cmdline, "test") {
         Some("panic") => {
@@ -101,20 +106,19 @@ fn kmain(bi: &'static BootInfo) -> ! {
 }
 
 fn idle() -> ! {
-    let mut last = u64::MAX;
     loop {
-        cpu::halt();
-        let period = time::uptime_ms() / 10_000;
-        if period != last {
-            last = period;
-            let f = mm::phys::stats();
-            let h = mm::heap::stats();
-            kdebug!(
-                "idle: uptime {} s, {} quadros livres, heap {} KiB em uso",
-                time::uptime_ms() / 1000,
-                f.free,
-                h.used_bytes / 1024
-            );
-        }
+        sched::sleep_ms(10_000);
+        sched::reap();
+        let f = mm::phys::stats();
+        let h = mm::heap::stats();
+        let s = sched::stats();
+        kdebug!(
+            "main: uptime {} s, {} quadros livres, heap {} KiB em uso, {} threads, {} trocas",
+            time::uptime_ms() / 1000,
+            f.free,
+            h.used_bytes / 1024,
+            s.alive,
+            s.switches
+        );
     }
 }

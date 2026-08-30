@@ -2,13 +2,14 @@
 
 Sistema operacional próprio, construído do zero em Rust estável — kernel, loader UEFI, bibliotecas e ferramentas — seguindo o [Plano Mestre](PLANO_MESTRE_SISTEMA_OPERACIONAL.md).
 
-**Release atual:** `0.0.1-boot` (Fase 0 + primeiros 90 dias concluídos). Estado detalhado: [docs/CHECKLIST_STATUS.md](docs/CHECKLIST_STATUS.md).
+**Release atual:** `0.0.1-boot` (Fase 0 + primeiros 90 dias concluídos); `main` já contém o grosso da Fase 1 (`0.1-kernel`): ACPI/APIC, SMP com 4 CPUs, escalonador preemptivo e modo de stress. Estado detalhado: [docs/CHECKLIST_STATUS.md](docs/CHECKLIST_STATUS.md). CI: ![ci](https://github.com/LucasBatista37/nexo-os/actions/workflows/ci.yml/badge.svg)
 
 ## O que já funciona
 
 - Loader UEFI próprio (`boot/loader`): carrega o kernel ELF, constrói tabelas de página (physmap NX, kernel W^X, pilha com guard page), entrega `BootInfo` versionado ([spec](docs/spec/boot-abi.md)).
 - Kernel x86_64 (`kernel/`): logger serial, GDT/TSS/IDT com 256 stubs, panic com backtrace simbolizado (demangler v0 próprio), alocador de quadros por bitmap, paginação (map/unmap/flags), heap com crescimento sob demanda, PIT a 1000 Hz, tarefas cooperativas, console de framebuffer com fonte própria.
-- 15 auto-testes executados no boot e verificados por serial no CI; cenários de falha (panic, page fault, estouro de pilha) com diagnóstico útil.
+- ACPI (MADT/HPET), LAPIC + I/O APIC, TSC como relógio monotônico, SMP (INIT/SIPI, dados por CPU), threads de kernel preemptivas (`spawn/sleep/join`), stress multi-CPU.
+- 25 auto-testes executados no boot e verificados por serial no CI; cenários de falha (panic, page fault, estouro de pilha) com diagnóstico útil; cenário de stress.
 - Imagem GPT+ESP reproduzível gerada por um comando; toolchain fixada.
 
 ## Começando

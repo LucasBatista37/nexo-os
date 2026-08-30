@@ -70,6 +70,19 @@ Substitui um board externo até o repositório ter issues. Uma linha por item do
 | [x] | timeout e resultado via serial | `tools/run-qemu --test`, `tools/test-qemu` |
 | [x] | documentação revisada e release `0.0.1-boot` | `docs/releases/0.0.1-boot.md`, tag `v0.0.1-boot` |
 
-## Próximo marco: `0.1-kernel` (Fase 1)
+## Marco: `0.1-kernel` (Fase 1) — em andamento (código em `main`)
 
-Itens iniciais: mapa de memória via ACPI/APIC, SMP, threads preemptivas, relógio monotônico (TSC/HPET), locks IRQ-safe, stress de 24 h. Ver Plano Mestre §5 Fase 1.
+| | Item | Evidência |
+|---|---|---|
+| [x] | mapa de memória do firmware; sair dos boot services; GDT/TSS; IDT; panic com backtrace; alocador físico; heap; RO/NX/guard | herdados de `0.0.1-boot` |
+| [-] | tabelas de página e espaços de endereçamento | mapper pronto; só o espaço do kernel (usuário na Fase 2) |
+| [x] | APIC, timer e interrupções externas | `x86/apic.rs`, `time.rs`; testes `apic_timer`, `ioapic`, `ipi_self` |
+| [x] | descobrir CPUs e SMP | `acpi.rs`, `x86/smp.rs`, `x86/percpu.rs`; teste `smp` (4/4) |
+| [x] | threads do kernel e troca de contexto | `sched.rs`; `threads_yield` |
+| [x] | escalonador preemptivo | `sched::on_tick`; `threads_preempt` |
+| [-] | relógio monotônico e timers | TSC (`monotonic_ns`), `sleep` por thread; API de timers genérica pendente |
+| [x] | locks, atomics e sincronização | `nexo-sync`, `kernel/src/sync.rs` (`IrqLock`) |
+| [x] | testes de concorrência e stress | `stress.rs`; cenário `stress`; `make stress` |
+| [x] | limitar e registrar `unsafe` | `docs/unsafe-inventory.md` |
+| [x] | symbolication e dump mínimo | herdado; registradores + backtrace por CPU |
+| [-] | publicar `0.1-kernel` | **Gate F1** exige 24 h de stress sem falha: `make stress DURATION=86400 SMP=4` |

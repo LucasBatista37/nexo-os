@@ -4,10 +4,10 @@
 //! barato em TCG e suficiente para diagnóstico. Uma barra de status no topo
 //! mostra o nome do sistema e a última mensagem de estado.
 
+use crate::sync::IrqLock;
 use core::fmt::{self, Write};
 use nexo_boot_abi::{FramebufferInfo, PixelFormat};
 use nexo_mm::PhysAddr;
-use nexo_sync::SpinLock;
 
 const SCALE: u32 = 2;
 const CELL_W: u32 = nexo_font::GLYPH_WIDTH as u32 * SCALE;
@@ -35,7 +35,7 @@ struct Console {
 // SAFETY: o ponteiro do framebuffer é acessado apenas sob o lock.
 unsafe impl Send for Console {}
 
-static CONSOLE: SpinLock<Option<Console>> = SpinLock::new(None);
+static CONSOLE: IrqLock<Option<Console>> = IrqLock::new(None);
 
 impl Console {
     fn pixel(&self, (r, g, b): (u8, u8, u8)) -> u32 {
@@ -227,11 +227,9 @@ pub fn write_fmt(args: fmt::Arguments) {
 
 /// Atualiza a barra de status.
 pub fn status(text: &str) {
-    nexo_arch_x86_64::cpu::without_interrupts(|| {
-        if let Some(c) = CONSOLE.lock().as_mut() {
-            c.header(text);
-        }
-    });
+    if let Some(c) = CONSOLE.lock().as_mut() {
+        c.header(text);
+    }
 }
 
 /// Libera o lock à força (caminho de panic).

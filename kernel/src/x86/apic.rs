@@ -6,7 +6,9 @@ use nexo_arch_x86_64::ioapic::{IoApic, Redirection};
 use nexo_arch_x86_64::paging::PageFlags;
 use nexo_arch_x86_64::{cpu, pic};
 use nexo_mm::{PhysAddr, VirtAddr};
-use nexo_sync::{Once, SpinLock};
+use nexo_sync::Once;
+
+use crate::sync::IrqLock;
 
 /// Endereço virtual do LAPIC.
 pub const LAPIC_VIRT: u64 = 0xffff_ffff_e000_0000;
@@ -34,7 +36,7 @@ pub mod vectors {
 }
 
 static LAPIC: Once<LocalApic> = Once::new();
-static IOAPICS: SpinLock<Vec<IoApic>> = SpinLock::new(Vec::new());
+static IOAPICS: IrqLock<Vec<IoApic>> = IrqLock::new(Vec::new());
 
 /// Flags de mapeamento para MMIO.
 const MMIO_FLAGS: PageFlags = PageFlags::KERNEL_RW

@@ -32,7 +32,7 @@ fn panic(info: &PanicInfo) -> ! {
         kprint!("local    : {}:{}:{}\n", l.file(), l.line(), l.column());
     }
     kprint!("uptime   : {} ms\n", crate::time::uptime_ms());
-    kprint!("tarefa   : {}\n", crate::task::current_name());
+    kprint!("thread   : {}\n", crate::sched::current_name());
     backtrace(cpu::read_rbp(), None);
     kprint!("======================================================\n");
     crate::console::status("KERNEL PANIC");
@@ -62,7 +62,7 @@ fn stack_bounds(addr: u64) -> Option<(u64, u64)> {
     if let Some(b) = crate::x86::percpu::stack_bounds_containing(addr) {
         return Some(b);
     }
-    crate::task::stack_bounds_containing(addr)
+    crate::sched::stack_bounds_containing(addr)
 }
 
 /// Imprime o backtrace a partir de `rbp` (e, opcionalmente, de um RIP inicial).

@@ -1,11 +1,11 @@
 //! Dados por CPU: GDT/TSS/pilha de #DF próprias, contadores e o ponteiro
 //! `self` acessível via `gs:[0]`.
 
+use crate::sync::IrqLock;
 use alloc::boxed::Box;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use nexo_arch_x86_64::cpu;
 use nexo_arch_x86_64::gdt::{GlobalDescriptorTable, TaskStateSegment, load_tss};
-use nexo_sync::SpinLock;
 
 use crate::acpi::MAX_CPUS;
 
@@ -32,6 +32,10 @@ pub struct PerCpu {
     pub stack_base: u64,
     /// Tamanho da pilha principal.
     pub stack_size: u64,
+    /// Thread em execução nesta CPU (`*const sched::Thread`).
+    pub current_thread: AtomicPtr<()>,
+    /// Thread idle desta CPU.
+    pub idle_thread: AtomicPtr<()>,
     gdt: GlobalDescriptorTable,
     tss: TaskStateSegment,
     df_stack: Box<Stack>,
@@ -43,7 +47,7 @@ unsafe impl Sync for PerCpu {}
 // SAFETY: a estrutura é vazada para 'static e nunca movida após `allocate`.
 unsafe impl Send for PerCpu {}
 
-static CPUS: SpinLock<[Option<&'static PerCpu>; MAX_CPUS]> = SpinLock::new([None; MAX_CPUS]);
+static CPUS: IrqLock<[Option<&'static PerCpu>; MAX_CPUS]> = IrqLock::new([None; MAX_CPUS]);
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static ONLINE: AtomicUsize = AtomicUsize::new(0);
 
@@ -64,6 +68,8 @@ impl PerCpu {
             ipis: AtomicU64::new(0),
             stack_base,
             stack_size,
+            current_thread: AtomicPtr::new(core::ptr::null_mut()),
+            idle_thread: AtomicPtr::new(core::ptr::null_mut()),
             gdt: GlobalDescriptorTable::new(),
             tss: TaskStateSegment::new(),
             df_stack: Box::new(Stack([0; DF_STACK_SIZE])),

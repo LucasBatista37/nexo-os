@@ -84,6 +84,12 @@ impl<T: ?Sized> SpinLock<T> {
     pub fn get_mut(&mut self) -> &mut T {
         self.data.get_mut()
     }
+
+    /// Ponteiro cru para o dado, para quem já detém o lock por outros meios
+    /// (ex.: guard esquecido através de uma troca de contexto).
+    pub fn as_ptr(&self) -> *mut T {
+        self.data.get()
+    }
 }
 
 impl<T: ?Sized> Deref for SpinLockGuard<'_, T> {

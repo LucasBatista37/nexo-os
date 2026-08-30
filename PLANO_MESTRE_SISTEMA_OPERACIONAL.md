@@ -392,25 +392,25 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 **Resultado:** kernel de 64 bits com memória, exceções, interrupções e multitarefa básica.
 
-- [ ] carregar mapa de memória fornecido pelo firmware;
-- [ ] abandonar corretamente os boot services UEFI;
-- [ ] inicializar GDT/TSS e estruturas x86_64 necessárias;
-- [ ] implementar IDT e handlers de exceção;
-- [ ] emitir panic com contexto e backtrace quando possível;
-- [ ] implementar alocador de páginas físicas;
-- [ ] implementar tabelas de páginas e espaços de endereçamento;
+- [x] carregar mapa de memória fornecido pelo firmware;
+- [x] abandonar corretamente os boot services UEFI;
+- [x] inicializar GDT/TSS e estruturas x86_64 necessárias — *GDT/TSS por CPU, IST para #DF, GS por CPU*;
+- [x] implementar IDT e handlers de exceção;
+- [x] emitir panic com contexto e backtrace quando possível — *backtrace simbolizado; para as outras CPUs por IPI*;
+- [x] implementar alocador de páginas físicas;
+- [-] implementar tabelas de páginas e espaços de endereçamento — *tabelas e mapper prontos; só o espaço do kernel (espaços de usuário na Fase 2)*;
 - [x] implementar heap do kernel;
-- [ ] proteger regiões como read-only, NX e guard pages;
-- [ ] inicializar APIC, timer e interrupções externas;
-- [ ] descobrir CPUs e iniciar multiprocessamento SMP;
-- [ ] criar threads do kernel e troca de contexto;
-- [ ] criar escalonador simples preemptivo;
-- [ ] implementar relógio monotônico e timers;
-- [ ] adicionar locks, atomics e primitivas de sincronização;
-- [ ] criar testes de concorrência e stress em QEMU;
-- [ ] limitar e registrar todo uso de `unsafe`;
-- [ ] adicionar symbolication e dump mínimo de falhas;
-- [ ] publicar release `0.1-kernel`.
+- [x] proteger regiões como read-only, NX e guard pages;
+- [x] inicializar APIC, timer e interrupções externas — *LAPIC + timer calibrado, I/O APIC com override ISA testado, PIC mascarado*;
+- [x] descobrir CPUs e iniciar multiprocessamento SMP — *ACPI MADT + INIT/SIPI; 4/4 CPUs online no QEMU*;
+- [x] criar threads do kernel e troca de contexto;
+- [x] criar escalonador simples preemptivo — *round-robin com quantum de 10 ms em todas as CPUs*;
+- [-] implementar relógio monotônico e timers — *TSC calibrado como relógio monotônico e sleep por thread; API de timers genérica pendente*;
+- [x] adicionar locks, atomics e primitivas de sincronização — *SpinLock, IrqLock, Once; regra: locks sempre com IRQs desabilitadas*;
+- [x] criar testes de concorrência e stress em QEMU — *`make stress DURATION=…` e cenário `stress` no CI (15 s)*;
+- [x] limitar e registrar todo uso de `unsafe` — *docs/unsafe-inventory.md*;
+- [x] adicionar symbolication e dump mínimo de falhas;
+- [-] publicar release `0.1-kernel` — *gate F1 exige 24 h de stress; ferramenta pronta, execução pendente*.
 
 **Gate F1:** 24 horas de stress em QEMU, múltiplas CPUs, memória virtual isolada, exceções tratadas e zero falha não explicada.
 
@@ -675,9 +675,9 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 
 - [x] especificação da ABI de boot — *docs/spec/boot-abi.md*;
 - [-] memória física e virtual — *0.0.1-boot: bitmap + paginação 4 níveis; falta SMP/afinidade*;
-- [ ] SMP e afinidade;
-- [ ] preempção e prioridades;
-- [ ] temporizadores de alta resolução;
+- [-] SMP e afinidade — *SMP sim; afinidade não*;
+- [-] preempção e prioridades — *preempção sim; prioridades não*;
+- [-] temporizadores de alta resolução — *TSC em ns; timers de alta resolução para threads pendentes*;
 - [ ] isolamento usuário/kernel;
 - [ ] syscalls versionadas;
 - [ ] IPC com transferência de capabilities;
@@ -685,7 +685,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [-] panic, dump e symbolication — *panic/backtrace/símbolos prontos; dump completo pendente*;
 - [ ] mitigação de classes de exploração;
 - [ ] benchmarks de contexto, syscall e IPC;
-- [ ] stress de 24h e posteriormente 7 dias;
+- [-] stress de 24h e posteriormente 7 dias — *`make stress DURATION=86400` disponível; execução ainda não realizada*;
 - [ ] documentação de todas as invariantes `unsafe`.
 
 ### 6.2 Drivers
@@ -694,7 +694,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [ ] descoberta e binding;
 - [ ] isolamento por host de driver;
 - [ ] PCI/PCIe;
-- [ ] ACPI;
+- [-] ACPI — *RSDP/XSDT/MADT/HPET; sem AML*;
 - [ ] VirtIO block, net, input, console e RNG;
 - [ ] USB e HID;
 - [ ] NVMe/AHCI;
@@ -812,7 +812,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [ ] fuzzing;
 - [ ] fault injection;
 - [ ] testes de corte de energia;
-- [ ] testes SMP e race conditions;
+- [-] testes SMP e race conditions — *stress multi-CPU básico*;
 - [ ] testes de longa duração;
 - [ ] matriz de hardware;
 - [ ] performance regression gates;
@@ -934,7 +934,7 @@ Não iniciar uma versão principal porque “o calendário chegou”. Avançar q
 - [x] mapear/desmapear páginas;
 - [x] aplicar permissões RW/NX;
 - [x] criar guard page;
-- [ ] implementar heap do kernel;
+- [x] implementar heap do kernel;
 - [x] testar page fault intencional;
 - [x] medir e registrar alocações.
 
