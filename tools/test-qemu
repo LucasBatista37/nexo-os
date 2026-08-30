@@ -10,6 +10,7 @@ import argparse
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -212,7 +213,117 @@ SCENARIOS = {
 }
 
 
+SHELL_SCRIPT = [
+    # (comando, regex esperado na resposta)
+    ("ajuda", r"comandos: ajuda info tempo ls cat escreve remove eco sair"),
+    ("info", r"cpus: [1-9]\d*"),
+    ("tempo", r"\d+ ms desde o boot"),
+    ("ls /", r"d boot"),
+    ("ls /boot/nexo", r"- kernel\.elf"),
+    ("escreve /tmp/nota.txt ola do shell", r"12 byte\(s\) escritos"),
+    ("cat /tmp/nota.txt", r"ola do shell"),
+    ("escreve /disk/shell.txt persistido", r"10 byte\(s\) escritos"),
+    ("cat /disk/shell.txt", r"persistido"),
+    ("remove /disk/shell.txt", r"removido"),
+    ("remove /tmp/nota.txt", r"removido"),
+    ("cat /tmp/nota.txt", r"cat: erro 3"),
+    ("eco alo mundo", r"alo mundo"),
+]
+
+
+def run_shell_scenario(timeout: float) -> bool:
+    """Sobe o QEMU com virtio-console em socket UNIX, conversa com o shell e sai."""
+    import socket
+
+    image = BUILD / "nexo-shell.img"
+    run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline", "selftest=0 shell=1 exit",
+         "--out", image], stdout=subprocess.DEVNULL)
+    disk = BUILD / "nexo-shell-data.img"
+    sock_path = BUILD / "nexo-shell.sock"
+    if sock_path.exists():
+        sock_path.unlink()
+    logfile = BUILD / "logs" / "shell.log"
+    logfile.parent.mkdir(parents=True, exist_ok=True)
+    log(f"=== cenario 'shell' (interativo pela console VirtIO) ===")
+    proc = subprocess.Popen([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
+                             "--disk", disk, "--console-socket", sock_path,
+                             "--timeout", str(timeout), "--log", logfile],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    ok = True
+    transcript = b""
+    try:
+        sk = None
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if sock_path.exists():
+                try:
+                    sk = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    sk.connect(str(sock_path))
+                    break
+                except OSError:
+                    sk = None
+            time.sleep(0.3)
+        if sk is None:
+            log("FALHA: socket da console nao apareceu")
+            return False
+        sk.settimeout(1.0)
+
+        def read_until(pattern: str, limit: float) -> bool:
+            nonlocal transcript
+            rx = re.compile(pattern.encode())
+            end = time.time() + limit
+            start = len(transcript)
+            while time.time() < end:
+                try:
+                    chunk = sk.recv(4096)
+                except socket.timeout:
+                    chunk = b""
+                if chunk:
+                    transcript += chunk
+                if rx.search(transcript[start:]):
+                    return True
+            return False
+
+        if not read_until(r"shell de diagnostico", 60):
+            log("FALHA: prompt inicial nao chegou")
+            ok = False
+        for cmd, expect in SHELL_SCRIPT if ok else []:
+            sk.sendall(cmd.encode() + b"\n")
+            if not read_until(expect, 20):
+                log(f"FALHA: comando {cmd!r} sem resposta /{expect}/")
+                ok = False
+                break
+        if ok:
+            sk.sendall(b"sair\n")
+            if not read_until(r"ate mais", 20):
+                log("FALHA: 'sair' sem despedida")
+                ok = False
+        sk.close()
+    finally:
+        rc = proc.wait(timeout=timeout + 60)
+    text = logfile.read_bytes().decode("utf-8", errors="replace")
+    (BUILD / "logs" / "shell-transcript.log").write_bytes(transcript)
+    if rc != 33:
+        log(f"FALHA: codigo de saida {rc}, esperado 33")
+        ok = False
+    for pat in [r"\[SHELL\] shell de diagnostico ativo na console VirtIO",
+                r"consoledev: virtio-console bdf 0x[0-9a-f]+ pronto \(rx \d+, tx \d+, MSI-X\)",
+                r"\[SHELL\] shell terminou com 0",
+                r"NEXO: boot completo"]:
+        if not re.search(pat, text):
+            log(f"FALHA: marcador ausente: /{pat}/")
+            ok = False
+    for pat in [r"KERNEL PANIC", r"EXCEPTION"]:
+        if re.search(pat, text):
+            log(f"FALHA: marcador proibido presente: /{pat}/")
+            ok = False
+    log(f"=== cenario 'shell': {'PASS' if ok else 'FAIL'} (log: {logfile}) ===")
+    return ok
+
+
 def run_scenario(name: str, timeout: float) -> bool:
+    if name == "shell":
+        return run_shell_scenario(timeout)
     sc = SCENARIOS[name]
     logfile = BUILD / "logs" / f"{name}.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
@@ -267,13 +378,13 @@ def run_scenario(name: str, timeout: float) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenario", choices=sorted(SCENARIOS), default=None)
+    ap.add_argument("--scenario", choices=sorted(list(SCENARIOS) + ["shell"]), default=None)
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--no-build", action="store_true", help="nao recompila loader/kernel")
     a = ap.parse_args()
     if not a.no_build:
         run([sys.executable, ROOT / "tools" / "build-image", "--cmdline", "exit"])
-    names = [a.scenario] if a.scenario else list(SCENARIOS)
+    names = [a.scenario] if a.scenario else list(SCENARIOS) + ["shell"]
     results = {n: run_scenario(n, a.timeout) for n in names}
     log("resumo: " + ", ".join(f"{n}={'PASS' if ok else 'FAIL'}" for n, ok in results.items()))
     return 0 if all(results.values()) else 1

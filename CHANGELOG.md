@@ -51,6 +51,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Cache de blocos de leitura no `fs` (8 blocos, write-through; estatísticas no log ao desmontar).
 - `utest` modo 12 e teste `user_vfs`: dois namespaces simultâneos (completo e só `/tmp`) — roteamento, leitura do kernel pela ESP via VFS, ramfs isolado entre instâncias, montagens invisíveis fora do namespace. 39 testes no boot.
 
+### Adicionado (Fase 3, bloco 6 — console VirtIO e shell de diagnóstico)
+- `services/consoledev`: driver VirtIO-console (porta 0, filas rx/tx, buffers de recepção pré-postados, MSI-X); protocolo `nexo.console` v0 (ler sem bloquear / escrever).
+- `services/shell`: shell de diagnóstico na console — `ajuda`, `info` (CPUs, uptime, processos, handles, syscalls), `tempo`, `ls`/`cat`/`escreve`/`remove` sobre o VFS (`/boot`, `/disk`, `/tmp`), `eco`, `sair`; edição de linha com backspace.
+- `shell=1` na linha de comando sobe blockdev+fs (+espfs se houver disco de boot), vfs, consoledev e shell; `run-qemu --console-socket PATH` liga a console a um socket UNIX.
+- Cenário `shell` do `test-qemu`: conversa de verdade com o shell pelo socket (13 comandos com respostas verificadas, incluindo escrita persistente em `/disk` e volátil em `/tmp`), e o boot termina limpo após `sair`.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

@@ -1,0 +1,15 @@
+[package]
+name = "nexo-consoledev"
+description = "Driver VirtIO-console (porta serial paravirtualizada) em processo de usuario"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+nexo-sys.workspace = true
+nexo-rt = { workspace = true, features = ["panic-handler"] }
+nexo-virtio.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

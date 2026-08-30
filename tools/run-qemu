@@ -38,7 +38,7 @@ def ovmf_vars_for(code: Path):
 FAILURE_EXIT = 35  # (0x11 << 1) | 1
 
 
-def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk=None) -> list:
+def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk=None, console_socket=None) -> list:
     qemu = require("qemu-system-x86_64", "Instale QEMU (macOS: brew install qemu; Debian: apt install qemu-system-x86)")
     ovmf = find_ovmf()
     cmd = [
@@ -66,6 +66,12 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
             "-drive", f"if=none,id=nexoboot,format=raw,readonly=on,file.locking=off,file={image}",
             "-device", "virtio-blk-pci,drive=nexoboot,serial=nexoboot,disable-legacy=on",
         ]
+    if console_socket is not None:
+        cmd += [
+            "-device", "virtio-serial-pci,disable-legacy=on",
+            "-chardev", f"socket,id=nexocon,path={console_socket},server=on,wait=off",
+            "-device", "virtconsole,chardev=nexocon",
+        ]
     cmd += [
         "-no-reboot",
         "-serial", "stdio",
@@ -88,6 +94,8 @@ def main() -> int:
     ap.add_argument("--disk", default=str(BUILD / "data.img"),
                     help="disco de dados virtio-blk (raw; criado com 16 MiB se nao existir)")
     ap.add_argument("--no-disk", action="store_true", help="nao anexa o disco de dados")
+    ap.add_argument("--console-socket", default=None, metavar="PATH",
+                    help="anexa uma virtio-console ligada a um socket UNIX (servidor) neste caminho")
     ap.add_argument("--kill-on", default=None, metavar="REGEX",
                     help="mata o QEMU (SIGKILL, como um corte de energia) assim que a saida serial casar; sai com 99")
     ap.add_argument("--kill-delay-ms", type=int, default=0,
@@ -105,7 +113,7 @@ def main() -> int:
             disk.parent.mkdir(parents=True, exist_ok=True)
             with open(disk, "wb") as f:
                 f.truncate(16 * 1024 * 1024)
-    cmd = qemu_cmd(image, a.test, a.gdb, a.extra, a.smp, disk)
+    cmd = qemu_cmd(image, a.test, a.gdb, a.extra, a.smp, disk, a.console_socket)
     log("$ " + " ".join(cmd))
     if not a.test and not a.log:
         return subprocess.call(cmd)

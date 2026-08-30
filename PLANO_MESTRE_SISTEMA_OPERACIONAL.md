@@ -432,7 +432,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] criar políticas de reinício e dependências — *reinício com limite implementado e testado (`echo` cai e volta); dependências declarativas pendentes*;
 - [x] criar loader ELF de usuário — *`process::spawn_elf` (W^X, USER, pilha com guarda)*;
 - [-] criar runtime mínimo Rust e ABI C — *`sdk/nexo-sys` + `sdk/nexo-rt` (Rust, sem alocação); ABI C pendente*;
-- [ ] criar shell de diagnóstico no espaço de usuário;
+- [x] criar shell de diagnóstico no espaço de usuário — *`services/shell` sobre a console VirtIO e o VFS; cenário `shell` interativo*;
 - [-] testar isolamento e negação de capabilities — *isolamento de memória/instruções e negação por direitos (Denied) testados; fuzzing pendente*;
 - [-] fuzzar decodificador de IPC e syscalls — *fuzz-lite determinístico dos parsers no host e fuzz de syscalls de um processo de usuário; fuzzing contínuo (cargo-fuzz/CI) pendente*;
 - [ ] publicar release `0.2-userspace`.
@@ -451,7 +451,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] implementar VirtIO block — *`services/blockdev` em modo usuário; teste `user_block` + cenário `storage`*;
 - [ ] implementar VirtIO input;
 - [x] implementar VirtIO RNG — *`services/rngdev` + `nexo.rng` v0; teste `user_devmgr`*;
-- [ ] implementar VirtIO console;
+- [x] implementar VirtIO console — *`services/consoledev` (porta 0, MSI-X) + `nexo.console` v0; cenário `shell` conversa por socket UNIX*;
 - [x] implementar drivers em processos isolados — *driver de bloco em ring 3 com handle de dispositivo; queda do driver não afeta o kernel*;
 - [-] restringir MMIO, IRQ e DMA por capabilities — *concessões por função PCI (`device_open`): config, `pci_enum` e MMIO limitados ao BDF; IRQ/DMA por handle; falta IOMMU para conter DMA*;
 - [-] criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro — *caminho sem IOMMU documentado como inseguro (ADR-0015); abstração IOMMU pendente*;

@@ -91,6 +91,9 @@ fn kmain(bi: &'static BootInfo) -> ! {
     if cmdline_value(cmdline, "fs-churn").is_some() {
         selftest::fs_churn();
     }
+    if cmdline_value(cmdline, "shell").is_some() {
+        selftest::shell_mode();
+    }
     match cmdline_value(cmdline, "test") {
         Some("panic") => {
             kinfo!("cenario: panic deliberado");

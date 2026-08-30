@@ -1511,6 +1511,79 @@ fn test_user_vfs() -> TestResult {
     Ok(())
 }
 
+/// `shell=1` na linha de comando: sobe blockdev(dados) + fs + blockdev(boot) + espfs + vfs +
+/// consoledev + shell e espera o shell terminar (`sair`).
+pub fn shell_mode() {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    if !has_virtio_blk() {
+        panic!("shell=1 exige o disco de dados (virtio-blk)");
+    }
+    let console_bdf = crate::pci::devices()
+        .iter()
+        .find(|d| d.is_virtio() && (d.device == 0x1043 || d.device == 0x1003))
+        .map(|d| d.bdf);
+    let Some(console_bdf) = console_bdf else {
+        panic!("shell=1 exige virtio-console (rode com --console-socket)");
+    };
+    let mut blks: Vec<u16> = crate::pci::devices()
+        .iter()
+        .filter(|d| d.is_virtio() && (d.device == 0x1001 || d.device == 0x1042))
+        .map(|d| d.bdf)
+        .collect();
+    blks.sort_unstable();
+    let (a1, b1) = ChannelEnd::create_pair();
+    let (c1, d1) = ChannelEnd::create_pair();
+    let _blk = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a1)],
+    )
+    .expect("blockdev");
+    let _fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b1), channel_handle(c1)])
+            .expect("fs");
+    // /boot se houver segundo disco; senao canais soltos (montagem responde NotFound ao uso)
+    let (c2, d2) = ChannelEnd::create_pair();
+    if blks.len() >= 2 {
+        let (a2, b2) = ChannelEnd::create_pair();
+        let g = Handle {
+            object: Object::Device(Arc::new(DeviceGrant::for_device(blks[1]))),
+            rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+        };
+        let _bb = crate::process::spawn_named("blockdev", 0, alloc::vec![g, channel_handle(a2)])
+            .expect("blockdev boot");
+        let _es = crate::process::spawn_named(
+            "espfs",
+            0,
+            alloc::vec![channel_handle(b2), channel_handle(c2)],
+        )
+        .expect("espfs");
+    }
+    let (x, y) = ChannelEnd::create_pair();
+    let _vfs = crate::process::spawn_named(
+        "vfs",
+        0,
+        alloc::vec![channel_handle(d1), channel_handle(d2), channel_handle(x)],
+    )
+    .expect("vfs");
+    let (ca, cb) = ChannelEnd::create_pair();
+    let cg = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(console_bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let _con = crate::process::spawn_named("consoledev", 0, alloc::vec![cg, channel_handle(ca)])
+        .expect("consoledev");
+    let shell = crate::process::spawn_named(
+        "shell",
+        0,
+        alloc::vec![channel_handle(cb), channel_handle(y)],
+    )
+    .expect("shell");
+    kinfo!("[SHELL] shell de diagnostico ativo na console VirtIO");
+    let code = crate::process::wait_and_reap(&shell);
+    kinfo!("[SHELL] shell terminou com {code}");
+}
+
 /// `fs-churn=1` na linha de comando: blockdev + fs + utest(10) escrevendo sem parar, para o
 /// cenario `powercut` (o host mata o QEMU no meio das escritas e verifica o volume no boot seguinte).
 pub fn fs_churn() -> ! {

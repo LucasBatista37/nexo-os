@@ -12,6 +12,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-consoledev"
+version = "0.0.1"
+dependencies = [
+ "nexo-rt",
+ "nexo-sys",
+ "nexo-virtio",
+]
+
+[[package]]
 name = "nexo-devmgr"
 version = "0.0.1"
 dependencies = [
@@ -79,6 +88,14 @@ dependencies = [
 name = "nexo-rt"
 version = "0.0.1"
 dependencies = [
+ "nexo-sys",
+]
+
+[[package]]
+name = "nexo-shell"
+version = "0.0.1"
+dependencies = [
+ "nexo-rt",
  "nexo-sys",
 ]
 
