@@ -52,6 +52,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         8 => block_client(),
         9 => fs_client(),
         10 => fs_churn(),
+        11 => devmgr_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -408,6 +409,7 @@ fn block_client() -> ! {
 
 /// Cliente `nexo.fs` v0 (handle 0 = canal para o `fs`).
 struct FsClient {
+    ch: nexo_sys::Handle,
     req: [u8; 4096],
     reply: [u8; 4096],
 }
@@ -429,11 +431,11 @@ impl FsClient {
         self.req[16..20].copy_from_slice(&len.to_le_bytes());
         let n = 20 + payload.len();
         self.req[20..n].copy_from_slice(payload);
-        if nexo_sys::channel_send(0, &self.req[..n], &[]) != Status::Ok {
+        if nexo_sys::channel_send(self.ch, &self.req[..n], &[]) != Status::Ok {
             nexo_sys::exit(130);
         }
         let mut hs = [0u32; 1];
-        match nexo_sys::channel_recv(0, &mut self.reply, &mut hs) {
+        match nexo_sys::channel_recv(self.ch, &mut self.reply, &mut hs) {
             Ok((n, _)) if n >= 12 => {
                 let value = u64::from_le_bytes(self.reply[4..12].try_into().unwrap());
                 (self.reply[0], value, n - 12)
@@ -464,7 +466,15 @@ impl FsClient {
 
 /// Modo 9: cria, le, altera, lista e remove arquivos; contador de boots persistente.
 fn fs_client() -> ! {
+    fs_exercise(0, true);
+    nexo_sys::log("utest: fs ok");
+    nexo_sys::exit(0)
+}
+
+/// Exercita o `fs` no canal `ch` (modos 9 e 11); so o modo 9 avanca o contador de boots.
+fn fs_exercise(ch: nexo_sys::Handle, count_boot: bool) {
     let mut c = FsClient {
+        ch,
         req: [0; 4096],
         reply: [0; 4096],
     };
@@ -534,6 +544,10 @@ fn fs_client() -> ! {
     if st != 3 {
         nexo_sys::exit(160);
     }
+    if !count_boot {
+        c.ok(7, 0, 0, 0, &[], 168);
+        return;
+    }
     // contador de boots
     let (st, bino, n) = c.call(0, 0, 0, 0, b"boot.count");
     let boots = if st == 3 {
@@ -559,14 +573,13 @@ fn fs_client() -> ! {
     let (_, n) = c.ok(8, 0, 0, 0, &[], 167);
     let free2 = u64::from_le_bytes(c.data(n)[8..16].try_into().unwrap());
     nexo_rt::log!("utest: fs: boot numero {} ({} blocos livres)", boots, free2);
-    nexo_sys::log("utest: fs ok");
-    nexo_sys::exit(0)
 }
 
 /// Modo 10: escreve sem parar (cria, sobrescreve, estende e remove arquivos em `churn/`),
 /// registrando os ciclos; termina so quando o host corta a energia.
 fn fs_churn() -> ! {
     let mut c = FsClient {
+        ch: 0,
         req: [0; 4096],
         reply: [0; 4096],
     };
@@ -606,4 +619,65 @@ fn fs_churn() -> ! {
             nexo_rt::log!("utest: churn: {} ciclos", cycle);
         }
     }
+}
+
+/// Modo 11: cliente do `devmgr` (handle 0): recebe os canais de servico (`fs`, `rng`) e usa-os.
+fn devmgr_client() -> ! {
+    let mut buf = [0u8; 64];
+    let mut hs = [0u32; 1];
+    let mut fs: Option<nexo_sys::Handle> = None;
+    let mut rng: Option<nexo_sys::Handle> = None;
+    loop {
+        let (n, nh) = match nexo_sys::channel_recv(0, &mut buf, &mut hs) {
+            Ok(v) => v,
+            Err(_) => nexo_sys::exit(180),
+        };
+        match &buf[..n] {
+            b"fs" if nh == 1 => fs = Some(hs[0]),
+            b"rng" if nh == 1 => rng = Some(hs[0]),
+            b"done" => break,
+            _ => nexo_sys::exit(181),
+        }
+    }
+    let Some(fs) = fs else { nexo_sys::exit(182) };
+    let Some(rng) = rng else { nexo_sys::exit(183) };
+    fs_exercise(fs, false);
+    let mut r1 = [0u8; 64];
+    let mut r2 = [0u8; 64];
+    for (i, out) in [&mut r1, &mut r2].into_iter().enumerate() {
+        if nexo_sys::channel_send(rng, &32u32.to_le_bytes(), &[]) != Status::Ok {
+            nexo_sys::exit(184);
+        }
+        match nexo_sys::channel_recv(rng, &mut buf, &mut hs) {
+            Ok((33, _)) if buf[0] == 0 => out[..32].copy_from_slice(&buf[1..33]),
+            Ok((n, _)) => {
+                nexo_rt::log!(
+                    "utest: rng: resposta {} inesperada ({} bytes, status {})",
+                    i,
+                    n,
+                    buf[0]
+                );
+                nexo_sys::exit(185)
+            }
+            Err(_) => nexo_sys::exit(186),
+        }
+    }
+    if r1[..32].iter().all(|&b| b == 0) || r1[..32] == r2[..32] {
+        nexo_sys::log("utest: rng: bytes nulos ou repetidos");
+        nexo_sys::exit(187);
+    }
+    // pedido invalido e recusado sem derrubar o driver
+    let _ = nexo_sys::channel_send(rng, &4096u32.to_le_bytes(), &[]);
+    match nexo_sys::channel_recv(rng, &mut buf, &mut hs) {
+        Ok((1, _)) if buf[0] == 1 => {}
+        _ => nexo_sys::exit(188),
+    }
+    nexo_rt::log!(
+        "utest: devmgr ok (rng {:02x}{:02x}{:02x}{:02x}...)",
+        r1[0],
+        r1[1],
+        r1[2],
+        r1[3]
+    );
+    nexo_sys::exit(0)
 }

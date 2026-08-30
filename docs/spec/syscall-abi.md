@@ -47,6 +47,7 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 21 | `dma_alloc` | dev, out (`DmaBuffer`) | endereço virtual da página (4 KiB zerada, contígua, mapeada `RW`) | `BadHandle`, `Denied` (sem `MAP`), `NoMemory`, `BadAddress` |
 | 22 | `irq_alloc` | dev, out (`IrqInfo`) | vetor (0x50–0x6f) com endereço/dados MSI para a BSP | `BadHandle`, `Denied` (sem `SIGNAL`), `NoMemory` (pool esgotado), `BadAddress` |
 | 23 | `irq_wait` | dev, vetor, visto | contagem atual de disparos (bloqueia até `> visto`) | `BadHandle`, `Denied` (sem `SIGNAL`), `InvalidArgs` |
+| 24 | `device_open` | dev (raiz, `ADMIN`), bdf | handle de concessão restrita à função `bdf` com `RIGHTS_DEVICE_DEFAULT` (sem `ADMIN`) | `BadHandle`, `Denied` (sem `ADMIN` ou `bdf` fora do escopo), `NotFound` (função não enumerada), `NoMemory` (tabela cheia) |
 
 Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` bloqueia a thread até haver mensagem ou o par fechar.
 
@@ -65,7 +66,7 @@ Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` b
 
 ## 3.1.1 Concessões de dispositivo (`kind` 3, ADR-0015)
 
-Um handle de dispositivo autoriza syscalls 17–23. Nesta versão existe só a concessão **total** (todas as funções PCI), criada pelo kernel para o driver ao iniciá-lo (o teste `user_block` entrega uma ao `blockdev`); direitos padrão `READ|WRITE|MAP|SIGNAL|TRANSFER|DUPLICATE`. Restrições: `mmio_map` só aceita faixas dentro de BARs MMIO enumerados; DMA é uma página física por chamada, zerada, pertencente ao processo (liberada com ele) — **sem IOMMU**, o dispositivo pode escrever em qualquer endereço físico que o driver lhe indicar (caminho inseguro documentado no ADR-0015); vetores de IRQ são devolvidos ao pool quando a concessão é destruída. Estruturas `repr(C)` em `abi/syscall`: `PciInfo` (168 B: BDF, IDs, classe, IRQ legada, 6 `PciBar` com base/tamanho/flags), `DmaBuffer` (virt, phys, len), `IrqInfo` (vetor, endereço e dados MSI).
+Um handle de dispositivo autoriza syscalls 17–24. Há dois escopos: a concessão **raiz** (todas as funções PCI; direitos `RIGHTS_DEVICE_ALL` = padrão + `ADMIN`), criada pelo kernel para o gerenciador de dispositivos (`devmgr`), e concessões **por função** (`device_open`, escopo = um BDF; direitos `RIGHTS_DEVICE_DEFAULT` = `READ|WRITE|MAP|SIGNAL|TRANSFER|DUPLICATE`), que o `devmgr` entrega a cada driver. Com escopo restrito, `pci_enum` devolve só a função, `pci_cfg_*` recusa outros BDFs (`Denied`) e `mmio_map` só aceita faixas dentro dos BARs dessa função. Restrições: `mmio_map` só aceita faixas dentro de BARs MMIO enumerados; DMA é uma página física por chamada, zerada, pertencente ao processo (liberada com ele) — **sem IOMMU**, o dispositivo pode escrever em qualquer endereço físico que o driver lhe indicar (caminho inseguro documentado no ADR-0015); vetores de IRQ são devolvidos ao pool quando a concessão é destruída. Estruturas `repr(C)` em `abi/syscall`: `PciInfo` (168 B: BDF, IDs, classe, IRQ legada, 6 `PciBar` com base/tamanho/flags), `DmaBuffer` (virt, phys, len), `IrqInfo` (vetor, endereço e dados MSI).
 
 ## 3.2 Canais (ADR-0005)
 

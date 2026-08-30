@@ -13,9 +13,10 @@ Contagem em 2026-08-30 (`grep -rhoE 'unsafe( \{| fn| impl| extern)' --include='*
 | `nexo-arch-x86_64` | 120 | 78 |
 | `nexo-loader` | 15 | 14 |
 | `nexo-kernel` | 120 | 111 |
-| `nexo-sys + nexo-rt` | 30 | 26 |
-| `services/*` | 22 | 17 (o `blockdev` concentra os acessos MMIO/DMA: um comentário `SAFETY` por método de `Mmio`) |
-| **total** | **347** | **281** |
+| `nexo-sys + nexo-rt` | 31 | 27 |
+| `nexo-virtio` | 10 | 5 (acessos voláteis a MMIO e às páginas da fila; um `SAFETY` por método/bloco) |
+| `services/*` | 13 | 13 (drivers: cópias de/para páginas de DMA e a queda deliberada do `blockdev`) |
+| **total** | **349** | **283** |
 
 Atualize junto com o código.
 

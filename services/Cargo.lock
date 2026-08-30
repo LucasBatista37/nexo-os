@@ -8,6 +8,16 @@ version = "0.0.1"
 dependencies = [
  "nexo-rt",
  "nexo-sys",
+ "nexo-virtio",
+]
+
+[[package]]
+name = "nexo-devmgr"
+version = "0.0.1"
+dependencies = [
+ "nexo-rt",
+ "nexo-sys",
+ "nexo-virtio",
 ]
 
 [[package]]
@@ -44,6 +54,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-rngdev"
+version = "0.0.1"
+dependencies = [
+ "nexo-rt",
+ "nexo-sys",
+ "nexo-virtio",
+]
+
+[[package]]
 name = "nexo-rt"
 version = "0.0.1"
 dependencies = [
@@ -76,6 +95,10 @@ dependencies = [
  "nexo-rt",
  "nexo-sys",
 ]
+
+[[package]]
+name = "nexo-virtio"
+version = "0.0.1"
 
 [[package]]
 name = "nexofs"

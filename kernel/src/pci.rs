@@ -169,15 +169,25 @@ pub fn devices() -> Vec<PciInfo> {
     DEVICES.lock().clone()
 }
 
-/// `true` se `[phys, phys+len)` cai dentro de um BAR MMIO de alguma função.
-pub fn is_mmio_range(phys: u64, len: u64) -> bool {
+/// `true` se `[phys, phys+len)` cai dentro de um BAR MMIO de alguma função
+/// (ou só da função `bdf`, se informada).
+pub fn is_mmio_range(bdf: Option<u16>, phys: u64, len: u64) -> bool {
     let end = match phys.checked_add(len) {
         Some(e) => e,
         None => return false,
     };
-    DEVICES.lock().iter().any(|d| {
-        d.bars
-            .iter()
-            .any(|b| b.size != 0 && b.flags & 1 == 0 && phys >= b.base && end <= b.base + b.size)
-    })
+    DEVICES
+        .lock()
+        .iter()
+        .filter(|d| bdf.is_none_or(|b| b == d.bdf))
+        .any(|d| {
+            d.bars.iter().any(|b| {
+                b.size != 0 && b.flags & 1 == 0 && phys >= b.base && end <= b.base + b.size
+            })
+        })
+}
+
+/// `true` se a função `bdf` foi enumerada.
+pub fn exists(bdf: u16) -> bool {
+    DEVICES.lock().iter().any(|d| d.bdf == bdf)
 }

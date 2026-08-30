@@ -33,6 +33,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Pilha de usuário de 256 KiB.
 - Cenário `powercut`: `run-qemu --kill-on REGEX [--kill-delay-ms N]` mata o QEMU (SIGKILL) durante escritas contínuas (`fs-churn=1`, `utest` modo 10); o boot seguinte monta o volume sem reformatar e o host o verifica com `nexo-disk check`.
 
+### Adicionado (Fase 3, bloco 3 — gerenciador de dispositivos, transporte VirtIO, RNG)
+- Concessões de dispositivo por função: `device_open` (syscall 24) deriva de uma concessão raiz (`RIGHTS_DEVICE_ALL`, com `ADMIN`) uma concessão restrita a um BDF; com escopo restrito, `pci_enum`/`pci_cfg_*`/`mmio_map` só enxergam aquela função.
+- `services/devmgr`: enumera PCI, faz *binding* por IDs (vendor VirtIO + tipo → `blockdev`/`rngdev`), inicia cada driver com concessão restrita e canal, sobe o `fs` sobre o bloco e entrega os canais de serviço ao cliente (`fs`, `rng`, `done`).
+- `libraries/virtio` (`nexo-virtio`): transporte VirtIO 1.x sobre PCI compartilhado (capabilities, reset/negociação, MSI-X, fila dividida) com testes de host; `blockdev` reescrito sobre ele.
+- `services/rngdev`: driver VirtIO-RNG (entropia) com MSI-X; protocolo `nexo.rng` v0. `run-qemu` anexa `virtio-rng-pci`.
+- `utest` modo 11 e teste `user_devmgr`: usa o `fs` e o `rng` entregues pelo `devmgr`; bytes aleatórios não nulos e distintos; pedido inválido recusado; todos os processos terminam sem vazar. 38 testes no boot.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

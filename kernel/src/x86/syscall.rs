@@ -290,10 +290,14 @@ fn sys_device(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
     let h = f.rdi as u32;
     match n {
         SYS_PCI_ENUM => {
-            if let Err(e) = device_grant(p, h, RIGHT_READ) {
-                return (e, 0);
-            }
-            let devs = crate::pci::devices();
+            let g = match device_grant(p, h, RIGHT_READ) {
+                Ok(g) => g,
+                Err(e) => return (e, 0),
+            };
+            let devs: Vec<PciInfo> = crate::pci::devices()
+                .into_iter()
+                .filter(|d| g.covers(d.bdf))
+                .collect();
             let cap = (f.rdx as usize).min(devs.len());
             let bytes: Vec<u8> = devs[..cap]
                 .iter()
@@ -325,8 +329,11 @@ fn sys_device(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
                 Err(e) => return (e, 0),
             };
             let bdf = Bdf::from_packed(f.rsi as u16);
-            if f.rdx > 0xfc || !f.rdx.is_multiple_of(4) || !g.all {
+            if f.rdx > 0xfc || !f.rdx.is_multiple_of(4) {
                 return (Status::InvalidArgs, 0);
+            }
+            if !g.covers(f.rsi as u16) {
+                return (Status::Denied, 0);
             }
             if n == SYS_PCI_CFG_READ {
                 (Status::Ok, crate::pci::cfg_read(bdf, f.rdx as u8) as u64)
@@ -336,15 +343,16 @@ fn sys_device(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
             }
         }
         SYS_MMIO_MAP => {
-            if let Err(e) = device_grant(p, h, RIGHT_MAP) {
-                return (e, 0);
-            }
+            let g = match device_grant(p, h, RIGHT_MAP) {
+                Ok(g) => g,
+                Err(e) => return (e, 0),
+            };
             let (phys, len) = (f.rsi, f.rdx);
             if len == 0 || len > 16 * 1024 * 1024 || !phys.is_multiple_of(PAGE_SIZE) {
                 return (Status::InvalidArgs, 0);
             }
             let len = nexo_mm::align_up(len, PAGE_SIZE);
-            if !crate::pci::is_mmio_range(phys, len) {
+            if !crate::pci::is_mmio_range(g.scope, phys, len) {
                 return (Status::Denied, 0);
             }
             let base = p.reserve_device_region(len);
@@ -435,6 +443,27 @@ fn sys_device(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
                 return (Status::InvalidArgs, 0);
             }
             (Status::Ok, crate::irq::wait(v as u8, f.rdx))
+        }
+        SYS_DEVICE_OPEN => {
+            let g = match device_grant(p, h, RIGHT_ADMIN) {
+                Ok(g) => g,
+                Err(e) => return (e, 0),
+            };
+            let bdf = f.rsi as u16;
+            if f.rsi > 0xffff || !g.covers(bdf) {
+                return (Status::Denied, 0);
+            }
+            if !crate::pci::exists(bdf) {
+                return (Status::NotFound, 0);
+            }
+            let handle = Handle {
+                object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+                rights: Rights(RIGHTS_DEVICE_DEFAULT),
+            };
+            match p.handles.lock().insert(handle) {
+                Ok(i) => (Status::Ok, i as u64),
+                Err(e) => (e, 0),
+            }
         }
         _ => (Status::NotSupported, 0),
     }
@@ -547,7 +576,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_CHANNEL_RECV => sys_channel_recv(&p, f),
         SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
         SYS_PCI_ENUM | SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE | SYS_MMIO_MAP | SYS_DMA_ALLOC
-        | SYS_IRQ_ALLOC | SYS_IRQ_WAIT => sys_device(&p, f),
+        | SYS_IRQ_ALLOC | SYS_IRQ_WAIT | SYS_DEVICE_OPEN => sys_device(&p, f),
         SYS_PROCESS_WAIT => {
             let h = p.handles.lock().get(f.rdi as u32);
             match h {

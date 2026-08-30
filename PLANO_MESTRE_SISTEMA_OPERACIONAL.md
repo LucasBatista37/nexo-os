@@ -445,15 +445,15 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 - [x] implementar enumeração ACPI mínima — *RSDP/XSDT/RSDT/MADT/HPET (`nexo-acpi`, Fase 1); tabelas de PCIe (MCFG) e AML ainda não*;
 - [x] implementar enumeração PCI/PCIe — *PCI convencional (config `0xCF8/0xCFC`, barramento 0, BARs por sondagem); PCIe/ECAM pendente*;
-- [-] definir protocolo driver–device manager — *concessão de dispositivo como objeto transferível (ADR-0015); device manager e binding ainda não existem*;
-- [ ] implementar binding por IDs e propriedades;
-- [-] implementar VirtIO transport — *transporte PCI moderno (capabilities, fila dividida, MSI-X) implementado dentro do `blockdev`; ainda não é biblioteca compartilhada*;
+- [x] definir protocolo driver–device manager — *`devmgr` inicia cada driver com `[concessão restrita, canal]` (ADR-0015); protocolo tipado vem com a IDL*;
+- [-] implementar binding por IDs e propriedades — *binding por IDs (vendor/tipo VirtIO → driver) no `devmgr`; por propriedades (classe, ACPI) pendente*;
+- [x] implementar VirtIO transport — *`libraries/virtio` (`nexo-virtio`): capabilities, negociação, MSI-X, fila dividida; usado por `blockdev` e `rngdev`*;
 - [x] implementar VirtIO block — *`services/blockdev` em modo usuário; teste `user_block` + cenário `storage`*;
 - [ ] implementar VirtIO input;
-- [ ] implementar VirtIO RNG;
+- [x] implementar VirtIO RNG — *`services/rngdev` + `nexo.rng` v0; teste `user_devmgr`*;
 - [ ] implementar VirtIO console;
 - [x] implementar drivers em processos isolados — *driver de bloco em ring 3 com handle de dispositivo; queda do driver não afeta o kernel*;
-- [-] restringir MMIO, IRQ e DMA por capabilities — *syscalls 17–23 exigem handle de dispositivo com direitos; MMIO limitado a BARs; falta concessão por dispositivo (BDF) e IOMMU*;
+- [-] restringir MMIO, IRQ e DMA por capabilities — *concessões por função PCI (`device_open`): config, `pci_enum` e MMIO limitados ao BDF; IRQ/DMA por handle; falta IOMMU para conter DMA*;
 - [-] criar abstração IOMMU e caminho sem IOMMU explicitamente inseguro — *caminho sem IOMMU documentado como inseguro (ADR-0015); abstração IOMMU pendente*;
 - [ ] implementar cache de blocos e fila assíncrona;
 - [ ] definir VFS e namespace por sessão/processo;

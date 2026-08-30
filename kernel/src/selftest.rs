@@ -68,6 +68,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_block", test_user_block),
     ("user_block_crash", test_user_block_crash),
     ("user_fs", test_user_fs),
+    ("user_devmgr", test_user_devmgr),
     ("symbols", test_symbols),
 ];
 
@@ -1147,8 +1148,16 @@ fn test_pci() -> TestResult {
                 b.base
             );
             check!(
-                crate::pci::is_mmio_range(b.base, b.size),
+                crate::pci::is_mmio_range(None, b.base, b.size),
                 "BAR nao reconhecido como MMIO"
+            );
+            check!(
+                crate::pci::is_mmio_range(Some(d.bdf), b.base, b.size),
+                "BAR nao reconhecido para o proprio BDF"
+            );
+            check!(
+                !crate::pci::is_mmio_range(Some(d.bdf ^ 0x1), b.base, b.size),
+                "BAR aceito para outro BDF"
             );
             n += 1;
         }
@@ -1159,11 +1168,11 @@ fn test_pci() -> TestResult {
         );
     }
     check!(
-        !crate::pci::is_mmio_range(0, PAGE_SIZE),
+        !crate::pci::is_mmio_range(None, 0, PAGE_SIZE),
         "pagina 0 aceita como MMIO"
     );
     check!(
-        !crate::pci::is_mmio_range(u64::MAX - 4096, 8192),
+        !crate::pci::is_mmio_range(None, u64::MAX - 4096, 8192),
         "overflow aceito como MMIO"
     );
     Ok(())
@@ -1340,6 +1349,65 @@ fn test_user_fs() -> TestResult {
         "quadros vazaram: {frames0} -> {frames}"
     );
     crate::irq::free(crate::irq::USER_VECTOR_BASE);
+    Ok(())
+}
+
+/// devmgr com concessao raiz: enumera, deriva concessoes por dispositivo, inicia blockdev e
+/// rngdev por IDs, sobe o fs e entrega os canais ao utest(11), que usa fs e rng.
+fn test_user_devmgr() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let mut live0 = 0;
+    crate::process::for_each_live(|_| live0 += 1);
+    let (x, y) = ChannelEnd::create_pair();
+    let root = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::all())),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_ALL),
+    };
+    let devmgr = crate::process::spawn_named("devmgr", 0, alloc::vec![root, channel_handle(x)])
+        .map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 11, alloc::vec![channel_handle(y)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let mc = crate::process::wait_and_reap(&devmgr);
+    drop((devmgr, client));
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(mc == 0, "devmgr saiu com {mc}");
+    // Os drivers e o fs terminam sozinhos quando seus canais fecham; espera-os.
+    let mut live = usize::MAX;
+    for _ in 0..200 {
+        sched::reap();
+        live = 0;
+        crate::process::for_each_live(|_| live += 1);
+        if live <= live0 {
+            break;
+        }
+        sched::sleep_ms(10);
+    }
+    sched::reap();
+    check!(
+        live <= live0,
+        "processos ainda vivos: {live} (antes {live0})"
+    );
+    let ends = crate::ipc::live_channel_ends();
+    check!(
+        ends == ends0,
+        "extremidades de canal vazaram: {ends0} -> {ends}"
+    );
+    let frames = phys::stats().free;
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    for v in 0..4u8 {
+        crate::irq::free(crate::irq::USER_VECTOR_BASE + v);
+    }
     Ok(())
 }
 

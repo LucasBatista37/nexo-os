@@ -60,11 +60,16 @@ pub const SYS_DMA_ALLOC: u64 = 21;
 pub const SYS_IRQ_ALLOC: u64 = 22;
 /// Bloqueia até o vetor `a1` ter disparado mais de `a2` vezes; `RDX` = contagem atual. (`SIGNAL`)
 pub const SYS_IRQ_WAIT: u64 = 23;
+/// Deriva de uma concessão raiz (`ADMIN`) uma concessão restrita à função PCI `a1` (BDF compacto);
+/// `RDX` = novo handle com [`RIGHTS_DEVICE_DEFAULT`]. (`ADMIN`)
+pub const SYS_DEVICE_OPEN: u64 = 24;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 23;
+pub const SYS_MAX: u64 = 24;
 
 /// Tipo de objeto: concessão de acesso a dispositivos.
 pub const KIND_DEVICE: u32 = 3;
+/// Direitos da concessão raiz entregue ao gerenciador de dispositivos (pode derivar concessões).
+pub const RIGHTS_DEVICE_ALL: u32 = RIGHTS_DEVICE_DEFAULT | RIGHT_ADMIN;
 /// Direitos padrão de uma concessão de dispositivo.
 pub const RIGHTS_DEVICE_DEFAULT: u32 =
     RIGHT_READ | RIGHT_WRITE | RIGHT_MAP | RIGHT_SIGNAL | RIGHT_TRANSFER | RIGHT_DUPLICATE;
@@ -302,6 +307,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_DMA_ALLOC => "dma_alloc",
         SYS_IRQ_ALLOC => "irq_alloc",
         SYS_IRQ_WAIT => "irq_wait",
+        SYS_DEVICE_OPEN => "device_open",
         _ => "?",
     }
 }

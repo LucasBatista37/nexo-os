@@ -1,6 +1,6 @@
 [package]
-name = "nexo-blockdev"
-description = "Driver VirtIO-block (PCI moderno, MSI-X) em processo de usuario; serve leitura/escrita de setores por canal"
+name = "nexo-rngdev"
+description = "Driver VirtIO-RNG (fonte de entropia) em processo de usuario"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

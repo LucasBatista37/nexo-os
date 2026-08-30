@@ -329,6 +329,13 @@ pub fn irq_alloc(dev: Handle) -> Result<abi::IrqInfo, Status> {
     if st.is_ok() { Ok(i) } else { Err(st) }
 }
 
+/// Deriva uma concessão restrita à função PCI `bdf` (exige `ADMIN` na concessão raiz).
+pub fn device_open(root: Handle, bdf: u16) -> Result<Handle, Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_DEVICE_OPEN, root as u64, bdf as u64, 0) };
+    if st.is_ok() { Ok(v as Handle) } else { Err(st) }
+}
+
 /// Espera o vetor disparar mais de `seen` vezes; devolve a contagem atual.
 pub fn irq_wait(dev: Handle, vector: u32, seen: u64) -> Result<u64, Status> {
     // SAFETY: sem ponteiros.

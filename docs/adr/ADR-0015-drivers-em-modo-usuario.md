@@ -14,7 +14,8 @@ O primeiro driver é `services/blockdev` (VirtIO-block 1.x sobre PCI, capabiliti
 
 - Um driver que cai é só um processo morto: o kernel continua; o `svcmgr` pode reiniciá-lo (a fila do dispositivo é reinicializada no reset VirtIO).
 - **Caminho sem IOMMU é explicitamente inseguro:** o dispositivo faz DMA para qualquer endereço físico que o driver lhe programar. A concessão total equivale, portanto, a confiança no driver. A abstração de IOMMU (VT-d/AMD-Vi) e concessões por dispositivo (BDF + BARs específicos) são itens abertos da Fase 3.
-- Cada concessão é um objeto com handle: pode ser transferida por canal e ter direitos reduzidos (`handle_duplicate`), preparando o *device manager* que atribuirá dispositivos a drivers por IDs/propriedades.
+- Cada concessão é um objeto com handle: pode ser transferida por canal e ter direitos reduzidos (`handle_duplicate`). O gerenciador de dispositivos (`services/devmgr`) recebe a concessão raiz (`ADMIN`), enumera PCI, deriva com `device_open` uma concessão **restrita a cada função** (config, `pci_enum` e BARs limitados àquele BDF) e inicia o driver correspondente por tabela de IDs (`vendor`/tipo VirtIO → programa do initrd), entregando-lhe `[concessão, canal]`. Um driver só enxerga o seu dispositivo; DMA continua sem IOMMU.
+- O transporte VirtIO (capabilities, negociação, MSI-X, fila dividida) é a biblioteca `nexo-virtio` (`libraries/virtio`, `no_std`, parser testado no host), usada por `blockdev` e `rngdev`.
 
 ## Alternativas
 

@@ -43,21 +43,35 @@ pub enum Object {
     Device(Arc<DeviceGrant>),
 }
 
-/// Concessão de acesso a dispositivos. `all` = qualquer função PCI.
+/// Concessão de acesso a dispositivos: `scope` = `None` (raiz: qualquer função PCI) ou uma
+/// função específica (BDF compacto) — config, BARs e enumeração ficam limitados a ela.
 pub struct DeviceGrant {
-    /// Acesso a todos os dispositivos.
-    pub all: bool,
+    /// Função PCI a que a concessão se limita (`None` = todas).
+    pub scope: Option<u16>,
     /// Vetores de interrupção reservados por esta concessão (devolvidos no drop).
     pub vectors: IrqLock<Vec<u8>>,
 }
 
 impl DeviceGrant {
-    /// Concessão total.
+    /// Concessão total (raiz).
     pub fn all() -> Self {
         Self {
-            all: true,
+            scope: None,
             vectors: IrqLock::new(Vec::new()),
         }
+    }
+
+    /// Concessão restrita a uma função PCI.
+    pub fn for_device(bdf: u16) -> Self {
+        Self {
+            scope: Some(bdf),
+            vectors: IrqLock::new(Vec::new()),
+        }
+    }
+
+    /// `true` se a concessão cobre `bdf`.
+    pub fn covers(&self, bdf: u16) -> bool {
+        self.scope.is_none_or(|s| s == bdf)
     }
 }
 

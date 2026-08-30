@@ -59,6 +59,7 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
         cmd += [
             "-drive", f"if=none,id=nexodata,format=raw,file={disk}",
             "-device", "virtio-blk-pci,drive=nexodata,disable-legacy=on",
+            "-device", "virtio-rng-pci,disable-legacy=on",
         ]
     cmd += [
         "-no-reboot",

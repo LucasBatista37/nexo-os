@@ -1,7 +1,7 @@
 # Workspace dos programas de usuario (alvo x86_64-unknown-none em ring 3, ver .cargo/config.toml).
 [workspace]
 resolver = "2"
-members = ["init", "svcmgr", "echo", "echo-client", "utest", "blockdev", "fs"]
+members = ["init", "svcmgr", "echo", "echo-client", "utest", "blockdev", "fs", "rngdev", "devmgr"]
 
 [workspace.package]
 version = "0.0.1"
@@ -13,6 +13,7 @@ rust-version = "1.98"
 nexo-sys = { path = "../sdk/nexo-sys" }
 nexo-rt = { path = "../sdk/nexo-rt" }
 nexofs = { path = "../libraries/nexofs" }
+nexo-virtio = { path = "../libraries/virtio" }
 
 [profile.dev]
 panic = "abort"

@@ -67,5 +67,9 @@ name = "nexo-syscall-abi"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-virtio"
+version = "0.0.1"
+
+[[package]]
 name = "nexofs"
 version = "0.0.1"
