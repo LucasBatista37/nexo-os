@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `701afac`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `597053e`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 130 · 🟡 31 · ⬜ 374 · ⛔ 0 → **27% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 134 · 🟡 31 · ⬜ 370 · ⛔ 0 → **28% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -11,7 +11,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 | Fase 0 — Fundação e preparação (meses 0–6) | ✅ atendido | 13 | 2 | 0 | 93% | 0 (concluída) | gate F0 atendido em clone limpo; release 0.0.1-boot publicada |
 | Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 17 | 2 | 0 | 95% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
 | Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 7 | 7 | 4 | 58% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
-| Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 em andamento | 4 | 5 | 12 | 31% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
+| Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 em andamento | 8 | 5 | 8 | 50% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 0 | 0 | 19 | 0% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
 | Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
@@ -29,7 +29,7 @@ Estimativas assumem uma pessoa com 15–25 h/semana (Plano §13). Somando as fai
 | Fase 0 | clone limpo → um comando gera imagem que inicia em QEMU; CI comprova a mensagem do kernel | ✅ atendido | clone limpo + `make ci` verde (2026-08-29); `docs/releases/0.0.1-boot.md` |
 | Fase 1 | 24 h de stress em QEMU, múltiplas CPUs, memória isolada, exceções tratadas, zero falha inexplicada | 🟡 quase | 30 min de stress com 4 CPUs sem erros; faltam as 24 h (`make stress DURATION=86400`) |
 | Fase 2 | 3 processos isolados simultâneos; servidor reinicia sem reiniciar o kernel; acesso sem capability falha de forma testada | 🟡 quase | 4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado |
-| Fase 3 | arquivos sobre VirtIO block persistem; driver de armazenamento pode falhar sem corromper o kernel; cortes de energia simulados | 🟡 em andamento | PCI enumerado; driver VirtIO-block em modo usuário com MSI-X e dados persistindo entre boots (`test-qemu --scenario storage`, 2026-08-30); faltam VFS/arquivos, cache de blocos, FAT, IOMMU e testes de corte de energia |
+| Fase 3 | arquivos sobre VirtIO block persistem; driver de armazenamento pode falhar sem corromper o kernel; cortes de energia simulados | 🟡 em andamento | arquivos criados/alterados/removidos sobre VirtIO-block persistem entre boots (NexoFS v0, `test-qemu --scenario storage`, 2026-08-30); driver de bloco morto sem afetar o kernel (`user_block_crash`); cortes de energia simulados no host em cada escrita — faltam VFS/namespace, cache de blocos, FAT do ESP, IOMMU, VirtIO input/rng/console e cortes no QEMU real |
 | Fase 4 | DHCP, DNS, TLS; tráfego malformado não derruba outros serviços | ⬜ não iniciado |  |
 | Fase 5 | login, dois apps, janelas/Contextos, teclado e mouse, sessão reiniciada sem reiniciar o kernel | ⬜ não iniciado |  |
 | Fase 6 | desenvolvedor novo cria, empacota, instala, depura e atualiza um app só pela documentação | ⬜ não iniciado |  |
@@ -113,9 +113,9 @@ Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem re
 | 🟡 | fuzzar decodificador de IPC e syscalls | fuzz-lite determinístico dos parsers no host e fuzz de syscalls de um processo de usuário; fuzzing contínuo (cargo-fuzz/CI) pendente |
 | ⬜ | publicar release `0.2-userspace` |  |
 
-### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) — 31% (4 ✅, 5 🟡, 12 ⬜)
+### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) — 50% (8 ✅, 5 🟡, 8 ⬜)
 
-Gate: 🟡 em andamento. PCI enumerado; driver VirtIO-block em modo usuário com MSI-X e dados persistindo entre boots (`test-qemu --scenario storage`, 2026-08-30); faltam VFS/arquivos, cache de blocos, FAT, IOMMU e testes de corte de energia
+Gate: 🟡 em andamento. arquivos criados/alterados/removidos sobre VirtIO-block persistem entre boots (NexoFS v0, `test-qemu --scenario storage`, 2026-08-30); driver de bloco morto sem afetar o kernel (`user_block_crash`); cortes de energia simulados no host em cada escrita — faltam VFS/namespace, cache de blocos, FAT do ESP, IOMMU, VirtIO input/rng/console e cortes no QEMU real
 
 | | Item | Evidência / nota |
 |---|---|---|
@@ -135,10 +135,10 @@ Gate: 🟡 em andamento. PCI enumerado; driver VirtIO-block em modo usuário com
 | ⬜ | definir VFS e namespace por sessão/processo |  |
 | 🟡 | implementar `ramfs` | initramfs somente leitura (`NEXOIRD1`) com membros nomeados; `ramfs` gravável pendente |
 | ⬜ | implementar FAT somente para EFI |  |
-| ⬜ | implementar leitura de um filesystem persistente de teste |  |
-| ⬜ | implementar escrita, flush e sincronização |  |
-| ⬜ | criar testes de imagem corrompida e corte de energia |  |
-| ⬜ | criar ferramenta de inspeção do disco no host |  |
+| ✅ | implementar leitura de um filesystem persistente de teste | NexoFS v0 (ADR-0016): `libraries/nexofs` + `services/fs`; `user_fs` e cenário `storage` |
+| ✅ | implementar escrita, flush e sincronização | copy-on-write com commit atômico por setor, `sync`; sem cache de blocos ainda |
+| ✅ | criar testes de imagem corrompida e corte de energia | host: corte em cada escrita (com escritas rasgadas) e 400 imagens corrompidas; falta simular cortes no QEMU real |
+| ✅ | criar ferramenta de inspeção do disco no host | `tools/nexo-disk` (info/ls/cat/check), usado pelo cenário `storage` |
 | ⬜ | publicar release `0.3-storage` |  |
 
 ### Fase 4 — Rede e serviços básicos (anos 3–4) — 0% (0 ✅, 0 🟡, 19 ⬜)

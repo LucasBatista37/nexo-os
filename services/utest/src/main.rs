@@ -50,6 +50,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         6 => ipc_client(),
         7 => syscall_fuzz(),
         8 => block_client(),
+        9 => fs_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -319,8 +320,20 @@ fn block_client() -> ! {
         req[4..12].copy_from_slice(&sector.to_le_bytes());
         req[12..16].copy_from_slice(&count.to_le_bytes());
     }
-    // 1. Escreve padrao nos setores 0..4 (2048 bytes) em um pedido.
-    header(&mut req, 1, 0, 4);
+    // 0. Capacidade: os testes crus usam a area reservada nos ultimos 256 setores
+    //    (o `fs` nao a administra), para nao colidir com o volume NexoFS.
+    header(&mut req, 2, 0, 0);
+    if nexo_sys::channel_send(ch, &req[..16], &[]) != Status::Ok {
+        nexo_sys::exit(108);
+    }
+    let base = match nexo_sys::channel_recv(ch, &mut reply, &mut hs) {
+        Ok((9, _)) if reply[0] == 0 => {
+            u64::from_le_bytes(reply[1..9].try_into().unwrap()).saturating_sub(256)
+        }
+        _ => nexo_sys::exit(109),
+    };
+    // 1. Escreve padrao em 4 setores (2048 bytes) em um pedido.
+    header(&mut req, 1, base, 4);
     for i in 0..2048usize {
         req[16 + i] = (i as u8) ^ 0x5a ^ ((i / 512) as u8);
     }
@@ -336,7 +349,7 @@ fn block_client() -> ! {
         Err(_) => nexo_sys::exit(112),
     }
     // 2. Le de volta e compara.
-    header(&mut req, 0, 0, 4);
+    header(&mut req, 0, base, 4);
     if nexo_sys::channel_send(ch, &req[..16], &[]) != Status::Ok {
         nexo_sys::exit(113);
     }
@@ -354,8 +367,8 @@ fn block_client() -> ! {
             nexo_sys::exit(116);
         }
     }
-    // 3. Marcador de persistencia no setor 8.
-    header(&mut req, 0, 8, 1);
+    // 3. Marcador de persistencia no setor base+8.
+    header(&mut req, 0, base + 8, 1);
     if nexo_sys::channel_send(ch, &req[..16], &[]) != Status::Ok {
         nexo_sys::exit(117);
     }
@@ -365,7 +378,7 @@ fn block_client() -> ! {
             if reply[1..1 + marker.len()] == marker[..] {
                 nexo_sys::log("utest: bloco persistente encontrado (boot anterior)");
             } else {
-                header(&mut req, 1, 8, 1);
+                header(&mut req, 1, base + 8, 1);
                 req[16..16 + 512].fill(0);
                 req[16..16 + marker.len()].copy_from_slice(marker);
                 if nexo_sys::channel_send(ch, &req[..16 + 512], &[]) != Status::Ok {
@@ -389,5 +402,162 @@ fn block_client() -> ! {
         _ => nexo_sys::exit(121),
     }
     nexo_sys::log("utest: bloco ok");
+    nexo_sys::exit(0)
+}
+
+/// Cliente `nexo.fs` v0 (handle 0 = canal para o `fs`).
+struct FsClient {
+    req: [u8; 4096],
+    reply: [u8; 4096],
+}
+
+impl FsClient {
+    /// Envia `op` e devolve (status, valor, tamanho dos dados em `reply[12..]`).
+    fn call(
+        &mut self,
+        op: u8,
+        ino: u32,
+        offset: u64,
+        len: u32,
+        payload: &[u8],
+    ) -> (u8, u64, usize) {
+        self.req[0] = op;
+        self.req[1..4].fill(0);
+        self.req[4..8].copy_from_slice(&ino.to_le_bytes());
+        self.req[8..16].copy_from_slice(&offset.to_le_bytes());
+        self.req[16..20].copy_from_slice(&len.to_le_bytes());
+        let n = 20 + payload.len();
+        self.req[20..n].copy_from_slice(payload);
+        if nexo_sys::channel_send(0, &self.req[..n], &[]) != Status::Ok {
+            nexo_sys::exit(130);
+        }
+        let mut hs = [0u32; 1];
+        match nexo_sys::channel_recv(0, &mut self.reply, &mut hs) {
+            Ok((n, _)) if n >= 12 => {
+                let value = u64::from_le_bytes(self.reply[4..12].try_into().unwrap());
+                (self.reply[0], value, n - 12)
+            }
+            _ => nexo_sys::exit(131),
+        }
+    }
+    fn ok(
+        &mut self,
+        op: u8,
+        ino: u32,
+        offset: u64,
+        len: u32,
+        payload: &[u8],
+        code: i64,
+    ) -> (u64, usize) {
+        let (st, v, n) = self.call(op, ino, offset, len, payload);
+        if st != 0 {
+            nexo_rt::log!("utest: fs: op {} falhou com status {}", op, st);
+            nexo_sys::exit(code);
+        }
+        (v, n)
+    }
+    fn data(&self, n: usize) -> &[u8] {
+        &self.reply[12..12 + n]
+    }
+}
+
+/// Modo 9: cria, le, altera, lista e remove arquivos; contador de boots persistente.
+fn fs_client() -> ! {
+    let mut c = FsClient {
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let (_, n) = c.ok(8, 0, 0, 0, &[], 140);
+    let d = c.data(n);
+    let total = u64::from_le_bytes(d[0..8].try_into().unwrap());
+    let free = u64::from_le_bytes(d[8..16].try_into().unwrap());
+    let repairs = u64::from_le_bytes(d[16..24].try_into().unwrap());
+    nexo_rt::log!(
+        "utest: fs: {} blocos, {} livres, {} reparo(s)",
+        total,
+        free,
+        repairs
+    );
+    // limpeza de um boot anterior interrompido
+    let _ = c.call(3, 0, 0, 0, b"docs/a.txt");
+    let _ = c.call(3, 0, 0, 0, b"docs");
+    c.ok(2, 0, 0, 0, b"docs", 141);
+    let (ino, _) = c.ok(1, 0, 0, 0, b"docs/a.txt", 142);
+    let ino = ino as u32;
+    let (st, _, _) = c.call(1, 0, 0, 0, b"docs/a.txt");
+    if st != 4 {
+        nexo_rt::log!("utest: fs: criar duplicado devolveu {}", st);
+        nexo_sys::exit(143);
+    }
+    c.ok(5, ino, 0, 0, b"hello world", 144);
+    c.ok(5, ino, 6, 0, b"nexo!", 145);
+    let (r, n) = c.ok(4, ino, 0, 64, &[], 146);
+    if r != 11 || c.data(n) != b"hello nexo!" {
+        nexo_sys::exit(147);
+    }
+    let mut big = [0u8; 3000];
+    for (i, b) in big.iter_mut().enumerate() {
+        *b = (i % 251) as u8;
+    }
+    c.ok(5, ino, 11, 0, &big, 148);
+    let (r, n) = c.ok(4, ino, 0, 4000, &[], 149);
+    if r != 3011 || n != 3011 || &c.data(n)[..11] != b"hello nexo!" || c.data(n)[11..] != big[..] {
+        nexo_rt::log!("utest: fs: releitura de 3011 bytes divergiu ({} lidos)", r);
+        nexo_sys::exit(150);
+    }
+    let (st, size_v, n) = c.call(0, 0, 0, 0, b"docs/a.txt");
+    if st != 0
+        || size_v != ino as u64
+        || u64::from_le_bytes(c.data(n)[1..9].try_into().unwrap()) != 3011
+    {
+        nexo_sys::exit(151);
+    }
+    c.ok(9, ino, 5, 0, &[], 152);
+    let (r, _) = c.ok(4, ino, 0, 64, &[], 153);
+    if r != 5 {
+        nexo_sys::exit(154);
+    }
+    let (count, n) = c.ok(6, 0, 0, 0, b"docs", 155);
+    let d = c.data(n);
+    if count != 1 || d[4] != 1 || &d[6..6 + d[5] as usize] != b"a.txt" {
+        nexo_sys::exit(156);
+    }
+    let (st, _, _) = c.call(3, 0, 0, 0, b"docs");
+    if st != 7 {
+        nexo_rt::log!("utest: fs: remover diretorio cheio devolveu {}", st);
+        nexo_sys::exit(157);
+    }
+    c.ok(3, 0, 0, 0, b"docs/a.txt", 158);
+    c.ok(3, 0, 0, 0, b"docs", 159);
+    let (st, _, _) = c.call(0, 0, 0, 0, b"docs/a.txt");
+    if st != 3 {
+        nexo_sys::exit(160);
+    }
+    // contador de boots
+    let (st, bino, n) = c.call(0, 0, 0, 0, b"boot.count");
+    let boots = if st == 3 {
+        let (i, _) = c.ok(1, 0, 0, 0, b"boot.count", 161);
+        c.ok(5, i as u32, 0, 0, b"1", 162);
+        1
+    } else if st == 0 {
+        let _ = n;
+        let (r, n) = c.ok(4, bino as u32, 0, 32, &[], 163);
+        let mut v = 0u64;
+        for &b in &c.data(n)[..r as usize] {
+            v = v * 10 + (b - b'0') as u64;
+        }
+        let v = v + 1;
+        let mut txt = nexo_rt::Buf::<32>::new();
+        let _ = core::fmt::Write::write_fmt(&mut txt, format_args!("{}", v));
+        c.ok(5, bino as u32, 0, 0, txt.as_bytes(), 164);
+        v
+    } else {
+        nexo_sys::exit(165)
+    };
+    c.ok(7, 0, 0, 0, &[], 166);
+    let (_, n) = c.ok(8, 0, 0, 0, &[], 167);
+    let free2 = u64::from_le_bytes(c.data(n)[8..16].try_into().unwrap());
+    nexo_rt::log!("utest: fs: boot numero {} ({} blocos livres)", boots, free2);
+    nexo_sys::log("utest: fs ok");
     nexo_sys::exit(0)
 }

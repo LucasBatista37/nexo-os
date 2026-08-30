@@ -77,8 +77,9 @@ Todo ponteiro de usuário é validado antes do acesso: faixa `[ptr, ptr+len)` ab
 
 ## 5. Processos nesta versão
 
-- Espaço de endereçamento por processo (PML4 própria; metade do kernel compartilhada), carregado de um ELF64 estático com segmentos W^X; pilha de 64 KiB em `0x0000_7fff_fff0_0000` (guard page abaixo).
+- Espaço de endereçamento por processo (PML4 própria; metade do kernel compartilhada), carregado de um ELF64 estático com segmentos W^X; pilha de 256 KiB abaixo de `0x0000_7fff_fff0_0000` (guard page abaixo).
 - Uma thread por processo; `RDI` na entrada carrega um argumento inteiro.
 - Falha em modo usuário (`#PF`, `#GP`, `#UD`…) encerra apenas o processo com código `-1` e motivo registrado no log; o kernel continua.
 - Handles com direitos, canais com transferência de handles e processos como objetos (spawn por nome do initrd, wait, info) existem (§3.1–3.2, syscalls 14–16); memória compartilhada, jobs/domínios, eventos/espera múltipla e timers de usuário vêm nos próximos blocos.
-- Programas: o initrd (`kernel/lib/initrd`, formato `NEXOIRD1`, gerado por `tools/mkinitrd.py`) contém `init`, `svcmgr`, `echo`, `echo-client`, `utest` e `blockdev` (driver VirtIO-block em modo usuário). `init` inicia `svcmgr`; `svcmgr` supervisiona `echo` (reinício até 3 vezes) e atende pedidos de conexão de `echo-client` entregando um canal por pedido.
+- Programas: o initrd (`kernel/lib/initrd`, formato `NEXOIRD1`, gerado por `tools/mkinitrd.py`) contém `init`, `svcmgr`, `echo`, `echo-client`, `utest`, `blockdev` (driver VirtIO-block em modo usuário) e `fs` (servidor NexoFS v0, ADR-0016).
+- Pilha de usuário: 256 KiB (era 64 KiB; serviços com buffers de bloco na pilha estouravam). `init` inicia `svcmgr`; `svcmgr` supervisiona `echo` (reinício até 3 vezes) e atende pedidos de conexão de `echo-client` entregando um canal por pedido.

@@ -15,6 +15,7 @@ members = [
     "kernel/lib/elf",
     "kernel/lib/initrd",
     "libraries/font",
+    "libraries/nexofs",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
 ]

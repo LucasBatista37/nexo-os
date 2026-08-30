@@ -66,6 +66,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_syscall_fuzz", test_user_syscall_fuzz),
     ("pci", test_pci),
     ("user_block", test_user_block),
+    ("user_block_crash", test_user_block_crash),
+    ("user_fs", test_user_fs),
     ("symbols", test_symbols),
 ];
 
@@ -1225,6 +1227,119 @@ fn test_user_block() -> TestResult {
         frames + 4 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
     );
+    Ok(())
+}
+
+fn has_virtio_blk() -> bool {
+    crate::pci::devices()
+        .iter()
+        .any(|d| d.is_virtio() && (d.device == 0x1001 || d.device == 0x1042))
+}
+
+fn channel_handle(end: Arc<crate::ipc::ChannelEnd>) -> crate::ipc::Handle {
+    crate::ipc::Handle {
+        object: crate::ipc::Object::Channel(end),
+        rights: crate::ipc::Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }
+}
+
+fn device_handle() -> crate::ipc::Handle {
+    crate::ipc::Handle {
+        object: crate::ipc::Object::Device(Arc::new(crate::ipc::DeviceGrant::all())),
+        rights: crate::ipc::Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    }
+}
+
+/// O driver de bloco cai (falta de pagina deliberada) no 2o pedido: o cliente ve o canal
+/// fechado, o kernel continua e nada vaza.
+fn test_user_block_crash() -> TestResult {
+    use crate::ipc::ChannelEnd;
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let driver = crate::process::spawn_named(
+        "blockdev",
+        1,
+        alloc::vec![device_handle(), channel_handle(a)],
+    )
+    .map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 8, alloc::vec![channel_handle(b)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let dc = crate::process::wait_and_reap(&driver);
+    drop((driver, client));
+    sched::reap();
+    check!(
+        dc == -1,
+        "driver deveria ter sido morto pelo kernel; saiu com {dc}"
+    );
+    check!(cc != 0, "cliente deveria falhar apos a queda do driver");
+    let ends = crate::ipc::live_channel_ends();
+    check!(
+        ends == ends0,
+        "extremidades de canal vazaram: {ends0} -> {ends}"
+    );
+    let frames = phys::stats().free;
+    check!(
+        frames + 4 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    check!(
+        crate::irq::alloc() == Some(crate::irq::USER_VECTOR_BASE),
+        "vetor nao devolvido apos a queda"
+    );
+    crate::irq::free(crate::irq::USER_VECTOR_BASE);
+    Ok(())
+}
+
+/// blockdev <-> fs <-> utest(9): arquivos criados, lidos, alterados, listados e removidos;
+/// contador de boots persistente.
+fn test_user_fs() -> TestResult {
+    use crate::ipc::ChannelEnd;
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let (c, d) = ChannelEnd::create_pair();
+    let driver = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a)],
+    )
+    .map_err(String::from)?;
+    let fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
+            .map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 9, alloc::vec![channel_handle(d)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let fc = crate::process::wait_and_reap(&fs);
+    let dc = crate::process::wait_and_reap(&driver);
+    drop((driver, fs, client));
+    sched::reap();
+    check!(cc == 0, "cliente do fs saiu com {cc}");
+    check!(fc == 0, "servidor fs saiu com {fc}");
+    check!(dc == 0, "driver saiu com {dc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(
+        ends == ends0,
+        "extremidades de canal vazaram: {ends0} -> {ends}"
+    );
+    let frames = phys::stats().free;
+    check!(
+        frames + 4 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    crate::irq::free(crate::irq::USER_VECTOR_BASE);
     Ok(())
 }
 

@@ -7,7 +7,7 @@ Contagem em 2026-08-30 (`grep -rhoE 'unsafe( \{| fn| impl| extern)' --include='*
 | Crate | ocorrências `unsafe` | comentários `SAFETY:` |
 |---|---|---|
 | `nexo-boot-abi` | 1 (tipo `unsafe extern "sysv64" fn`) | — |
-| `nexo-mm`, `nexo-symbols`, `nexo-font`, `nexo-acpi`, `nexo-elf`, `nexo-initrd`, `nexo-syscall-abi` | 0 | — |
+| `nexo-mm`, `nexo-symbols`, `nexo-font`, `nexo-acpi`, `nexo-elf`, `nexo-initrd`, `nexo-syscall-abi`, `nexofs` | 0 | — |
 | `nexo-sync` | 9 | 8 |
 | `nexo-heap` | 30 | 27 |
 | `nexo-arch-x86_64` | 120 | 78 |

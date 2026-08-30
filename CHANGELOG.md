@@ -25,6 +25,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 8 (cliente de bloco): escreve/lê 4 setores, verifica marcador de persistência no setor 8 (grava no 1º boot, encontra no 2º), pedido fora da capacidade é recusado sem derrubar o driver.
 - `tools/run-qemu --disk` (padrão `build/data.img`, 16 MiB, criado se ausente; `--no-disk`) anexa `virtio-blk-pci` moderno; cenário `storage` do `test-qemu` roda dois boots com o mesmo disco novo e exige o marcador persistido; testes `pci` e `user_block` (verifica ≥ 1 interrupção MSI-X entregue e ausência de vazamento de quadros/canais/vetores). 35 testes no boot.
 
+### Adicionado (Fase 3, bloco 2 — sistema de arquivos persistente)
+- `libraries/nexofs`: NexoFS v0 (ADR-0016) — biblioteca `no_std`/sem alocação/`forbid(unsafe_code)` com superbloco, bitmap, inodes (12 diretos + 1 indireto) e diretórios, todos com CRC32; copy-on-write com commit atômico em um setor; montagem reconstrói o bitmap e recupera órfãos. Testes de host: ciclo completo de arquivos, arquivos grandes, muitas entradas, disco cheio, **corte de energia em cada escrita** (com escritas rasgadas) e **imagens corrompidas** (fuzz-lite).
+- `services/fs`: servidor NexoFS sobre o canal do `blockdev` (formata se não há assinatura), protocolo cru `nexo.fs` v0 (stat/create/mkdir/unlink/read/write/list/sync/info/truncate); `blockdev` ganhou `op` 2 (capacidade); últimos 256 setores reservados para os testes crus.
+- `utest` modo 9: cria, lê, altera parcialmente, estende sobre vários blocos, trunca, lista e remove arquivos e diretórios; contador de boots persistente (`boot.count`). Testes `user_fs` e `user_block_crash` (driver morto no 2º pedido: cliente vê o canal fechado, kernel íntegro, vetor de IRQ devolvido). 37 testes no boot.
+- `tools/nexo-disk` (Python, independente do Rust): `info`, `ls`, `cat`, `check` de um volume; o cenário `storage` verifica com ele o disco após os dois boots (`boot.count` = 2, volume consistente).
+- Pilha de usuário de 256 KiB.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

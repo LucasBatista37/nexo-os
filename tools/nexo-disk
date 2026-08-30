@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""Inspeciona um volume NexoFS v0 no host (independente do codigo Rust).
+
+Uso: tools/nexo-disk [--offset BYTES] IMAGEM (info | ls [CAMINHO] | cat CAMINHO | check)
+Codigo de saida 1 em erro ou inconsistencia (`check`).
+"""
+import argparse
+import struct
+import sys
+import zlib
+
+BLOCK = 2048
+INODE = 128
+DIRENT = 64
+NDIRECT = 12
+PTRS = BLOCK // 8
+MAGIC = b"NEXOFS00"
+
+
+class Corrupt(Exception):
+    pass
+
+
+class Volume:
+    def __init__(self, path: str, offset: int):
+        with open(path, "rb") as f:
+            f.seek(offset)
+            self.data = f.read()
+        self.total = 0
+        sb = self.data[0:BLOCK]
+        if sb[:8] != MAGIC:
+            raise Corrupt("assinatura do superbloco ausente")
+        if struct.unpack_from("<I", sb, 80)[0] != zlib.crc32(sb[:80]) & 0xFFFFFFFF:
+            raise Corrupt("crc do superbloco")
+        (self.version, self.block_size, self.total, self.bitmap_start, self.bitmap_blocks,
+         self.inode_start, self.inode_blocks, self.data_start, self.inode_count, _pad,
+         self.generation) = struct.unpack_from("<IIQQQQQQIIQ", sb, 8)
+        if self.version != 0 or self.block_size != BLOCK:
+            raise Corrupt("versao/tamanho de bloco")
+        if self.total * BLOCK > len(self.data):
+            raise Corrupt("volume maior que a imagem")
+
+    def block(self, n: int) -> bytes:
+        if n >= self.total:
+            raise Corrupt(f"bloco {n} fora do volume")
+        return self.data[n * BLOCK:(n + 1) * BLOCK]
+
+    def inode(self, ino: int):
+        if ino == 0 or ino >= self.inode_count:
+            raise Corrupt(f"inode {ino} invalido")
+        off = ino * INODE
+        raw = self.block(self.inode_start + off // BLOCK)[off % BLOCK:off % BLOCK + INODE]
+        kind = struct.unpack_from("<I", raw, 0)[0]
+        if kind == 0:
+            return None
+        if struct.unpack_from("<I", raw, 124)[0] != zlib.crc32(raw[:124]) & 0xFFFFFFFF:
+            raise Corrupt(f"crc do inode {ino}")
+        if kind not in (1, 2):
+            raise Corrupt(f"tipo do inode {ino}")
+        size = struct.unpack_from("<Q", raw, 8)[0]
+        direct = list(struct.unpack_from("<12Q", raw, 16))
+        indirect, gen = struct.unpack_from("<QI", raw, 112)
+        return {"ino": ino, "kind": kind, "size": size, "direct": direct, "indirect": indirect, "gen": gen}
+
+    def data_block(self, ptr: int) -> bytes:
+        if ptr < self.data_start or ptr >= self.total:
+            raise Corrupt(f"ponteiro {ptr} fora da area de dados")
+        return self.block(ptr)
+
+    def pointers(self, inode):
+        ptrs = list(inode["direct"])
+        if inode["indirect"]:
+            ind = self.data_block(inode["indirect"])
+            ptrs += list(struct.unpack("<256Q", ind))
+        return ptrs
+
+    def read(self, inode) -> bytes:
+        out = bytearray()
+        ptrs = self.pointers(inode)
+        for i in range((inode["size"] + BLOCK - 1) // BLOCK):
+            p = ptrs[i] if i < len(ptrs) else 0
+            out += self.data_block(p) if p else bytes(BLOCK)
+        return bytes(out[:inode["size"]])
+
+    def entries(self, inode):
+        raw = self.read(inode)
+        for i in range(len(raw) // DIRENT):
+            e = raw[i * DIRENT:(i + 1) * DIRENT]
+            ino = struct.unpack_from("<I", e, 0)[0]
+            if ino == 0:
+                continue
+            crc = struct.unpack_from("<I", e, 4)[0]
+            if crc != zlib.crc32(e[:4] + e[8:]) & 0xFFFFFFFF:
+                raise Corrupt(f"crc da entrada {i}")
+            n = e[8]
+            if n == 0 or n > 55:
+                raise Corrupt(f"nome da entrada {i}")
+            yield e[9:9 + n].decode("utf-8", "replace"), ino
+
+    def resolve(self, path: str):
+        ino = 1
+        inode = self.inode(1)
+        for comp in path.split("/"):
+            if not comp or comp == ".":
+                continue
+            if inode["kind"] != 2:
+                raise Corrupt(f"'{comp}': pai nao e diretorio")
+            for name, child in self.entries(inode):
+                if name == comp:
+                    ino, inode = child, self.inode(child)
+                    if inode is None:
+                        raise Corrupt(f"'{comp}' aponta para inode livre")
+                    break
+            else:
+                raise FileNotFoundError(path)
+        return ino, inode
+
+
+def cmd_info(v: Volume):
+    print(f"NexoFS v{v.version}: {v.total} blocos de {BLOCK} B, inodes {v.inode_count}, dados a partir do bloco {v.data_start}, geracao {v.generation}")
+
+
+def cmd_ls(v: Volume, path: str):
+    _, inode = v.resolve(path)
+    if inode["kind"] != 2:
+        print(f"{path}: arquivo de {inode['size']} bytes")
+        return
+    for name, ino in sorted(v.entries(inode)):
+        child = v.inode(ino)
+        kind = "d" if child["kind"] == 2 else "-"
+        print(f"{kind} {child['size']:>10} {ino:>4} {name}")
+
+
+def cmd_cat(v: Volume, path: str):
+    _, inode = v.resolve(path)
+    if inode["kind"] == 2:
+        raise Corrupt(f"{path} e diretorio")
+    sys.stdout.write(v.read(inode).decode("utf-8", "replace"))
+    sys.stdout.write("\n")
+
+
+def cmd_check(v: Volume) -> int:
+    used_blocks = set(range(v.data_start))
+    used_inodes = set()
+    problems = []
+
+    def mark(inode):
+        for p in [x for x in v.pointers(inode) if x] + ([inode["indirect"]] if inode["indirect"] else []):
+            if p < v.data_start or p >= v.total:
+                problems.append(f"inode {inode['ino']}: ponteiro {p} fora da area de dados")
+            elif p in used_blocks:
+                problems.append(f"inode {inode['ino']}: bloco {p} referenciado duas vezes")
+            used_blocks.add(p)
+
+    stack = [(1, "/")]
+    while stack:
+        ino, path = stack.pop()
+        if ino in used_inodes:
+            problems.append(f"{path}: inode {ino} referenciado duas vezes")
+            continue
+        inode = v.inode(ino)
+        if inode is None:
+            problems.append(f"{path}: inode {ino} livre")
+            continue
+        used_inodes.add(ino)
+        mark(inode)
+        if inode["kind"] == 2:
+            for name, child in v.entries(inode):
+                stack.append((child, path.rstrip("/") + "/" + name))
+    orphans = [i for i in range(2, v.inode_count) if v.inode(i) is not None and i not in used_inodes]
+    if orphans:
+        problems.append(f"inodes orfaos: {orphans}")
+    bitmap = b"".join(v.block(v.bitmap_start + i) for i in range(v.bitmap_blocks))
+    on_disk = {b for b in range(v.total) if bitmap[b // 8] & (1 << (b % 8))}
+    if on_disk != used_blocks:
+        problems.append(f"bitmap divergente: {len(on_disk - used_blocks)} a mais, {len(used_blocks - on_disk)} a menos")
+    if problems:
+        print("INCONSISTENTE:\n  " + "\n  ".join(problems))
+        return 1
+    print(f"consistente: {len(used_inodes)} inode(s) em uso, {len(used_blocks) - v.data_start} bloco(s) de dados")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--offset", type=int, default=0, help="deslocamento do volume na imagem (bytes)")
+    ap.add_argument("image")
+    ap.add_argument("cmd", choices=["info", "ls", "cat", "check"])
+    ap.add_argument("path", nargs="?", default="/")
+    a = ap.parse_args()
+    try:
+        v = Volume(a.image, a.offset)
+        if a.cmd == "info":
+            cmd_info(v)
+        elif a.cmd == "ls":
+            cmd_ls(v, a.path)
+        elif a.cmd == "cat":
+            cmd_cat(v, a.path)
+        else:
+            return cmd_check(v)
+    except (Corrupt, FileNotFoundError) as e:
+        print(f"erro: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

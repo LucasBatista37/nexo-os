@@ -427,6 +427,13 @@ pub extern "C" fn _start(crash_after: u64) -> ! {
             continue;
         }
         let op = buf[0];
+        if op == 2 {
+            let mut r = [0u8; 9];
+            r[1..9].copy_from_slice(&dev.capacity.to_le_bytes());
+            let _ = nexo_sys::channel_send(CHAN, &r, &[]);
+            served += 1;
+            continue;
+        }
         let sector = u64::from_le_bytes(buf[4..12].try_into().unwrap());
         let count = u32::from_le_bytes(buf[12..16].try_into().unwrap()) as usize;
         if count == 0 || count > MAX_SECTORS || sector + count as u64 > dev.capacity {

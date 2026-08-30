@@ -459,10 +459,10 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] definir VFS e namespace por sessão/processo;
 - [-] implementar `ramfs` — *initramfs somente leitura (`NEXOIRD1`) com membros nomeados; `ramfs` gravável pendente*;
 - [ ] implementar FAT somente para EFI;
-- [ ] implementar leitura de um filesystem persistente de teste;
-- [ ] implementar escrita, flush e sincronização;
-- [ ] criar testes de imagem corrompida e corte de energia;
-- [ ] criar ferramenta de inspeção do disco no host;
+- [x] implementar leitura de um filesystem persistente de teste — *NexoFS v0 (ADR-0016): `libraries/nexofs` + `services/fs`; `user_fs` e cenário `storage`*;
+- [x] implementar escrita, flush e sincronização — *copy-on-write com commit atômico por setor, `sync`; sem cache de blocos ainda*;
+- [x] criar testes de imagem corrompida e corte de energia — *host: corte em cada escrita (com escritas rasgadas) e 400 imagens corrompidas; falta simular cortes no QEMU real*;
+- [x] criar ferramenta de inspeção do disco no host — *`tools/nexo-disk` (info/ls/cat/check), usado pelo cenário `storage`*;
 - [ ] publicar release `0.3-storage`.
 
 **Gate F3:** criar, ler, alterar e remover arquivos sobre VirtIO block; reiniciar preserva dados; um driver de armazenamento pode falhar sem corromper o kernel; testes simulam desligamentos abruptos.

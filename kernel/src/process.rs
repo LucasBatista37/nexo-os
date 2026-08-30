@@ -22,7 +22,7 @@ pub type Pid = u64;
 /// Topo da pilha de usuário (exclusivo).
 pub const USER_STACK_TOP: u64 = 0x0000_7fff_fff0_0000;
 /// Tamanho da pilha de usuário.
-pub const USER_STACK_SIZE: u64 = 64 * 1024;
+pub const USER_STACK_SIZE: u64 = 256 * 1024;
 
 /// Espaço de endereçamento de um processo.
 pub struct AddressSpace {
