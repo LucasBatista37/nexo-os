@@ -38,7 +38,7 @@ ESTIMATES = {
 
 GATES = {
     "Fase 0": ("✅ atendido", "clone limpo + `make ci` verde (2026-08-29); `docs/releases/0.0.1-boot.md`"),
-    "Fase 1": ("🟡 quase", "30 min de stress com 4 CPUs sem erros; faltam as 24 h (`make stress DURATION=86400`)"),
+    "Fase 1": ("🟡 quase", "2 h de stress com 4 CPUs sem erros (2026-08-30: 17 M trocas, contador com lock exato, 1,27 M processos); as 24 h estão em execução (`make stress DURATION=86400`)"),
     "Fase 2": ("🟡 quase", "4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado"),
     "Fase 3": ("🟡 critérios atendidos; release pendente", "arquivos criados/alterados/removidos sobre VirtIO-block persistem entre boots (NexoFS v0, `test-qemu --scenario storage`, 2026-08-30); driver de bloco morto sem afetar o kernel (`user_block_crash`); cortes de energia simulados no host em cada escrita — faltam VFS/namespace, cache de blocos, FAT do ESP, IOMMU, VirtIO input/rng/console e cortes no QEMU real"),
 }

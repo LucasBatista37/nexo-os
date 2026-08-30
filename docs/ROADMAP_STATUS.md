@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `a18fe9c`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `77bfcef`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 144 · 🟡 30 · ⬜ 361 · ⛔ 0 → **30% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -27,7 +27,7 @@ Estimativas assumem uma pessoa com 15–25 h/semana (Plano §13). Somando as fai
 | Gate | Critério (resumo) | Estado | Evidência |
 |---|---|---|---|
 | Fase 0 | clone limpo → um comando gera imagem que inicia em QEMU; CI comprova a mensagem do kernel | ✅ atendido | clone limpo + `make ci` verde (2026-08-29); `docs/releases/0.0.1-boot.md` |
-| Fase 1 | 24 h de stress em QEMU, múltiplas CPUs, memória isolada, exceções tratadas, zero falha inexplicada | 🟡 quase | 30 min de stress com 4 CPUs sem erros; faltam as 24 h (`make stress DURATION=86400`) |
+| Fase 1 | 24 h de stress em QEMU, múltiplas CPUs, memória isolada, exceções tratadas, zero falha inexplicada | 🟡 quase | 2 h de stress com 4 CPUs sem erros (2026-08-30: 17 M trocas, contador com lock exato, 1,27 M processos); as 24 h estão em execução (`make stress DURATION=86400`) |
 | Fase 2 | 3 processos isolados simultâneos; servidor reinicia sem reiniciar o kernel; acesso sem capability falha de forma testada | 🟡 quase | 4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado |
 | Fase 3 | arquivos sobre VirtIO block persistem; driver de armazenamento pode falhar sem corromper o kernel; cortes de energia simulados | 🟡 critérios atendidos; release pendente | arquivos criados/alterados/removidos sobre VirtIO-block persistem entre boots (NexoFS v0, `test-qemu --scenario storage`, 2026-08-30); driver de bloco morto sem afetar o kernel (`user_block_crash`); cortes de energia simulados no host em cada escrita — faltam VFS/namespace, cache de blocos, FAT do ESP, IOMMU, VirtIO input/rng/console e cortes no QEMU real |
 | Fase 4 | DHCP, DNS, TLS; tráfego malformado não derruba outros serviços | ⬜ não iniciado |  |
@@ -64,7 +64,7 @@ Gate: ✅ atendido. clone limpo + `make ci` verde (2026-08-29); `docs/releases/0
 
 ### Fase 1 — Kernel mínimo confiável (meses 6–18) — 95% (17 ✅, 2 🟡, 0 ⬜)
 
-Gate: 🟡 quase. 30 min de stress com 4 CPUs sem erros; faltam as 24 h (`make stress DURATION=86400`)
+Gate: 🟡 quase. 2 h de stress com 4 CPUs sem erros (2026-08-30: 17 M trocas, contador com lock exato, 1,27 M processos); as 24 h estão em execução (`make stress DURATION=86400`)
 
 | | Item | Evidência / nota |
 |---|---|---|

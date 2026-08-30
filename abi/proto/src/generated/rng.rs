@@ -22,7 +22,9 @@ impl FillRequest {
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
-        if o + 4 > out.len() { return Err(ProtoError::Short); }
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
         out[o..o + 4].copy_from_slice(&self.len.to_le_bytes());
         o += 4;
         Ok(o)
@@ -31,7 +33,9 @@ impl FillRequest {
     /// ausentes assumem o padrao — ipc-compat §3).
     pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
         let mut o = 0usize;
-        if o + 4 > b.len() { return Err(ProtoError::Short); }
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
         let len = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
         o += 4;
         let _ = o;
@@ -39,7 +43,9 @@ impl FillRequest {
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
     pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
-        if out.len() < HEADER_LEN { return Err(ProtoError::Short); }
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
         let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
         let h = Header {
             protocol_id: PROTOCOL_ID,
@@ -74,8 +80,12 @@ impl FillResponse {
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
         let n = self.data_len as usize;
-        if n > 1024 { return Err(ProtoError::TooBig); }
-        if o + 4 + n > out.len() { return Err(ProtoError::Short); }
+        if n > 1024 {
+            return Err(ProtoError::TooBig);
+        }
+        if o + 4 + n > out.len() {
+            return Err(ProtoError::Short);
+        }
         out[o..o + 4].copy_from_slice(&(n as u32).to_le_bytes());
         out[o + 4..o + 4 + n].copy_from_slice(&self.data[..n]);
         o += 4 + n;
@@ -88,10 +98,16 @@ impl FillResponse {
         let mut data = [0u8; 1024];
         let data_len: u32;
         {
-            if o + 4 > b.len() { return Err(ProtoError::Short); }
+            if o + 4 > b.len() {
+                return Err(ProtoError::Short);
+            }
             let l = u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as usize;
-            if l > 1024 { return Err(ProtoError::TooBig); }
-            if o + 4 + l > b.len() { return Err(ProtoError::Short); }
+            if l > 1024 {
+                return Err(ProtoError::TooBig);
+            }
+            if o + 4 + l > b.len() {
+                return Err(ProtoError::Short);
+            }
             data[..l].copy_from_slice(&b[o + 4..o + 4 + l]);
             data_len = l as u32;
             o += 4 + l;
@@ -101,7 +117,9 @@ impl FillResponse {
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
     pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
-        if out.len() < HEADER_LEN { return Err(ProtoError::Short); }
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
         let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
         let h = Header {
             protocol_id: PROTOCOL_ID,
@@ -126,9 +144,15 @@ pub enum Request {
 /// Decodifica um pedido completo (cabecalho + payload).
 pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
     let h = Header::decode(msg)?;
-    if h.protocol_id != PROTOCOL_ID { return Err(ProtoError::Protocol); }
-    if h.version_major != VERSION_MAJOR { return Err(ProtoError::Version); }
-    if h.flags != 0 { return Err(ProtoError::Flags); }
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.flags != 0 {
+        return Err(ProtoError::Flags);
+    }
     let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
     match h.method_id {
         1 => Ok(Request::Fill(FillRequest::decode_payload(p)?)),
@@ -139,21 +163,35 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
 /// Decodifica a resposta de `fill` (erro remoto vira `ProtoError::Remote`).
 pub fn decode_fill_response(msg: &[u8]) -> Result<FillResponse, ProtoError> {
     let h = Header::decode(msg)?;
-    if h.protocol_id != PROTOCOL_ID { return Err(ProtoError::Protocol); }
-    if h.version_major != VERSION_MAJOR { return Err(ProtoError::Version); }
-    if h.method_id != 1 { return Err(ProtoError::Method); }
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 1 {
+        return Err(ProtoError::Method);
+    }
     let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
     if h.flags & FLAG_ERROR != 0 {
-        let code = if p.len() >= 4 { u32::from_le_bytes([p[0], p[1], p[2], p[3]]) } else { 0 };
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
         return Err(ProtoError::Remote(code));
     }
-    if h.flags != FLAG_RESPONSE { return Err(ProtoError::Flags); }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
     FillResponse::decode_payload(p)
 }
 
 /// Codifica uma resposta de erro para o metodo `method_id`.
 pub fn encode_error(method_id: u32, code: u32, out: &mut [u8]) -> Result<usize, ProtoError> {
-    if out.len() < HEADER_LEN + 4 { return Err(ProtoError::Short); }
+    if out.len() < HEADER_LEN + 4 {
+        return Err(ProtoError::Short);
+    }
     let h = Header {
         protocol_id: PROTOCOL_ID,
         version_major: VERSION_MAJOR,

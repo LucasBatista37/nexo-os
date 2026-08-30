@@ -62,9 +62,11 @@ stress: image
 	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --timeout $$(( $(DURATION) + 300 )) --log build/logs/stress-long.log; \
 	rc=$$?; if [ $$rc -eq 33 ]; then echo "[nexo] stress de $(DURATION)s: PASS"; else echo "[nexo] stress: FALHA (codigo $$rc)"; exit 1; fi
 
-# Regenera os protocolos tipados a partir de idl/*.idl (abi/proto/src/generated).
+# Regenera os protocolos tipados a partir de idl/*.idl (abi/proto/src/generated) e formata
+# (a saida do gerador so e estavel depois do rustfmt).
 idl:
 	tools/idlgen
+	cargo fmt -p nexo-proto
 
 # Falha se os modulos gerados estiverem defasados em relacao a IDL (usado no CI).
 idl-check: idl
