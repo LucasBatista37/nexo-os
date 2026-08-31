@@ -80,6 +80,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         34 => greeter_driver(),
         35 => wm_context(),
         36 => wm_clipboard(),
+        37 => wm_notify(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2404,6 +2405,136 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 37: notificacoes + nao-perturbe. Um aviso (inclusive de sessao em segundo plano) desenha
+/// o banner de sobreposicao; dismiss o remove; com DND ativo o aviso e descartado; o set_dnd e
+/// mediado pela posse da entrada.
+fn wm_notify() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    // Janela azul cobrindo a tela toda (fica atras do banner).
+    let (a, a_base) = wm_create(s1, 0, 0, 64, 48, 0);
+    wm_fill(a_base, 64, 48, 0, 0, 255);
+    wm_commit(s1, a);
+    let _ = a;
+
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(900));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(901);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(902));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(903));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(904));
+    let stride = outp.w;
+    // regiao do banner (topo direito): comeca azul
+    if wm_px(ob, stride, 60, 4) != (0, 0, 255) {
+        nexo_sys::exit(905);
+    }
+
+    let notify = |ch: nexo_sys::Handle,
+                  txt: &[u8],
+                  out: &mut [u8; 256],
+                  buf: &mut [u8; 256],
+                  hs: &mut [u32; 1]| {
+        let mut rq = nexo_proto::wm::NotifyRequest {
+            title: [0; 64],
+            title_len: txt.len() as u32,
+        };
+        rq.title[..txt.len()].copy_from_slice(txt);
+        let m = rq.encode_msg(out).unwrap_or_else(|_| nexo_sys::exit(906));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(907);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) if nexo_proto::wm::decode_notify_response(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(908),
+        }
+    };
+    let dismiss =
+        |ch: nexo_sys::Handle, out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 1]| {
+            let m = nexo_proto::wm::DismissNotificationRequest {}
+                .encode_msg(out)
+                .unwrap_or_else(|_| nexo_sys::exit(909));
+            if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit(910);
+            }
+            match nexo_sys::channel_recv(ch, buf, hs) {
+                Ok((n, _))
+                    if nexo_proto::wm::decode_dismiss_notification_response(&buf[..n]).is_ok() => {}
+                _ => nexo_sys::exit(911),
+            }
+        };
+    let set_dnd = |ch: nexo_sys::Handle,
+                   on: u8,
+                   out: &mut [u8; 256],
+                   buf: &mut [u8; 256],
+                   hs: &mut [u32; 1]|
+     -> bool {
+        let m = nexo_proto::wm::SetDndRequest { enabled: on }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(912));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(913);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_set_dnd_response(&buf[..n]).is_ok(),
+            _ => nexo_sys::exit(914),
+        }
+    };
+
+    // aviso -> banner (azul do fundo some na regiao); dismiss -> volta o azul
+    notify(s1, b"oi", &mut out, &mut buf, &mut hs);
+    if wm_px(ob, stride, 60, 4) == (0, 0, 255) {
+        nexo_sys::exit(915);
+    }
+    dismiss(s1, &mut out, &mut buf, &mut hs);
+    if wm_px(ob, stride, 60, 4) != (0, 0, 255) {
+        nexo_sys::exit(916);
+    }
+
+    // nao-perturbe: aviso descartado
+    if !set_dnd(s1, 1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(917);
+    }
+    notify(s1, b"spam", &mut out, &mut buf, &mut hs);
+    if wm_px(ob, stride, 60, 4) != (0, 0, 255) {
+        nexo_sys::exit(918);
+    }
+    if !set_dnd(s1, 0, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(919);
+    }
+
+    // sessao em segundo plano pode notificar (mas nao mudar o DND)
+    let (s2, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(920));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(921));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(922);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(923),
+    }
+    if set_dnd(s2, 1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(924); // sem posse da entrada: negado
+    }
+    notify(s2, b"bg", &mut out, &mut buf, &mut hs);
+    if wm_px(ob, stride, 60, 4) == (0, 0, 255) {
+        nexo_sys::exit(925); // o banner do aviso em segundo plano aparece
+    }
+    nexo_sys::log(
+        "utest: wm notify ok — banner de aviso, DND descarta e so o dono da entrada o controla",
+    );
     nexo_sys::exit(0)
 }
 

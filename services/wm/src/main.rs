@@ -53,6 +53,12 @@ struct Outputs {
     bytes: u64,
 }
 
+/// Notificação em exibição (título truncado) e o modo não-perturbe.
+struct Attention {
+    banner: Option<([u8; 64], u32)>,
+    dnd: bool,
+}
+
 /// Área de transferência mediada: conteúdo atual + anel de histórico (opt-in).
 struct Clipboard {
     data: [u8; 256],
@@ -162,7 +168,13 @@ fn as_slice_mut<'a>(base: u64, len: u64) -> &'a mut [u8] {
 
 /// Recompõe as saídas de **todos** os displays (ordem-Z sobre fundo preto, por display); o
 /// display 0 é apresentado no framebuffer real, se mapeado.
-fn recompose(surfaces: &[Slot; MAX_SURFACES], outs: &Outputs, fb: Option<&FbOut>, ctx: u8) {
+fn recompose(
+    surfaces: &[Slot; MAX_SURFACES],
+    outs: &Outputs,
+    fb: Option<&FbOut>,
+    ctx: u8,
+    att: &Attention,
+) {
     for d in 0..NUM_DISPLAYS {
         let out_pixels = as_slice_mut(outs.base[d], outs.bytes);
         let mut out = Surface::new(
@@ -202,6 +214,16 @@ fn recompose(surfaces: &[Slot; MAX_SURFACES], outs: &Outputs, fb: Option<&FbOut>
         let mut dmg = Damage::new();
         dmg.add(Rect::new(0, 0, OUT_W, OUT_H));
         composite(&mut out, &wins[..n], dmg.bounds(), Color::rgb(0, 0, 0));
+        // Banner de notificação: sobreposição no topo direito do display 0, acima de tudo.
+        if d == 0
+            && let Some((title, tlen)) = &att.banner
+        {
+            let r = Rect::new(OUT_W - 32, 0, 32, 10);
+            out.fill_rect(r, Color::rgb(40, 80, 200));
+            out.stroke_rect(r, Color::WHITE);
+            let txt = core::str::from_utf8(&title[..*tlen as usize]).unwrap_or("?");
+            nexo_gfx::text::draw_text(&mut out, txt, r.x + 2, r.y + 1, 1, Color::WHITE, None);
+        }
         // Display 0: apresenta no framebuffer real, se mapeado.
         if d == 0
             && let Some(fb) = fb
@@ -288,6 +310,10 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut focused: Option<usize> = None;
     let mut grabbed: Option<usize> = None;
     let mut active_ctx: u8 = 0;
+    let mut attention = Attention {
+        banner: None,
+        dnd: false,
+    };
     let mut clipboard = Clipboard {
         data: [0; 256],
         len: 0,
@@ -327,7 +353,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                         let _ = nexo_sys::handle_close(ch);
                     }
                     sessions[slot] = None;
-                    recompose(&surfaces, &outs, fb.as_ref(), active_ctx);
+                    recompose(&surfaces, &outs, fb.as_ref(), active_ctx, &attention);
                     if sessions.iter().all(|s| s.is_none()) {
                         log!("wm: ultima sessao desconectou; encerrando");
                         nexo_sys::exit(0)
@@ -383,6 +409,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 &mut grabbed,
                 &mut active_ctx,
                 &mut clipboard,
+                &mut attention,
             );
         }
         // Processa eventos de entrada (evdev crus, 8 bytes cada).
@@ -427,7 +454,13 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                         .unwrap_or(0);
                                     surfaces[i].z = top.saturating_add(1);
                                     focused = Some(i);
-                                    recompose(&surfaces, &outs, fb.as_ref(), active_ctx);
+                                    recompose(
+                                        &surfaces,
+                                        &outs,
+                                        fb.as_ref(),
+                                        active_ctx,
+                                        &attention,
+                                    );
                                 }
                             }
                             (EV_KEY, BTN_LEFT, _) => {} // release do botão: ignora
@@ -449,7 +482,13 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                         .unwrap_or(0);
                                     surfaces[i].z = top.saturating_add(1);
                                     focused = Some(i);
-                                    recompose(&surfaces, &outs, fb.as_ref(), active_ctx);
+                                    recompose(
+                                        &surfaces,
+                                        &outs,
+                                        fb.as_ref(),
+                                        active_ctx,
+                                        &attention,
+                                    );
                                 }
                             }
                             (EV_KEY, c, v) => {
@@ -509,6 +548,7 @@ fn serve(
     grabbed: &mut Option<usize>,
     active_ctx: &mut u8,
     clipboard: &mut Clipboard,
+    attention: &mut Attention,
 ) {
     // Uma superfície só pode ser tocada pela sessão que a criou.
     let mine = |surfaces: &[Slot; MAX_SURFACES], id: u32| -> bool {
@@ -574,7 +614,7 @@ fn serve(
         }
         Request::Commit(rq) => {
             if mine(surfaces, rq.id) {
-                recompose(surfaces, outs, fb, *active_ctx);
+                recompose(surfaces, outs, fb, *active_ctx, attention);
                 let m = wm::CommitResponse {}.encode_msg(out).unwrap_or(0);
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
             } else {
@@ -585,7 +625,7 @@ fn serve(
             if mine(surfaces, rq.id) {
                 surfaces[rq.id as usize].rect.x = rq.x;
                 surfaces[rq.id as usize].rect.y = rq.y;
-                recompose(surfaces, outs, fb, *active_ctx);
+                recompose(surfaces, outs, fb, *active_ctx, attention);
                 let m = wm::MoveResponse {}.encode_msg(out).unwrap_or(0);
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
             } else {
@@ -596,7 +636,7 @@ fn serve(
             if mine(surfaces, rq.id) {
                 let _ = nexo_sys::handle_close(surfaces[rq.id as usize].mem);
                 surfaces[rq.id as usize].used = false;
-                recompose(surfaces, outs, fb, *active_ctx);
+                recompose(surfaces, outs, fb, *active_ctx, attention);
                 let m = wm::DestroyResponse {}.encode_msg(out).unwrap_or(0);
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
             } else {
@@ -606,7 +646,7 @@ fn serve(
         Request::SetAlpha(rq) => {
             if mine(surfaces, rq.id) {
                 surfaces[rq.id as usize].alpha = rq.alpha;
-                recompose(surfaces, outs, fb, *active_ctx);
+                recompose(surfaces, outs, fb, *active_ctx, attention);
                 let m = wm::SetAlphaResponse {}.encode_msg(out).unwrap_or(0);
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
             } else {
@@ -622,7 +662,7 @@ fn serve(
                     .max()
                     .unwrap_or(0);
                 surfaces[rq.id as usize].z = top.saturating_add(1);
-                recompose(surfaces, outs, fb, *active_ctx);
+                recompose(surfaces, outs, fb, *active_ctx, attention);
                 let m = wm::RaiseResponse {}.encode_msg(out).unwrap_or(0);
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
             } else {
@@ -638,7 +678,7 @@ fn serve(
                     .min()
                     .unwrap_or(0);
                 surfaces[rq.id as usize].z = bottom.saturating_sub(1);
-                recompose(surfaces, outs, fb, *active_ctx);
+                recompose(surfaces, outs, fb, *active_ctx, attention);
                 let m = wm::LowerResponse {}.encode_msg(out).unwrap_or(0);
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
             } else {
@@ -657,7 +697,7 @@ fn serve(
             let i = rq.id as usize;
             match realloc_surface(surfaces, i, rq.w, rq.h) {
                 Some(client_mem) => {
-                    recompose(surfaces, outs, fb, *active_ctx);
+                    recompose(surfaces, outs, fb, *active_ctx, attention);
                     let resp = wm::ResizeResponse { mem: client_mem };
                     let m = resp.encode_msg(out).unwrap_or(0);
                     if nexo_sys::channel_send(ch, &out[..m], &resp.handles()) != Status::Ok {
@@ -665,7 +705,7 @@ fn serve(
                     }
                 }
                 None => {
-                    recompose(surfaces, outs, fb, *active_ctx);
+                    recompose(surfaces, outs, fb, *active_ctx, attention);
                     reply_err(ch, wm::ResizeRequest::METHOD_ID, E_NO_RES, out);
                 }
             }
@@ -683,7 +723,7 @@ fn serve(
             surfaces[i].rect.y = 0;
             match realloc_surface(surfaces, i, OUT_W, OUT_H) {
                 Some(client_mem) => {
-                    recompose(surfaces, outs, fb, *active_ctx);
+                    recompose(surfaces, outs, fb, *active_ctx, attention);
                     let resp = wm::MaximizeResponse { mem: client_mem };
                     let m = resp.encode_msg(out).unwrap_or(0);
                     if nexo_sys::channel_send(ch, &out[..m], &resp.handles()) != Status::Ok {
@@ -691,7 +731,7 @@ fn serve(
                     }
                 }
                 None => {
-                    recompose(surfaces, outs, fb, *active_ctx);
+                    recompose(surfaces, outs, fb, *active_ctx, attention);
                     reply_err(ch, wm::MaximizeRequest::METHOD_ID, E_NO_RES, out);
                 }
             }
@@ -710,7 +750,7 @@ fn serve(
             surfaces[i].rect.y = saved.y;
             match realloc_surface(surfaces, i, saved.w, saved.h) {
                 Some(client_mem) => {
-                    recompose(surfaces, outs, fb, *active_ctx);
+                    recompose(surfaces, outs, fb, *active_ctx, attention);
                     let resp = wm::RestoreResponse { mem: client_mem };
                     let m = resp.encode_msg(out).unwrap_or(0);
                     if nexo_sys::channel_send(ch, &out[..m], &resp.handles()) != Status::Ok {
@@ -718,7 +758,7 @@ fn serve(
                     }
                 }
                 None => {
-                    recompose(surfaces, outs, fb, *active_ctx);
+                    recompose(surfaces, outs, fb, *active_ctx, attention);
                     reply_err(ch, wm::RestoreRequest::METHOD_ID, E_NO_RES, out);
                 }
             }
@@ -741,9 +781,39 @@ fn serve(
                         k += 1;
                     }
                 }
-                recompose(surfaces, outs, fb, *active_ctx);
+                recompose(surfaces, outs, fb, *active_ctx, attention);
             }
             let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::Notify(rq) => {
+            // Qualquer sessão pode publicar; com o não-perturbe ativo o aviso é descartado.
+            if !attention.dnd {
+                let t = rq.title();
+                let mut title = [0u8; 64];
+                title[..t.len()].copy_from_slice(t);
+                attention.banner = Some((title, t.len() as u32));
+                recompose(surfaces, outs, fb, *active_ctx, attention);
+            }
+            let m = wm::NotifyResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::DismissNotification(_) => {
+            if attention.banner.take().is_some() {
+                recompose(surfaces, outs, fb, *active_ctx, attention);
+            }
+            let m = wm::DismissNotificationResponse {}
+                .encode_msg(out)
+                .unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::SetDnd(rq) => {
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(ch, wm::SetDndRequest::METHOD_ID, E_NO_INPUT_OWNER, out);
+                return;
+            }
+            attention.dnd = rq.enabled != 0;
+            let m = wm::SetDndResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::ClipboardSet(rq) => {
@@ -838,7 +908,7 @@ fn serve(
                 return;
             }
             surfaces[rq.id as usize].context = rq.context;
-            recompose(surfaces, outs, fb, *active_ctx);
+            recompose(surfaces, outs, fb, *active_ctx, attention);
             let m = wm::SetContextResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
@@ -855,7 +925,7 @@ fn serve(
                 .filter(|(_, s)| s.used && s.context == *active_ctx)
                 .max_by_key(|(_, s)| s.z)
                 .map(|(i, _)| i);
-            recompose(surfaces, outs, fb, *active_ctx);
+            recompose(surfaces, outs, fb, *active_ctx, attention);
             let m = wm::SwitchContextResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
@@ -869,7 +939,7 @@ fn serve(
                 return;
             }
             surfaces[rq.id as usize].display = rq.display;
-            recompose(surfaces, outs, fb, *active_ctx);
+            recompose(surfaces, outs, fb, *active_ctx, attention);
             let m = wm::MoveToDisplayResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }

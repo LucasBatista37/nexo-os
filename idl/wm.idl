@@ -6,7 +6,7 @@
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada).
-protocol wm 1.12
+protocol wm 1.13
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -239,6 +239,35 @@ method 24 clipboard_history {
     }
     response {
         data: bytes<256>,
+    }
+}
+
+# Notificacoes: qualquer sessao (inclusive em segundo plano) publica um aviso; o compositor
+# desenha um banner de sobreposicao no topo direito do display 0 (acima de tudo, em qualquer
+# contexto). Com o nao-perturbe ativo, o aviso e descartado (fila/central ficam para o shell).
+method 25 notify {
+    request {
+        title: bytes<64>,
+    }
+    response {
+    }
+}
+
+# Remove o banner atual (se houver).
+method 26 dismiss_notification {
+    request {
+    }
+    response {
+    }
+}
+
+# Controle de atencao: liga/desliga o nao-perturbe. Mediado pela posse da entrada (erro 6) — so
+# o app com que o usuario interage muda o modo de atencao.
+method 27 set_dnd {
+    request {
+        enabled: u8,
+    }
+    response {
     }
 }
 
