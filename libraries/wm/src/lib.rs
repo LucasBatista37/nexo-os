@@ -22,10 +22,14 @@ pub struct Window<'a> {
     pub stride: u32,
     /// Formato dos pixels do cliente.
     pub format: PixelFormat,
+    /// Opacidade da janela inteira (255 = opaca, 0 = invisível): composta src-over sobre o que
+    /// está abaixo. Buffers são `*x8888` (sem alfa por pixel), então a opacidade é por janela.
+    pub alpha: u8,
 }
 
 impl Window<'_> {
-    /// Lê a cor do pixel do conteúdo em `(cx, cy)` relativo ao canto da janela.
+    /// Lê a cor do pixel do conteúdo em `(cx, cy)` relativo ao canto da janela (com a opacidade
+    /// da janela no canal alfa).
     fn sample(&self, cx: i32, cy: i32) -> Option<Color> {
         if cx < 0 || cy < 0 || cx >= self.rect.w || cy >= self.rect.h {
             return None;
@@ -36,8 +40,8 @@ impl Window<'_> {
         }
         let p = &self.pixels[o..o + 4];
         Some(match self.format {
-            PixelFormat::Rgbx8888 => Color::rgba(p[0], p[1], p[2], 255),
-            PixelFormat::Bgrx8888 => Color::rgba(p[2], p[1], p[0], 255),
+            PixelFormat::Rgbx8888 => Color::rgba(p[0], p[1], p[2], self.alpha),
+            PixelFormat::Bgrx8888 => Color::rgba(p[2], p[1], p[0], self.alpha),
             PixelFormat::Unknown => Color::TRANSPARENT,
         })
     }
@@ -182,6 +186,7 @@ mod tests {
                 pixels: &red,
                 stride: 4,
                 format: PixelFormat::Rgbx8888,
+                alpha: 255,
             },
             Window {
                 rect: Rect::new(2, 2, 4, 4),
@@ -189,6 +194,7 @@ mod tests {
                 pixels: &green,
                 stride: 4,
                 format: PixelFormat::Rgbx8888,
+                alpha: 255,
             },
         ];
         composite(
@@ -201,6 +207,40 @@ mod tests {
         assert_eq!(out.get(3, 3), Color::rgb(0, 255, 0)); // sobreposicao: verde (z maior) na frente
         assert_eq!(out.get(5, 5), Color::rgb(0, 255, 0)); // so verde
         assert_eq!(out.get(7, 7), Color::rgb(0, 0, 40)); // fundo
+    }
+
+    #[test]
+    fn per_window_alpha_blends_over_below() {
+        let mut out_buf = std::vec![0u8; 8 * 8 * 4];
+        let mut out = Surface::new(&mut out_buf, 8, 8, 8, PixelFormat::Rgbx8888).unwrap();
+        let red = win_buf(8, 8, Color::rgb(255, 0, 0), PixelFormat::Rgbx8888);
+        let green = win_buf(4, 4, Color::rgb(0, 255, 0), PixelFormat::Rgbx8888);
+        let windows = [
+            Window {
+                rect: Rect::new(0, 0, 8, 8),
+                z: 0,
+                pixels: &red,
+                stride: 8,
+                format: PixelFormat::Rgbx8888,
+                alpha: 255, // fundo opaco
+            },
+            Window {
+                rect: Rect::new(0, 0, 4, 4),
+                z: 1,
+                pixels: &green,
+                stride: 4,
+                format: PixelFormat::Rgbx8888,
+                alpha: 128, // ~50%: verde translúcido sobre o vermelho
+            },
+        ];
+        composite(&mut out, &windows, Rect::new(0, 0, 8, 8), Color::BLACK);
+        // sobreposição: ~50% verde sobre vermelho -> (127,128,0) aprox.
+        let c = out.get(1, 1);
+        assert!((c.r as i32 - 127).abs() <= 2, "r={}", c.r);
+        assert!((c.g as i32 - 128).abs() <= 2, "g={}", c.g);
+        assert_eq!(c.b, 0);
+        // fora do verde: vermelho opaco intacto
+        assert_eq!(out.get(6, 6), Color::rgb(255, 0, 0));
     }
 
     #[test]
@@ -217,6 +257,7 @@ mod tests {
                 pixels: &b,
                 stride: 4,
                 format: PixelFormat::Rgbx8888,
+                alpha: 255,
             },
             Window {
                 rect: Rect::new(0, 0, 4, 4),
@@ -224,6 +265,7 @@ mod tests {
                 pixels: &a,
                 stride: 4,
                 format: PixelFormat::Rgbx8888,
+                alpha: 255,
             },
         ];
         composite(&mut out, &windows, Rect::new(0, 0, 4, 4), Color::BLACK);
@@ -242,6 +284,7 @@ mod tests {
             pixels: &white,
             stride: 8,
             format: PixelFormat::Rgbx8888,
+            alpha: 255,
         }];
         composite(&mut out, &windows, Rect::new(2, 2, 3, 3), Color::BLACK);
         // fora do dano: conteudo previo intacto

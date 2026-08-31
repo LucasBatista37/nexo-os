@@ -4,7 +4,7 @@
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes.
-protocol wm 1.5
+protocol wm 1.6
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -110,6 +110,17 @@ method 9 resize {
 method 10 set_input {
     request {
         chan: handle,
+    }
+    response {
+    }
+}
+
+# Define a opacidade da superficie `id` (255 = opaca, 0 = invisivel); recompoe. As superficies
+# nascem opacas. Buffers sao *x8888 (sem alfa por pixel), entao a opacidade e da janela inteira.
+method 12 set_alpha {
+    request {
+        id: u32,
+        alpha: u8,
     }
     response {
     }

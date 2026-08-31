@@ -196,6 +196,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo.wm` v1.5: evento `key{surface,code,value}` (`FLAG_EVENT`) — o compositor entrega cada tecla (`EV_KEY` que não seja `BTN_LEFT`) à **janela em foco**, na sessão dona da superfície. O foco é definido pelo clique (bloco 8); o foco é solto se a superfície focada é destruída/desconecta (não vaza para um slot reutilizado).
 - `utest` modo 24 + auto-teste de boot `user_wm_keyboard`: cria uma superfície, foca-a por clique e injeta teclas (press/release); confere que chegam como eventos `key` com o id da superfície e o código/valor corretos. 48 testes no boot.
 
+### Adicionado (Fase 5, bloco 10 — opacidade por superfície)
+- `nexo-wm`: `Window` ganhou `alpha` (opacidade da janela inteira); `composite` compõe cada janela src-over com essa opacidade sobre o que está abaixo. Buffers seguem `*x8888` (sem alfa por pixel), então a transparência é por janela. Teste de host de composição alfa.
+- `nexo.wm` v1.6: método `set_alpha{id, alpha}` — define a opacidade de uma superfície (255 = opaca; nascem opacas), recompõe. Enforça a posse por sessão.
+- `utest` modo 25 + auto-teste de boot `user_wm_alpha`: duas superfícies opacas sobrepostas (a de cima verde); define a opacidade da de cima em ~50% e confere na saída composta que a sobreposição vira uma mistura verde+vermelho (~(127,128,0)), a área só da translúcida mistura com o fundo preto e a área da opaca embaixo fica intacta. 49 testes no boot.
+
 ### Adicionado (Fase 2, extra — memória compartilhada entre processos)
 - `MemoryObject` (`kind` 4) e syscalls `memory_create` (28, aloca N páginas zeradas ≤ 256) / `memory_map` (29, mapeia `USER|RW` cacheável na região de dispositivos). Transferir o handle por canal compartilha as **mesmas páginas físicas** entre processos; o objeto possui os frames e os libera quando ninguém mais o referencia (mapeamento sem posse, como MMIO). `sdk/nexo-sys` ganhou os wrappers.
 - Teste `user_shmem`: um produtor cria memória, escreve um marcador e transfere o handle a um consumidor por canal; o consumidor lê o marcador e responde na mesma memória; sem vazamento de quadros. 42 testes no boot. Base para o compositor (buffers de janela) e payloads grandes de IPC (ipc-compat §2.6).

@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.wm` v1.5 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
+//! Protocolo tipado `nexo.wm` v1.6 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x1b0edd71;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 5;
+pub const VERSION_MINOR: u16 = 6;
 
 /// `nexo.wm.create_surface` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1040,6 +1040,108 @@ impl SetInputResponse {
     }
 }
 
+/// `nexo.wm.set_alpha` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetAlphaRequest {
+    /// Campo `id`.
+    pub id: u32,
+    /// Campo `alpha`.
+    pub alpha: u8,
+}
+
+impl SetAlphaRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 12;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.id.to_le_bytes());
+        o += 4;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.alpha.to_le_bytes());
+        o += 1;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let id = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let alpha = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
+        let _ = o;
+        Ok(SetAlphaRequest { id, alpha })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.set_alpha` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetAlphaResponse {}
+
+impl SetAlphaResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 12;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(SetAlphaResponse {})
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// `nexo.wm.key` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyEvent {
@@ -1146,6 +1248,8 @@ pub enum Request {
     Resize(ResizeRequest),
     /// `set_input`.
     SetInput(SetInputRequest),
+    /// `set_alpha`.
+    SetAlpha(SetAlphaRequest),
 }
 
 /// Decodifica um pedido injetando os handles recebidos (ordem de declaracao por metodo).
@@ -1204,6 +1308,11 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
             }
             rq.chan = hs[0];
         }
+        Request::SetAlpha(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
     }
     Ok(r)
 }
@@ -1234,6 +1343,7 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
         8 => Ok(Request::Lower(LowerRequest::decode_payload(p)?)),
         9 => Ok(Request::Resize(ResizeRequest::decode_payload(p)?)),
         10 => Ok(Request::SetInput(SetInputRequest::decode_payload(p)?)),
+        12 => Ok(Request::SetAlpha(SetAlphaRequest::decode_payload(p)?)),
         _ => Err(ProtoError::Method),
     }
 }
@@ -1506,6 +1616,33 @@ pub fn decode_set_input_response(msg: &[u8]) -> Result<SetInputResponse, ProtoEr
         return Err(ProtoError::Flags);
     }
     SetInputResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `set_alpha` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_set_alpha_response(msg: &[u8]) -> Result<SetAlphaResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 12 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    SetAlphaResponse::decode_payload(p)
 }
 
 /// Decodifica um evento `key` (mensagem sem resposta).

@@ -39,6 +39,8 @@ struct Slot {
     owner: usize,
     rect: Rect,
     z: i32,
+    /// Opacidade da janela (255 = opaca).
+    alpha: u8,
     /// Handle do wm para o `MemoryObject` (mantido para ler os pixels e liberar no fim).
     mem: Handle,
     base: u64,
@@ -50,6 +52,7 @@ const EMPTY: Slot = Slot {
     owner: 0,
     rect: Rect::new(0, 0, 0, 0),
     z: 0,
+    alpha: 255,
     mem: 0,
     base: 0,
     len: 0,
@@ -87,6 +90,7 @@ fn recompose(surfaces: &[Slot; MAX_SURFACES], out_base: u64, out_bytes: u64) {
         pixels: &[],
         stride: 0,
         format: PixelFormat::Rgbx8888,
+        alpha: 255,
     }; MAX_SURFACES];
     let mut n = 0;
     for s in surfaces.iter() {
@@ -97,6 +101,7 @@ fn recompose(surfaces: &[Slot; MAX_SURFACES], out_base: u64, out_bytes: u64) {
                 pixels: as_slice(s.base, s.len),
                 stride: s.rect.w as u32,
                 format: PixelFormat::Rgbx8888,
+                alpha: s.alpha,
             };
             n += 1;
         }
@@ -347,6 +352,7 @@ fn serve(
                 owner,
                 rect: Rect::new(rq.x, rq.y, rq.w, rq.h),
                 z: rq.z,
+                alpha: 255,
                 mem,
                 base,
                 len: bytes,
@@ -392,6 +398,16 @@ fn serve(
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
             } else {
                 reply_err(ch, wm::DestroyRequest::METHOD_ID, E_NO_SURFACE, out);
+            }
+        }
+        Request::SetAlpha(rq) => {
+            if mine(surfaces, rq.id) {
+                surfaces[rq.id as usize].alpha = rq.alpha;
+                recompose(surfaces, out_base, out_bytes);
+                let m = wm::SetAlphaResponse {}.encode_msg(out).unwrap_or(0);
+                let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+            } else {
+                reply_err(ch, wm::SetAlphaRequest::METHOD_ID, E_NO_SURFACE, out);
             }
         }
         Request::Raise(rq) => {

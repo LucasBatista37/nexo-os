@@ -68,6 +68,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         22 => wm_resize(),
         23 => wm_input(),
         24 => wm_keyboard(),
+        25 => wm_alpha(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2392,6 +2393,68 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 25: opacidade por superficie. Duas superficies opacas sobrepostas (a de cima verde);
+/// define a opacidade da de cima para ~50% e confere na saida composta que a sobreposicao vira uma
+/// mistura verde+vermelho, enquanto as areas exclusivas mantem suas cores.
+fn wm_alpha() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0); // A vermelha (fundo, opaca)
+    wm_commit(ch, a);
+    let (b, b_base) = wm_create(ch, 4, 4, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0); // B verde (por cima, opaca)
+    wm_commit(ch, b);
+
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(570));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(571);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(572));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(573));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(574));
+    let stride = outp.w;
+    // B opaca por cima: sobreposicao verde.
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(575);
+    }
+
+    // Define a opacidade de B em ~50%.
+    let m = nexo_proto::wm::SetAlphaRequest { id: b, alpha: 128 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(576));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(577);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_alpha_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(578),
+    }
+
+    // Sobreposicao: ~50% verde sobre vermelho -> (127,128,0) aprox.
+    let (r, g, bl) = wm_px(ob, stride, 6, 6);
+    if (r as i32 - 127).abs() > 2 || (g as i32 - 128).abs() > 2 || bl != 0 {
+        nexo_sys::exit(579);
+    }
+    // Area so de B (10,10): verde 50% sobre fundo preto -> (0,128,0) aprox.
+    let (r, g, bl) = wm_px(ob, stride, 10, 10);
+    if r != 0 || (g as i32 - 128).abs() > 2 || bl != 0 {
+        nexo_sys::exit(580);
+    }
+    // Area so de A (2,2): vermelho opaco.
+    if wm_px(ob, stride, 2, 2) != (255, 0, 0) {
+        nexo_sys::exit(581);
+    }
+    nexo_sys::log("utest: wm alpha ok — opacidade da janela mistura com o que esta abaixo");
     nexo_sys::exit(0)
 }
 
