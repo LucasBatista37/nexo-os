@@ -79,6 +79,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         33 => wm_displays(),
         34 => greeter_driver(),
         35 => wm_context(),
+        36 => wm_clipboard(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2403,6 +2404,213 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 36: clipboard mediado. So a sessao dona da entrada (janela focada) le/escreve; sessoes em
+/// segundo plano recebem erro 6 (nem farejar nem injetar). Historico e opt-in (anel de 4).
+fn wm_clipboard() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let mut out = [0u8; 384];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    let (a, a_base) = wm_create(s1, 0, 0, 8, 8, 0); // foco: A (sessao 1)
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    wm_commit(s1, a);
+    let _ = a;
+
+    // sessao 2 com a janela B (nao rouba o foco na criacao)
+    let (s2, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(840));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(841));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(842);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(843),
+    }
+    let req = nexo_proto::wm::CreateSurfaceRequest {
+        x: 16,
+        y: 0,
+        w: 8,
+        h: 8,
+        z: 1,
+        display: 0,
+    };
+    let m = req
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(844));
+    if nexo_sys::channel_send(s2, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(845);
+    }
+    let (n, nh) =
+        nexo_sys::channel_recv(s2, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(846));
+    let bs = nexo_proto::wm::decode_create_surface_response(&buf[..n])
+        .unwrap_or_else(|_| nexo_sys::exit(847));
+    if nh != 1 {
+        nexo_sys::exit(848);
+    }
+    let b = bs.id;
+    let b_base = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(849));
+    wm_fill(b_base, 8, 8, 0, 255, 0);
+    let m = nexo_proto::wm::CommitRequest { id: b }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(850));
+    if nexo_sys::channel_send(s2, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(851);
+    }
+    if nexo_sys::channel_recv(s2, &mut buf, &mut hs).is_err() {
+        nexo_sys::exit(852);
+    }
+
+    // sessao 1 (focada) escreve e le
+    let set = |ch: nexo_sys::Handle,
+               txt: &[u8],
+               out: &mut [u8; 384],
+               buf: &mut [u8; 384],
+               hs: &mut [u32; 1]|
+     -> bool {
+        let mut rq = nexo_proto::wm::ClipboardSetRequest {
+            data: [0; 256],
+            data_len: txt.len() as u32,
+        };
+        rq.data[..txt.len()].copy_from_slice(txt);
+        let m = rq.encode_msg(out).unwrap_or_else(|_| nexo_sys::exit(853));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(854);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_clipboard_set_response(&buf[..n]).is_ok(),
+            _ => nexo_sys::exit(855),
+        }
+    };
+    let get = |ch: nexo_sys::Handle,
+               out: &mut [u8; 384],
+               buf: &mut [u8; 384],
+               hs: &mut [u32; 1]|
+     -> Option<([u8; 256], usize)> {
+        let m = nexo_proto::wm::ClipboardGetRequest {}
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(856));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(857);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_clipboard_get_response(&buf[..n])
+                .ok()
+                .map(|r| {
+                    let mut d = [0u8; 256];
+                    d[..r.data().len()].copy_from_slice(r.data());
+                    (d, r.data().len())
+                }),
+            _ => nexo_sys::exit(858),
+        }
+    };
+
+    if !set(s1, b"hello", &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(860);
+    }
+    match get(s1, &mut out, &mut buf, &mut hs) {
+        Some((d, l)) if &d[..l] == b"hello" => {}
+        _ => nexo_sys::exit(861),
+    }
+    // sessao 2 (sem foco) nao le nem escreve
+    if get(s2, &mut out, &mut buf, &mut hs).is_some() {
+        nexo_sys::exit(862);
+    }
+    if set(s2, b"spy", &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(863);
+    }
+
+    // foca B por clique; a tecla seguinte (na sessao 2) confirma o novo dono da entrada
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(864));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(865));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(866);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(867),
+    }
+    wm_click(inj, 18, 2);
+    wm_key(inj, 30, 1);
+    let n = match nexo_sys::channel_recv(s2, &mut buf, &mut hs) {
+        Ok((n, _)) => n,
+        _ => nexo_sys::exit(868),
+    };
+    match nexo_proto::wm::decode_key_event(&buf[..n]) {
+        Ok(ev) if ev.surface == b => {}
+        _ => nexo_sys::exit(869),
+    }
+
+    // agora a sessao 2 le ("hello" atravessou as sessoes via mediacao) e a 1 e negada
+    match get(s2, &mut out, &mut buf, &mut hs) {
+        Some((d, l)) if &d[..l] == b"hello" => {}
+        _ => nexo_sys::exit(870),
+    }
+    if get(s1, &mut out, &mut buf, &mut hs).is_some() {
+        nexo_sys::exit(871);
+    }
+
+    // historico opt-in (sessao 2, focada): liga, grava 2, le na ordem; indice invalido falha
+    let m = nexo_proto::wm::ClipboardEnableHistoryRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(872));
+    if nexo_sys::channel_send(s2, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(873);
+    }
+    match nexo_sys::channel_recv(s2, &mut buf, &mut hs) {
+        Ok((n, _))
+            if nexo_proto::wm::decode_clipboard_enable_history_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(874),
+    }
+    if !set(s2, b"aa", &mut out, &mut buf, &mut hs) || !set(s2, b"bb", &mut out, &mut buf, &mut hs)
+    {
+        nexo_sys::exit(875);
+    }
+    let hist = |ch: nexo_sys::Handle,
+                idx: u32,
+                out: &mut [u8; 384],
+                buf: &mut [u8; 384],
+                hs: &mut [u32; 1]|
+     -> Option<([u8; 256], usize)> {
+        let m = nexo_proto::wm::ClipboardHistoryRequest { index: idx }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(876));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(877);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_clipboard_history_response(&buf[..n])
+                .ok()
+                .map(|r| {
+                    let mut d = [0u8; 256];
+                    d[..r.data().len()].copy_from_slice(r.data());
+                    (d, r.data().len())
+                }),
+            _ => nexo_sys::exit(878),
+        }
+    };
+    match hist(s2, 0, &mut out, &mut buf, &mut hs) {
+        Some((d, l)) if &d[..l] == b"bb" => {}
+        _ => nexo_sys::exit(880),
+    }
+    match hist(s2, 1, &mut out, &mut buf, &mut hs) {
+        Some((d, l)) if &d[..l] == b"aa" => {}
+        _ => nexo_sys::exit(881),
+    }
+    if hist(s2, 2, &mut out, &mut buf, &mut hs).is_some() {
+        nexo_sys::exit(882);
+    }
+    if hist(s1, 0, &mut out, &mut buf, &mut hs).is_some() {
+        nexo_sys::exit(883);
+    }
+    nexo_sys::log("utest: wm clipboard ok — mediado pela posse da entrada; historico opt-in");
     nexo_sys::exit(0)
 }
 

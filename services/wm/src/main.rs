@@ -53,12 +53,22 @@ struct Outputs {
     bytes: u64,
 }
 
+/// Área de transferência mediada: conteúdo atual + anel de histórico (opt-in).
+struct Clipboard {
+    data: [u8; 256],
+    len: u32,
+    hist: [([u8; 256], u32); 4],
+    hist_n: usize,
+    hist_enabled: bool,
+}
+
 /// Erros remotos do protocolo `nexo.wm`.
 const E_INVALID: u32 = 1;
 const E_NO_RES: u32 = 2;
 const E_NO_SURFACE: u32 = 3;
 const E_NO_SESSION: u32 = 4;
 const E_GRABBED: u32 = 5;
+const E_NO_INPUT_OWNER: u32 = 6;
 
 struct Slot {
     used: bool,
@@ -278,6 +288,13 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut focused: Option<usize> = None;
     let mut grabbed: Option<usize> = None;
     let mut active_ctx: u8 = 0;
+    let mut clipboard = Clipboard {
+        data: [0; 256],
+        len: 0,
+        hist: [([0; 256], 0); 4],
+        hist_n: 0,
+        hist_enabled: false,
+    };
     let mut meta_down = false;
 
     let mut buf = [0u8; 512];
@@ -365,6 +382,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 &mut focused,
                 &mut grabbed,
                 &mut active_ctx,
+                &mut clipboard,
             );
         }
         // Processa eventos de entrada (evdev crus, 8 bytes cada).
@@ -490,6 +508,7 @@ fn serve(
     focused: &mut Option<usize>,
     grabbed: &mut Option<usize>,
     active_ctx: &mut u8,
+    clipboard: &mut Clipboard,
 ) {
     // Uma superfície só pode ser tocada pela sessão que a criou.
     let mine = |surfaces: &[Slot; MAX_SURFACES], id: u32| -> bool {
@@ -727,6 +746,88 @@ fn serve(
             let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
+        Request::ClipboardSet(rq) => {
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(
+                    ch,
+                    wm::ClipboardSetRequest::METHOD_ID,
+                    E_NO_INPUT_OWNER,
+                    out,
+                );
+                return;
+            }
+            let d = rq.data();
+            clipboard.data[..d.len()].copy_from_slice(d);
+            clipboard.len = d.len() as u32;
+            if clipboard.hist_enabled {
+                // anel: desloca e insere na frente (0 = mais recente)
+                clipboard.hist.rotate_right(1);
+                clipboard.hist[0].0[..d.len()].copy_from_slice(d);
+                clipboard.hist[0].1 = d.len() as u32;
+                clipboard.hist_n = (clipboard.hist_n + 1).min(clipboard.hist.len());
+            }
+            let m = wm::ClipboardSetResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::ClipboardGet(_) => {
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(
+                    ch,
+                    wm::ClipboardGetRequest::METHOD_ID,
+                    E_NO_INPUT_OWNER,
+                    out,
+                );
+                return;
+            }
+            let mut resp = wm::ClipboardGetResponse {
+                data: [0; 256],
+                data_len: clipboard.len,
+            };
+            resp.data[..clipboard.len as usize]
+                .copy_from_slice(&clipboard.data[..clipboard.len as usize]);
+            let m = resp.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::ClipboardEnableHistory(_) => {
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(
+                    ch,
+                    wm::ClipboardEnableHistoryRequest::METHOD_ID,
+                    E_NO_INPUT_OWNER,
+                    out,
+                );
+                return;
+            }
+            clipboard.hist_enabled = true;
+            let m = wm::ClipboardEnableHistoryResponse {}
+                .encode_msg(out)
+                .unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::ClipboardHistory(rq) => {
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(
+                    ch,
+                    wm::ClipboardHistoryRequest::METHOD_ID,
+                    E_NO_INPUT_OWNER,
+                    out,
+                );
+                return;
+            }
+            let i = rq.index as usize;
+            if !clipboard.hist_enabled || i >= clipboard.hist_n {
+                reply_err(ch, wm::ClipboardHistoryRequest::METHOD_ID, E_INVALID, out);
+                return;
+            }
+            let (ref d, l) = clipboard.hist[i];
+            let mut resp = wm::ClipboardHistoryResponse {
+                data: [0; 256],
+                data_len: l,
+            };
+            resp.data[..l as usize].copy_from_slice(&d[..l as usize]);
+            let m = resp.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
         Request::SetContext(rq) => {
             if !mine(surfaces, rq.id) {
                 reply_err(ch, wm::SetContextRequest::METHOD_ID, E_NO_SURFACE, out);
@@ -821,6 +922,20 @@ fn serve(
         }
         Request::Open(_) | Request::SetInput(_) => {} // tratados no laço principal
     }
+}
+
+/// `true` se a sessão `owner` detém a **entrada**: possui a superfície capturada (grab) ou, sem
+/// captura, a focada. É a mediação do clipboard — só quem tem a entrada lê/escreve.
+fn input_owner(
+    surfaces: &[Slot; MAX_SURFACES],
+    focused: &Option<usize>,
+    grabbed: &Option<usize>,
+    owner: usize,
+) -> bool {
+    grabbed
+        .or(*focused)
+        .map(|i| surfaces[i].used && surfaces[i].owner == owner)
+        .unwrap_or(false)
 }
 
 fn reply_err(ch: Handle, method: u32, code: u32, out: &mut [u8; 512]) {

@@ -515,7 +515,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] implementar Central de Ações;
 - [ ] implementar Faixa de Atividades;
 - [ ] criar notificações e controles de atenção;
-- [ ] implementar clipboard com mediação e histórico opt-in;
+- [x] implementar clipboard com mediação e histórico opt-in — *área de transferência **mediada pelo compositor**: só a sessão dona da **entrada** (janela focada, ou capturada) lê/escreve — apps em segundo plano não farejam nem injetam (erro remoto 6); o conteúdo atravessa sessões pela mediação; **histórico opt-in** (anel de 4, desligado por padrão, `clipboard_enable_history`) — auto-teste `user_wm_clipboard`. Limite de 256 B nesta versão; formatos ricos/tamanhos maiores (via `MemoryObject`) e UI de histórico ficam para o shell*;
 - [ ] implementar drag-and-drop por grants;
 - [ ] implementar leitor de tela em arquitetura, ainda que simples;
 - [ ] implementar navegação completa por teclado;

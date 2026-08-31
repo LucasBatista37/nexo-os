@@ -4,8 +4,9 @@
 # O wm compoe todas as superficies (de todas as sessoes) na saida (outro MemoryObject) por z.
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
-# inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra superficie.
-protocol wm 1.11
+# inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
+# superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada).
+protocol wm 1.12
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -200,6 +201,44 @@ method 20 switch_context {
         context: u8,
     }
     response {
+    }
+}
+
+# Area de transferencia MEDIADA pelo compositor: so a sessao dona da ENTRADA (a janela focada,
+# ou a capturada se ha grab) pode escrever/ler — aplicativos em segundo plano nao farejam nem
+# injetam conteudo (erro 6). Ate 256 bytes nesta versao.
+method 21 clipboard_set {
+    request {
+        data: bytes<256>,
+    }
+    response {
+    }
+}
+
+method 22 clipboard_get {
+    request {
+    }
+    response {
+        data: bytes<256>,
+    }
+}
+
+# Liga o historico do clipboard (OPT-IN; desligado por padrao). Mesma mediacao do clipboard.
+# Depois de ligado, cada clipboard_set tambem entra no anel de historico (4 entradas).
+method 23 clipboard_enable_history {
+    request {
+    }
+    response {
+    }
+}
+
+# Le a entrada `index` do historico (0 = mais recente; erro 1 se nao existe). Mesma mediacao.
+method 24 clipboard_history {
+    request {
+        index: u32,
+    }
+    response {
+        data: bytes<256>,
     }
 }
 
