@@ -91,6 +91,8 @@ struct Slot {
     display: u8,
     /// Contexto (grupo de janelas) a que a superfície pertence.
     context: u8,
+    /// Título da janela (para leitores de tela e a Faixa de Atividades).
+    title: ([u8; 32], u32),
     /// Retângulo salvo antes de maximizar (para `restore`).
     saved: Option<Rect>,
     /// Handle do wm para o `MemoryObject` (mantido para ler os pixels e liberar no fim).
@@ -109,6 +111,7 @@ const EMPTY: Slot = Slot {
     buf_h: 0,
     display: 0,
     context: 0,
+    title: ([0; 32], 0),
     saved: None,
     mem: 0,
     base: 0,
@@ -310,6 +313,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut focused: Option<usize> = None;
     let mut grabbed: Option<usize> = None;
     let mut active_ctx: u8 = 0;
+    // Leitor de tela assinado (canal de eventos semânticos).
+    let mut a11y: Option<Handle> = None;
     // Arrasto em andamento (payload aguardando o drop).
     let mut drag: Option<([u8; 256], u32)> = None;
     let mut attention = Attention {
@@ -413,6 +418,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 &mut clipboard,
                 &mut attention,
                 &mut drag,
+                &mut a11y,
             );
         }
         // Processa eventos de entrada (evdev crus, 8 bytes cada).
@@ -457,6 +463,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                         .unwrap_or(0);
                                     surfaces[i].z = top.saturating_add(1);
                                     focused = Some(i);
+                                    let (t, tl) = surfaces[i].title;
+                                    a11y_emit(&mut a11y, 1, i as u32, &t[..tl as usize]);
                                     recompose(
                                         &surfaces,
                                         &outs,
@@ -515,6 +523,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                         .unwrap_or(0);
                                     surfaces[i].z = top.saturating_add(1);
                                     focused = Some(i);
+                                    let (t, tl) = surfaces[i].title;
+                                    a11y_emit(&mut a11y, 1, i as u32, &t[..tl as usize]);
                                     recompose(
                                         &surfaces,
                                         &outs,
@@ -583,6 +593,7 @@ fn serve(
     clipboard: &mut Clipboard,
     attention: &mut Attention,
     drag: &mut Option<([u8; 256], u32)>,
+    a11y: &mut Option<Handle>,
 ) {
     // Uma superfície só pode ser tocada pela sessão que a criou.
     let mine = |surfaces: &[Slot; MAX_SURFACES], id: u32| -> bool {
@@ -625,6 +636,7 @@ fn serve(
                 buf_h: rq.h,
                 display: rq.display,
                 context: 0,
+                title: ([0; 32], 0),
                 saved: None,
                 mem,
                 base,
@@ -820,6 +832,25 @@ fn serve(
             let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
+        Request::SetTitle(rq) => {
+            if !mine(surfaces, rq.id) {
+                reply_err(ch, wm::SetTitleRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            let t = rq.title();
+            let mut title = [0u8; 32];
+            title[..t.len()].copy_from_slice(t);
+            surfaces[rq.id as usize].title = (title, t.len() as u32);
+            let m = wm::SetTitleResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::A11ySubscribe(rq) => {
+            if let Some(old_ch) = a11y.replace(rq.chan) {
+                let _ = nexo_sys::handle_close(old_ch);
+            }
+            let m = wm::A11ySubscribeResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
         Request::DragStart(rq) => {
             if !input_owner(surfaces, focused, grabbed, owner) {
                 reply_err(ch, wm::DragStartRequest::METHOD_ID, E_NO_INPUT_OWNER, out);
@@ -839,6 +870,7 @@ fn serve(
                 let mut title = [0u8; 64];
                 title[..t.len()].copy_from_slice(t);
                 attention.banner = Some((title, t.len() as u32));
+                a11y_emit(a11y, 2, 0, t);
                 recompose(surfaces, outs, fb, *active_ctx, attention);
             }
             let m = wm::NotifyResponse {}.encode_msg(out).unwrap_or(0);
@@ -964,6 +996,7 @@ fn serve(
                 return;
             }
             *active_ctx = rq.context;
+            a11y_emit(a11y, 3, rq.context as u32, b"");
             // foco vai para a janela de maior z do contexto ativado (ou nenhuma)
             *focused = surfaces
                 .iter()
@@ -1037,6 +1070,28 @@ fn serve(
             }
         }
         Request::Open(_) | Request::SetInput(_) => {} // tratados no laço principal
+    }
+}
+
+/// Emite um evento semântico de acessibilidade no canal do leitor de tela, se assinado.
+/// Se o leitor desconectou, o canal é fechado e a assinatura removida.
+fn a11y_emit(a11y: &mut Option<Handle>, kind: u32, surface: u32, text: &[u8]) {
+    let Some(ch) = *a11y else {
+        return;
+    };
+    let n = text.len().min(32);
+    let mut ev = wm::A11yEvent {
+        kind,
+        surface,
+        text: [0; 32],
+        text_len: n as u32,
+    };
+    ev.text[..n].copy_from_slice(&text[..n]);
+    let mut out = [0u8; 128];
+    let m = ev.encode_msg(&mut out).unwrap_or(0);
+    if nexo_sys::channel_send(ch, &out[..m], &[]) == Status::PeerClosed {
+        let _ = nexo_sys::handle_close(ch);
+        *a11y = None;
     }
 }
 

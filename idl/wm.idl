@@ -6,7 +6,7 @@
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada).
-protocol wm 1.14
+protocol wm 1.15
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -298,6 +298,35 @@ method 28 drag_start {
 event 29 drop {
     surface: u32,
     data: bytes<256>,
+}
+
+# Titulo da janela (mostrado por leitores de tela e, futuramente, pela Faixa de Atividades).
+method 30 set_title {
+    request {
+        id: u32,
+        title: bytes<32>,
+    }
+    response {
+    }
+}
+
+# Acessibilidade: assina o fluxo de EVENTOS SEMANTICOS do compositor (a arquitetura do leitor de
+# tela): transfere a ponta de um canal e o compositor passa a emitir eventos `a11y` nela —
+# kind 1 = foco mudou (surface + titulo), 2 = aviso publicado (texto), 3 = contexto trocado
+# (surface = numero do contexto). Um assinante por vez (o novo substitui o anterior).
+method 31 a11y_subscribe {
+    request {
+        chan: handle,
+    }
+    response {
+    }
+}
+
+# Evento semantico de acessibilidade (ver a11y_subscribe).
+event 32 a11y {
+    kind: u32,
+    surface: u32,
+    text: bytes<32>,
 }
 
 # Evento: uma tecla (EV_KEY que nao seja BTN_LEFT) entregue a janela em foco. `surface` = id da

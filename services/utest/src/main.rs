@@ -82,6 +82,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         36 => wm_clipboard(),
         37 => wm_notify(),
         38 => wm_dnd(),
+        39 => wm_a11y(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2406,6 +2407,136 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 39: arquitetura de leitor de tela. Assina o fluxo de eventos semanticos do compositor e
+/// confere que mudancas de foco (com o titulo da janela), avisos e trocas de contexto chegam como
+/// eventos `a11y` na ordem.
+fn wm_a11y() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    let (a, a_base) = wm_create(s1, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    wm_commit(s1, a);
+    let (b, b_base) = wm_create(s1, 16, 0, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0);
+    wm_commit(s1, b);
+
+    let set_title = |ch: nexo_sys::Handle,
+                     id: u32,
+                     t: &[u8],
+                     out: &mut [u8; 256],
+                     buf: &mut [u8; 256],
+                     hs: &mut [u32; 1]| {
+        let mut rq = nexo_proto::wm::SetTitleRequest {
+            id,
+            title: [0; 32],
+            title_len: t.len() as u32,
+        };
+        rq.title[..t.len()].copy_from_slice(t);
+        let m = rq.encode_msg(out).unwrap_or_else(|_| nexo_sys::exit(970));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(971);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) if nexo_proto::wm::decode_set_title_response(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(972),
+        }
+    };
+    set_title(s1, a, b"editor", &mut out, &mut buf, &mut hs);
+    set_title(s1, b, b"chat", &mut out, &mut buf, &mut hs);
+
+    // assina o fluxo de acessibilidade
+    let (reader, sub) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(973));
+    let m = nexo_proto::wm::A11ySubscribeRequest { chan: sub }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(974));
+    if nexo_sys::channel_send(s1, &out[..m], &[sub]) != Status::Ok {
+        nexo_sys::exit(975);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_a11y_subscribe_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(976),
+    }
+
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(977));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(978));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(979);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(980),
+    }
+
+    let recv_a11y = |reader: nexo_sys::Handle,
+                     buf: &mut [u8; 256],
+                     hs: &mut [u32; 1]|
+     -> nexo_proto::wm::A11yEvent {
+        let n = match nexo_sys::channel_recv(reader, buf, hs) {
+            Ok((n, _)) => n,
+            _ => nexo_sys::exit(981),
+        };
+        nexo_proto::wm::decode_a11y_event(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(982))
+    };
+
+    // foco por clique -> evento com o titulo
+    wm_click(inj, 2, 2);
+    let ev = recv_a11y(reader, &mut buf, &mut hs);
+    if ev.kind != 1 || ev.surface != a || ev.text() != b"editor" {
+        nexo_sys::exit(983);
+    }
+    wm_click(inj, 18, 2);
+    let ev = recv_a11y(reader, &mut buf, &mut hs);
+    if ev.kind != 1 || ev.surface != b || ev.text() != b"chat" {
+        nexo_sys::exit(984);
+    }
+
+    // aviso -> evento de notificacao
+    let mut rq = nexo_proto::wm::NotifyRequest {
+        title: [0; 64],
+        title_len: 2,
+    };
+    rq.title[..2].copy_from_slice(b"oi");
+    let m = rq
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(985));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(986);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_notify_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(987),
+    }
+    let ev = recv_a11y(reader, &mut buf, &mut hs);
+    if ev.kind != 2 || ev.text() != b"oi" {
+        nexo_sys::exit(988);
+    }
+
+    // troca de contexto -> evento
+    let m = nexo_proto::wm::SwitchContextRequest { context: 1 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(989));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(990);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_switch_context_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(991),
+    }
+    let ev = recv_a11y(reader, &mut buf, &mut hs);
+    if ev.kind != 3 || ev.surface != 1 {
+        nexo_sys::exit(992);
+    }
+    nexo_sys::log(
+        "utest: wm a11y ok — foco/aviso/contexto chegam como eventos semanticos ao leitor",
+    );
     nexo_sys::exit(0)
 }
 
