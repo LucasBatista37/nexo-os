@@ -168,6 +168,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `libraries/wm` (`nexo-wm`): motor de composição `no_std`/`forbid(unsafe_code)` — dada uma lista de `Window` (retângulo + buffer de pixels do cliente + z + formato) e uma região de dano, compõe as janelas visíveis sobre um fundo na superfície de saída **por ordem de z** (ordenação estável, independente da ordem de entrada), redesenhando só os pixels dentro do dano. `Damage` acumula até 16 retângulos sujos e coalesce no envelope quando enche (`bounds`/`rects`/`clear`); `Rect::union` no `nexo-gfx`. 4 grupos de testes de host (z-order, ordem de entrada, dano limitando o repintar, coalescência).
 - Nota de arquitetura: o **serviço** compositor e o transporte por `MemoryObject` compartilhado (buffers dos clientes) ficam para um bloco futuro — dependem de memória compartilhada entre processos, ainda não implementada.
 
+### Adicionado (Fase 2, extra — memória compartilhada entre processos)
+- `MemoryObject` (`kind` 4) e syscalls `memory_create` (28, aloca N páginas zeradas ≤ 256) / `memory_map` (29, mapeia `USER|RW` cacheável na região de dispositivos). Transferir o handle por canal compartilha as **mesmas páginas físicas** entre processos; o objeto possui os frames e os libera quando ninguém mais o referencia (mapeamento sem posse, como MMIO). `sdk/nexo-sys` ganhou os wrappers.
+- Teste `user_shmem`: um produtor cria memória, escreve um marcador e transfere o handle a um consumidor por canal; o consumidor lê o marcador e responde na mesma memória; sem vazamento de quadros. 42 testes no boot. Base para o compositor (buffers de janela) e payloads grandes de IPC (ipc-compat §2.6).
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

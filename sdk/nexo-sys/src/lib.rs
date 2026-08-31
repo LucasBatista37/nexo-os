@@ -367,6 +367,20 @@ pub fn channel_wait_any(handles: &[Handle]) -> Result<usize, Status> {
     if st.is_ok() { Ok(v as usize) } else { Err(st) }
 }
 
+/// Cria um objeto de memória compartilhável de `pages` páginas de 4 KiB (zeradas).
+pub fn memory_create(pages: u64) -> Result<Handle, Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_MEMORY_CREATE, pages, 0, 0) };
+    if st.is_ok() { Ok(v as Handle) } else { Err(st) }
+}
+
+/// Mapeia o objeto de memória `mem` no processo; devolve o endereço virtual base.
+pub fn memory_map(mem: Handle) -> Result<u64, Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_MEMORY_MAP, mem as u64, 0, 0) };
+    if st.is_ok() { Ok(v) } else { Err(st) }
+}
+
 /// Cria um canal que recebe 1 byte por disparo do vetor (coalescido); combine com
 /// [`channel_wait_any`] para esperar canal *ou* interrupção.
 pub fn irq_channel(dev: Handle, vector: u32) -> Result<Handle, Status> {

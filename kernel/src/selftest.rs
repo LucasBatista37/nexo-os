@@ -71,6 +71,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_devmgr", test_user_devmgr),
     ("user_vfs", test_user_vfs),
     ("user_wait_any", test_user_wait_any),
+    ("user_shmem", test_user_shmem),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -1768,6 +1769,39 @@ pub fn fs_churn() -> ! {
 
 /// Renderizador 2D (nexo-gfx) sobre uma superficie de rascunho no heap: fill, composicao alfa
 /// e clipping, com leitura de volta — prova a biblioteca no ambiente no_std/alloc do kernel.
+/// Memoria compartilhada entre dois processos: o produtor cria um objeto, escreve um marcador e
+/// transfere o handle ao consumidor por um canal; o consumidor le o marcador e responde na mesma
+/// memoria. Verifica ausencia de vazamento de quadros ao final (o objeto libera os frames).
+fn test_user_shmem() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let ha = alloc::vec![Handle {
+        object: Object::Channel(a),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let hb = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let producer = crate::process::spawn_named("utest", 17, ha).map_err(String::from)?;
+    let consumer = crate::process::spawn_named("utest", 18, hb).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&consumer);
+    let pc = crate::process::wait_and_reap(&producer);
+    drop((producer, consumer));
+    let frames = settled_free_frames(frames0, 8);
+    check!(cc == 0, "consumidor saiu com {cc}");
+    check!(pc == 0, "produtor saiu com {pc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram (memoria compartilhada nao liberada): {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
 fn test_gfx() -> TestResult {
     use nexo_boot_abi::PixelFormat;
     use nexo_gfx::{Color, Rect, Surface};

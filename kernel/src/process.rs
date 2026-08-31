@@ -95,6 +95,16 @@ impl AddressSpace {
         self.mapper().map_4k(virt, phys, flags, &mut alloc)
     }
 
+    /// Mapeia um quadro físico **não possuído** (compartilhado) em `virt`, cacheável `USER|RW`.
+    pub fn map_user_shared(&self, virt: VirtAddr, phys: PhysAddr) -> Result<(), MapError> {
+        if virt.as_u64() >= USER_ADDRESS_LIMIT {
+            return Err(MapError::Unaligned(virt));
+        }
+        let mut alloc = Recording(&self.frames);
+        let flags = PageFlags::KERNEL_RW | PageFlags::USER;
+        self.mapper().map_4k(virt, phys, flags, &mut alloc)
+    }
+
     /// Endereço físico mapeado em `virt` (páginas de 4 KiB).
     pub fn translate(&self, virt: VirtAddr) -> Option<PhysAddr> {
         self.mapper().translate(virt).map(|t| t.phys)

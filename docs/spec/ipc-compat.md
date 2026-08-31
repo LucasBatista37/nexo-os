@@ -33,7 +33,7 @@ Campos de tipo `handle` na IDL **não entram no payload**: viajam no vetor de ha
 3. Um serviço atende a versão maior atual e a anterior por pelo menos um ciclo de release (`RELEASE.md`); a descontinuação é anunciada nas notas de release com a versão em que deixa de ser aceita.
 4. Números de método são estáveis para sempre; um método removido tem seu número reservado.
 5. Enumerações reservam valor `0 = desconhecido`; leitores tratam valores fora da lista como desconhecido, nunca como erro fatal.
-6. Dados grandes (> 4096 bytes) viajam por `MemoryObject` compartilhado + descritor no payload (objeto ainda não implementado); nenhum protocolo fragmenta mensagens manualmente.
+6. Dados grandes (> 4096 bytes) viajam por `MemoryObject` compartilhado (syscalls `memory_create`/`memory_map`, `kind` 4) + descritor no payload; nenhum protocolo fragmenta mensagens manualmente. O handle do objeto é transferido como qualquer handle (no vetor de handles da mensagem).
 
 ## 4. Testes exigidos por protocolo
 

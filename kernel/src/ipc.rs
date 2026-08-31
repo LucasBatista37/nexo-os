@@ -41,6 +41,25 @@ pub enum Object {
     Process(Arc<crate::process::Process>),
     /// Concessão de acesso a dispositivos (PCI/MMIO/DMA/IRQ).
     Device(Arc<DeviceGrant>),
+    /// Memória compartilhável (frames físicos possuídos por este objeto).
+    Memory(Arc<MemoryObject>),
+}
+
+/// Objeto de memória compartilhável: possui os quadros físicos e os libera quando ninguém mais
+/// o referencia. Vários processos podem mapeá-lo (`map_user_shared`), vendo a mesma memória.
+pub struct MemoryObject {
+    /// Quadros físicos (zerados na criação), na ordem das páginas.
+    pub frames: Vec<nexo_mm::PhysAddr>,
+    /// Tamanho em bytes (páginas × 4096).
+    pub len: u64,
+}
+
+impl Drop for MemoryObject {
+    fn drop(&mut self) {
+        for f in self.frames.drain(..) {
+            let _ = crate::mm::phys::free_frame(f);
+        }
+    }
 }
 
 /// Concessão de acesso a dispositivos: `scope` = `None` (raiz: qualquer função PCI) ou uma
@@ -90,6 +109,7 @@ impl Object {
             Object::Channel(_) => KIND_CHANNEL,
             Object::Process(_) => KIND_PROCESS,
             Object::Device(_) => KIND_DEVICE,
+            Object::Memory(_) => KIND_MEMORY,
         }
     }
 }

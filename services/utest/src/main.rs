@@ -60,6 +60,8 @@ pub extern "C" fn _start(mode: u64) -> ! {
         14 => net_client(param as u16),
         15 => sock_client(param as u16, (param >> 16) as u16, (param >> 32) as u16),
         16 => wait_any_test(),
+        17 => shmem_producer(),
+        18 => shmem_consumer(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -261,6 +263,7 @@ fn syscall_fuzz(seed: u64) -> ! {
             || n == SYS_CHANNEL_RECV
             || n == SYS_PROCESS_WAIT
             || n == SYS_CHANNEL_WAIT_ANY
+            || n == SYS_MEMORY_CREATE
         {
             continue;
         }
@@ -2095,5 +2098,70 @@ fn wait_any_test() -> ! {
         nexo_sys::exit(408);
     }
     nexo_sys::log("utest: wait_any ok");
+    nexo_sys::exit(0)
+}
+
+/// Modo 17: produtor de memoria compartilhada (handle 0 = canal). Cria um objeto de memoria,
+/// mapeia, escreve um marcador e envia o handle do objeto pelo canal; espera a resposta do
+/// consumidor na propria memoria compartilhada.
+fn shmem_producer() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let mem = nexo_sys::memory_create(1).unwrap_or_else(|_| nexo_sys::exit(410));
+    let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| nexo_sys::exit(411));
+    let marker = b"SHMEM-OK";
+    // SAFETY: base .. base+4096 foi mapeada por memory_map (USER|RW) neste processo.
+    unsafe {
+        core::ptr::copy_nonoverlapping(marker.as_ptr(), base as *mut u8, marker.len());
+    }
+    // transfere o handle do objeto ao consumidor
+    if nexo_sys::channel_send(ch, b"mem", &[mem]) != Status::Ok {
+        nexo_sys::exit(412);
+    }
+    // espera a resposta escrita pelo consumidor no offset 64
+    let start = nexo_sys::time_now();
+    loop {
+        // SAFETY: leitura da mesma pagina mapeada.
+        let mut reply = [0u8; 5];
+        unsafe {
+            core::ptr::copy_nonoverlapping((base + 64) as *const u8, reply.as_mut_ptr(), 5);
+        }
+        if &reply == b"REPLY" {
+            nexo_sys::log(
+                "utest: shmem produtor ok — consumidor escreveu na memoria compartilhada",
+            );
+            nexo_sys::exit(0)
+        }
+        if nexo_sys::time_now() - start > 10_000_000_000 {
+            nexo_sys::exit(413)
+        }
+        nexo_sys::sleep_ns(5_000_000);
+    }
+}
+
+/// Modo 18: consumidor (handle 0 = canal). Recebe o handle do objeto de memoria, mapeia,
+/// confere o marcador do produtor e escreve uma resposta na mesma memoria.
+fn shmem_consumer() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let mut buf = [0u8; 16];
+    let mut hs = [0u32; 1];
+    let mem = match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, 1)) if &buf[..n] == b"mem" => hs[0],
+        _ => nexo_sys::exit(420),
+    };
+    let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| nexo_sys::exit(421));
+    // SAFETY: base foi mapeada por memory_map; confere o marcador do produtor.
+    let mut marker = [0u8; 8];
+    unsafe {
+        core::ptr::copy_nonoverlapping(base as *const u8, marker.as_mut_ptr(), 8);
+    }
+    if &marker != b"SHMEM-OK" {
+        nexo_sys::exit(422);
+    }
+    // escreve a resposta no offset 64 (visivel para o produtor)
+    // SAFETY: mesma pagina compartilhada.
+    unsafe {
+        core::ptr::copy_nonoverlapping(b"REPLY".as_ptr(), (base + 64) as *mut u8, 5);
+    }
+    nexo_sys::log("utest: shmem consumidor ok — leu o marcador e respondeu");
     nexo_sys::exit(0)
 }

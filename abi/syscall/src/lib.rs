@@ -69,13 +69,27 @@ pub const SYS_CHANNEL_TRY_RECV: u64 = 25;
 /// Espera múltipla: bloqueia até algum dos canais em `a0` (array de `a1` handles, ≤ 16) ter
 /// mensagem ou par fechado; `RDX` = índice do primeiro pronto. Exige `READ` em todos.
 pub const SYS_CHANNEL_WAIT_ANY: u64 = 26;
+/// Cria um objeto de memória compartilhável de `a1` páginas de 4 KiB (zeradas); `RDX` = handle
+/// com [`RIGHTS_MEMORY_DEFAULT`]. Transferir o handle por canal compartilha as mesmas páginas
+/// físicas entre processos (base do compositor e de payloads grandes de IPC).
+pub const SYS_MEMORY_CREATE: u64 = 28;
+/// Mapeia o objeto de memória `a1` no processo; `RDX` = endereço virtual (região de dispositivos,
+/// `USER|RW`, cacheável). O mesmo objeto pode ser mapeado por vários processos.
+pub const SYS_MEMORY_MAP: u64 = 29;
 /// Cria um canal de interrupções para o vetor `a1` (obtido por [`SYS_IRQ_ALLOC`] na mesma
 /// concessão `a0`, direito `SIGNAL`): o kernel envia uma mensagem de 1 byte a cada disparo
 /// (coalescida se a fila não estiver vazia); `RDX` = handle da ponta de leitura. Combina com
 /// [`SYS_CHANNEL_WAIT_ANY`] para esperar canal *ou* interrupção.
 pub const SYS_IRQ_CHANNEL: u64 = 27;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 27;
+pub const SYS_MAX: u64 = 29;
+/// Máximo de páginas por objeto de memória (1 MiB).
+pub const MEMORY_MAX_PAGES: u64 = 256;
+/// Tipo de objeto: memória compartilhável.
+pub const KIND_MEMORY: u32 = 4;
+/// Direitos padrão de um objeto de memória.
+pub const RIGHTS_MEMORY_DEFAULT: u32 =
+    RIGHT_READ | RIGHT_WRITE | RIGHT_MAP | RIGHT_TRANSFER | RIGHT_DUPLICATE;
 /// Máximo de handles em uma espera múltipla.
 pub const WAIT_ANY_MAX: usize = 16;
 
@@ -324,6 +338,8 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_CHANNEL_TRY_RECV => "channel_try_recv",
         SYS_CHANNEL_WAIT_ANY => "channel_wait_any",
         SYS_IRQ_CHANNEL => "irq_channel",
+        SYS_MEMORY_CREATE => "memory_create",
+        SYS_MEMORY_MAP => "memory_map",
         _ => "?",
     }
 }

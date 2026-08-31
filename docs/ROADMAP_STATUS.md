@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `92ed7f1`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `93bafb2`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 148 · 🟡 50 · ⬜ 337 · ⛔ 0 → **32% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -178,7 +178,7 @@ Gate: ⬜ não iniciado.
 | 🟡 | implementar cores, composição alfa, clipping e transformações | cores RGBA, composição alfa src-over e clipping retangular em `nexo-gfx` (testes de host); transformações (escala/rotação) pendentes |
 | 🟡 | implementar rasterização de texto e fallback de fontes | `nexo-gfx::text` desenha strings com a fonte bitmap 8×8 (escala, cor, fundo, quebra de linha) e cai no glifo de fallback para caracteres fora da faixa; testes de host e no auto-teste `gfx`; fontes vetoriais/hinting e Unicode amplo pendentes |
 | 🟡 | definir protocolo de superfícies e buffers | modelo de superfície/janela (retângulo + buffer + z + dano) definido em `nexo-wm`; a IDL `nexo.wm` e o transporte por `MemoryObject` compartilhado ficam para o bloco do serviço |
-| 🟡 | implementar compositor em espaço de usuário | motor de composição em `nexo-wm` (janelas por z sobre fundo, testado no host); o serviço em ring 3 e o transporte por memória compartilhada pendem de `MemoryObject` |
+| 🟡 | implementar compositor em espaço de usuário | motor de composição em `nexo-wm` (janelas por z sobre fundo, testado no host); o serviço em ring 3 fica para o próximo bloco (a memória compartilhada — `MemoryObject`, syscalls 28/29 — já existe para o transporte dos buffers) |
 | 🟡 | implementar double/triple buffering e damage tracking | rastreamento de danos (`nexo-wm::Damage`: acumula e coalesce; composição só repinta o dano) pronto e testado; double/triple buffering pende do serviço e do framebuffer real |
 | ⬜ | integrar mouse e teclado pelo serviço de entrada |  |
 | ⬜ | implementar foco, atalhos e captura segura |  |

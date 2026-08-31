@@ -10,7 +10,7 @@ use nexo_arch_x86_64::trap::TrapFrame;
 use nexo_mm::{PAGE_SIZE, VirtAddr};
 use nexo_syscall_abi::*;
 
-use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Message, Object, Rights};
+use crate::ipc::{ChannelEnd, DeviceGrant, Handle, MemoryObject, Message, Object, Rights};
 use crate::process;
 use crate::sched;
 use crate::sync::IrqLock;
@@ -159,6 +159,64 @@ fn sys_channel_send(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
 }
 
 /// Cria um canal de interrupções: o kernel envia 1 byte por disparo do vetor (coalescido).
+/// Cria um objeto de memória compartilhável de `a1` páginas (zeradas); devolve o handle.
+fn sys_memory_create(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
+    let pages = f.rdi;
+    if pages == 0 || pages > nexo_syscall_abi::MEMORY_MAX_PAGES {
+        return (Status::InvalidArgs, 0);
+    }
+    let mut frames = Vec::with_capacity(pages as usize);
+    for _ in 0..pages {
+        match crate::mm::phys::allocate_zeroed_frame() {
+            Some(fr) => frames.push(fr),
+            None => {
+                // libera o que já alocamos
+                for fr in frames.drain(..) {
+                    let _ = crate::mm::phys::free_frame(fr);
+                }
+                return (Status::NoMemory, 0);
+            }
+        }
+    }
+    let obj = alloc::sync::Arc::new(MemoryObject {
+        frames,
+        len: pages * PAGE_SIZE,
+    });
+    let handle = Handle {
+        object: Object::Memory(obj),
+        rights: Rights(RIGHTS_MEMORY_DEFAULT),
+    };
+    match p.handles.lock().insert(handle) {
+        Ok(i) => (Status::Ok, i as u64),
+        Err(e) => (e, 0),
+    }
+}
+
+/// Mapeia o objeto de memória `a1` no processo; devolve o endereço virtual base.
+fn sys_memory_map(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
+    let obj = match p.handles.lock().get(f.rdi as u32) {
+        Ok(Handle {
+            object: Object::Memory(m),
+            rights,
+        }) => {
+            if !rights.contains(RIGHT_MAP) {
+                return (Status::Denied, 0);
+            }
+            m
+        }
+        Ok(_) => return (Status::InvalidArgs, 0),
+        Err(e) => return (e, 0),
+    };
+    let base = p.reserve_device_region(obj.len);
+    for (i, fr) in obj.frames.iter().enumerate() {
+        let virt = VirtAddr::new(base + (i as u64) * PAGE_SIZE);
+        if p.space.map_user_shared(virt, *fr).is_err() {
+            return (Status::NoMemory, 0);
+        }
+    }
+    (Status::Ok, base)
+}
+
 fn sys_irq_channel(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let g = match device_grant(p, f.rdi as u32, RIGHT_SIGNAL) {
         Ok(g) => g,
@@ -669,6 +727,8 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_CHANNEL_TRY_RECV => sys_channel_recv(&p, f, true),
         SYS_CHANNEL_WAIT_ANY => sys_channel_wait_any(&p, f),
         SYS_IRQ_CHANNEL => sys_irq_channel(&p, f),
+        SYS_MEMORY_CREATE => sys_memory_create(&p, f),
+        SYS_MEMORY_MAP => sys_memory_map(&p, f),
         SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
         SYS_PCI_ENUM | SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE | SYS_MMIO_MAP | SYS_DMA_ALLOC
         | SYS_IRQ_ALLOC | SYS_IRQ_WAIT | SYS_DEVICE_OPEN => sys_device(&p, f),
