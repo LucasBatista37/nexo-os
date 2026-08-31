@@ -561,6 +561,27 @@ def run_net_scenario(timeout: float) -> bool:
     srv.close()
     usrv.close()
     hsrv.close()
+    # verifica no pcap que saiu um ICMPv6 Neighbor Solicitation (proto 58, type 135) do guest
+    ns_seen = False
+    try:
+        import struct
+        d = (BUILD / "logs" / "net.pcap").read_bytes()
+        off = 24
+        while off + 16 <= len(d):
+            _, _, incl, _ = struct.unpack_from("<IIII", d, off)
+            off += 16
+            p = d[off:off + incl]
+            off += incl
+            if len(p) >= 14 + 40 + 4 and p[12:14] == b"\x86\xdd" and p[14] >> 4 == 6 and p[20] == 58:
+                if p[14 + 40] == 135:
+                    ns_seen = True
+                    break
+    except OSError:
+        pass
+    if not ns_seen:
+        log("FALHA: nenhum ICMPv6 Neighbor Solicitation (tipo 135) no pcap")
+        ok = False
+
     for pat in [r"netdev: virtio-net bdf 0x[0-9a-f]+ mac 52:54:00:12:34:56 \(rx \d+, tx \d+, MSI-X\)",
                 r"utest: dhcp ok — ip 10\.0\.2\.15 mascara 255\.255\.255\.0 gw 10\.0\.2\.2 dns 10\.0\.2\.3",
                 r"utest: net: ARP reply do gateway",

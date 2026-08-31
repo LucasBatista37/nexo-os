@@ -313,6 +313,15 @@ fn pump() {
                 st.gw_mac = m;
                 continue;
             }
+            // IPv6/NDP: responde Neighbor Solicitations pelo nosso link-local.
+            if et == nsk::ipv6::ETHERTYPE_IPV6 {
+                let me = nsk::ipv6::link_local(st.mac);
+                let mut na = [0u8; 128];
+                if let Some(n) = nsk::ipv6::respond_ns(f, st.mac, &me, &mut na) {
+                    net_send(&na[..n]);
+                    continue;
+                }
+            }
             if et == nsk::ETHERTYPE_IPV4
                 && let Some(ip) = nsk::ipv4_parse(p)
             {

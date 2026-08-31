@@ -1193,6 +1193,34 @@ fn net_client(tcp_port: u16) -> ! {
         mac[4],
         mac[5]
     );
+    // IPv6/NDP: emite um Neighbor Solicitation valido pelo link-local do gateway; o harness
+    // confirma no pcap que saiu um ICMPv6 tipo 135 bem-formado (nexo-netstack).
+    {
+        use nexo_netstack::ipv6;
+        let me = ipv6::link_local(mac);
+        // alvo: link-local derivado do MAC do gateway do slirp (52:55:0a:00:02:02)
+        let gw_mac = [0x52u8, 0x55, 0x0a, 0x00, 0x02, 0x02];
+        let target = ipv6::link_local(gw_mac);
+        let mut ns = SendRequest {
+            frame: [0; 1514],
+            frame_len: 0,
+        };
+        let n = ipv6::neighbor_solicitation(&mut ns.frame, mac, &me, &target);
+        ns.frame_len = n as u32;
+        let m = ns.encode_msg(&mut msg).unwrap_or(0);
+        if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(265);
+        }
+        match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+            Ok((n, _)) if decode_send_response(&msg[..n]).is_ok() => {}
+            _ => nexo_sys::exit(266),
+        }
+        nexo_rt::log!(
+            "utest: ipv6 ok — Neighbor Solicitation emitido (link-local {:02x}{:02x}..)",
+            me[0],
+            me[1]
+        );
+    }
     // DHCP: DISCOVER -> OFFER -> REQUEST -> ACK contra o servidor do slirp.
     let lease = dhcp_handshake(mac);
     nexo_rt::log!(

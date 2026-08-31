@@ -140,6 +140,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo.sock` v1.0: método `open{chan}` — um cliente cria um canal e transfere a ponta ao `netd`, que passa a atendê-la como mais um cliente.
 - `netd` multi-cliente: laço de eventos varre até 8 clientes com `channel_try_recv`, ocioso dorme em `channel_wait_any({todos os clientes, driver})`, encerra quando o último desconecta. `utest` (modo 15) abre uma 2ª sessão por `open` e usa `info` por ela.
 
+### Adicionado (Fase 4, bloco 14 — IPv6 e NDP)
+- `nexo-netstack::ipv6`: endereço link-local (EUI-64), cabeçalho IPv6 fixo, checksum ICMPv6/UDP/TCP com pseudo-cabeçalho, ICMPv6 echo e **NDP** — Neighbor Solicitation/Advertisement com endereços multicast solicited-node e MAC `33:33`; `no_std`, sem alocação. 4 grupos de testes de host (incl. NS→NA→echo completo e fuzz-lite).
+- `netd` responde a Neighbor Solicitations pelo seu link-local (nó IPv6 alcançável). Cenário `net`: o guest emite um NS válido pela `nexo-netstack` e o harness confirma no pcap (`build/logs/net.pcap`) um ICMPv6 tipo 135 bem-formado saindo na interface.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.
