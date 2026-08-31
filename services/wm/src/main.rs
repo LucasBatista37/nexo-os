@@ -327,6 +327,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 out_bytes,
                 &mut out,
                 fb.as_ref(),
+                &mut focused,
             );
         }
         // Processa eventos de entrada (evdev crus, 8 bytes cada).
@@ -445,6 +446,7 @@ fn serve(
     out_bytes: u64,
     out: &mut [u8; 512],
     fb: Option<&FbOut>,
+    focused: &mut Option<usize>,
 ) {
     // Uma superfície só pode ser tocada pela sessão que a criou.
     let mine = |surfaces: &[Slot; MAX_SURFACES], id: u32| -> bool {
@@ -485,6 +487,10 @@ fn serve(
                 base,
                 len: bytes,
             };
+            // foco inicial: a primeira janela criada (sem foco previo) passa a receber o teclado
+            if focused.is_none() {
+                *focused = Some(id);
+            }
             // duplica o handle para o cliente (o wm mantém o seu para ler os pixels)
             let client_mem = nexo_sys::handle_duplicate(mem, nexo_sys::abi::RIGHTS_MEMORY_DEFAULT)
                 .unwrap_or_else(|_| fail(55, "dup handle"));

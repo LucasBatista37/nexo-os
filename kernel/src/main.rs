@@ -99,8 +99,8 @@ fn kmain(bi: &'static BootInfo) -> ! {
     if cmdline_value(cmdline, "shell").is_some() {
         selftest::shell_mode();
     }
-    if cmdline_value(cmdline, "input-test").is_some() {
-        selftest::input_test_mode();
+    if let Some(v) = cmdline_value(cmdline, "input-test") {
+        selftest::input_test_mode(v.parse().unwrap_or(1));
     }
     if cmdline_value(cmdline, "net-test").is_some() {
         selftest::net_test_mode();

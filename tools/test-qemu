@@ -364,20 +364,19 @@ def qmp_send_keys(sock_path, keys) -> bool:
     return True
 
 
-def run_input_scenario(timeout: float) -> bool:
-    """Teclado virtio: o host injeta teclas por QMP e o driver de usuario as recebe."""
+def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
+    """Uma execucao do teste de entrada: boot com input-test=<variant>, teclas por QMP."""
     image = BUILD / "nexo-input.img"
-    run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline", "selftest=0 input-test=1 exit",
-         "--out", image], stdout=subprocess.DEVNULL)
+    run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline",
+         f"selftest=0 input-test={variant} exit", "--out", image], stdout=subprocess.DEVNULL)
     qmp_path = BUILD / "nexo-input.qmp"
     if qmp_path.exists():
         qmp_path.unlink()
-    logfile = BUILD / "logs" / "input.log"
+    logfile = BUILD / "logs" / f"input-{variant}.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
     if logfile.exists():
         logfile.unlink()
-    log("=== cenario 'input' (teclas via QMP) ===")
-    runner_log = open(BUILD / "logs" / "input-runner.log", "wb")
+    runner_log = open(BUILD / "logs" / f"input-{variant}-runner.log", "wb")
     proc = subprocess.Popen([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
                              "--disk", BUILD / "nexo-input-data.img", "--input-keyboard",
                              "--qmp-socket", qmp_path, "--timeout", str(timeout), "--log", logfile],
@@ -398,21 +397,41 @@ def run_input_scenario(timeout: float) -> bool:
     if rc != 33:
         log(f"FALHA: codigo de saida {rc}, esperado 33")
         ok = False
-    for pat in [r"inputdev: virtio-input bdf 0x[0-9a-f]+ pronto \(fila \d+, \d+ buffers, MSI-X\)",
-                r"utest: input: tecla code=30",
-                r"utest: input: tecla code=48",
-                r"utest: input: tecla code=28",
-                r"utest: input ok \(3 teclas, ultima code=28\)",
-                r"\[INPUT\] teste de entrada terminou com 0",
-                r"NEXO: boot completo"]:
+    for pat in expect:
         if not re.search(pat, text):
             log(f"FALHA: marcador ausente: /{pat}/")
             ok = False
-    for pat in [r"KERNEL PANIC", r"EXCEPTION", r"inputdev: falha"]:
+    for pat in [r"KERNEL PANIC", r"EXCEPTION", r"inputdev: falha", r"wm: falha"]:
         if re.search(pat, text):
             log(f"FALHA: marcador proibido presente: /{pat}/")
             ok = False
-    log(f"=== cenario 'input': {'PASS' if ok else 'FAIL'} (log: {logfile}) ===")
+    return ok
+
+
+def run_input_scenario(timeout: float) -> bool:
+    """Teclado virtio: o host injeta teclas por QMP. Fase 1: driver + cliente poll (modo 13).
+    Fase 2: cadeia real inputdev --subscribe--> canal --set_input--> wm --evento key--> janela
+    em foco (modo 31)."""
+    log("=== cenario 'input' (teclas via QMP) ===")
+    ready = r"inputdev: virtio-input bdf 0x[0-9a-f]+ pronto \(fila \d+, \d+ buffers, MSI-X\)"
+    ok = run_input_phase(timeout, 1, [
+        ready,
+        r"utest: input: tecla code=30",
+        r"utest: input: tecla code=48",
+        r"utest: input: tecla code=28",
+        r"utest: input ok \(3 teclas, ultima code=28\)",
+        r"\[INPUT\] teste de entrada terminou com 0",
+        r"NEXO: boot completo"])
+    ok = run_input_phase(timeout, 2, [
+        ready,
+        r"utest: input real: cadeia inputdev -> wm -> janela pronta",
+        r"utest: input real: tecla code=30 na janela 0",
+        r"utest: input real: tecla code=48 na janela 0",
+        r"utest: input real: tecla code=28 na janela 0",
+        r"utest: wm input real ok \(3 teclas, ultima code=28\)",
+        r"\[INPUT\] teste de entrada terminou com 0",
+        r"NEXO: boot completo"]) and ok
+    log(f"=== cenario 'input': {'PASS' if ok else 'FAIL'} (logs: {BUILD / 'logs'}/input-*.log) ===")
     return ok
 
 

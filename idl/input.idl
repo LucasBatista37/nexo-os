@@ -1,7 +1,7 @@
 # nexo.input — eventos de entrada (services/inputdev); formato evdev:
 # cada evento tem 8 bytes [type u16][code u16][value u32].
 # Erros remotos: 1 = pedido invalido.
-protocol input 1.0
+protocol input 1.1
 
 # Le os eventos disponiveis (sem bloquear; resposta pode vir vazia).
 method 1 poll {
@@ -9,5 +9,17 @@ method 1 poll {
     }
     response {
         events: bytes<3500>,
+    }
+}
+
+# Assina o modo de eventos: transfere a ponta de um canal (`chan`) e o driver passa a EMPURRAR
+# cada lote de eventos evdev CRUS (8 bytes por evento, sem cabecalho NXIP) nesse canal, guiado
+# por interrupcao. Depois disso `poll` devolve vazio. A outra ponta do canal pode ser entregue
+# direto ao compositor (`nexo.wm set_input`), que le o mesmo formato.
+method 2 subscribe {
+    request {
+        chan: handle,
+    }
+    response {
     }
 }

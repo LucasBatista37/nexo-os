@@ -2,6 +2,9 @@
 //! handle 1 = canal. Fila 0 = eventos (`virtio_input_event`: `[type u16][code u16][value u32]`).
 //! Protocolo **tipado** `nexo.input` v1.0 (gerado de `idl/input.idl`; cabeçalho NXIP):
 //! `poll` devolve os eventos disponíveis (8 B cada, formato evdev), sem bloquear.
+//! `subscribe{chan}` liga o modo de eventos: o driver passa a **empurrar** cada lote de eventos
+//! crus no canal transferido (guiado por interrupção via `irq_channel`); a outra ponta pode ir
+//! direto ao compositor (`nexo.wm set_input`), que lê o mesmo formato.
 #![no_std]
 #![no_main]
 
@@ -128,33 +131,23 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         nbufs,
         if irq.is_some() { "MSI-X" } else { "polling" }
     );
-    let mut buf = [0u8; 64];
-    let mut reply = [0u8; 4096];
-    let mut hs = [0u32; 1];
-    loop {
-        let (n, _) = match nexo_sys::channel_recv(CHAN, &mut buf, &mut hs) {
-            Ok(v) => v,
-            Err(Status::PeerClosed) => nexo_sys::exit(0),
-            Err(_) => fail(86, "recv"),
-        };
-        let Ok(Request::Poll(_)) = input::decode_request(&buf[..n]) else {
-            let m = input::encode_error(0, 1, &mut reply).unwrap_or(0);
-            let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
-            continue;
-        };
-        let mut resp = PollResponse {
-            events: [0; 3500],
-            events_len: 0,
-        };
+    // Canal de interrupções (IRQ→canal): permite dormir em wait_any({cliente, IRQ}) e empurrar
+    // eventos no modo `subscribe` sem varredura ociosa.
+    let irq_chan = irq
+        .as_ref()
+        .and_then(|i| nexo_sys::irq_channel(DEV, i.vector).ok());
+
+    // Drena a fila de eventos para `batch` (8 bytes por evento) e ressubmete os buffers.
+    let drain = |q: &mut SplitQueue, batch: &mut [u8]| -> usize {
         let mut out = 0usize;
         while let Some((id, len)) = q.pop_used() {
             let id = id as u16;
-            if id < nbufs && len >= EVENT_SIZE as u32 && out + 8 <= resp.events.len() {
+            if id < nbufs && len >= EVENT_SIZE as u32 && out + 8 <= batch.len() {
                 // SAFETY: página de DMA exclusiva; o evento tem 8 bytes dentro da página.
                 unsafe {
                     core::ptr::copy_nonoverlapping(
                         (pool.virt + id as u64 * EVENT_SIZE) as *const u8,
-                        resp.events[out..].as_mut_ptr(),
+                        batch[out..].as_mut_ptr(),
                         8,
                     )
                 };
@@ -172,8 +165,83 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             }
         }
         let _ = t.isr_ack();
-        resp.events_len = out as u32;
-        let m = resp.encode_msg(&mut reply).unwrap_or(0);
-        let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+        out
+    };
+
+    let mut push: Option<nexo_sys::Handle> = None;
+    let mut buf = [0u8; 64];
+    let mut reply = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    let mut batch = [0u8; 3500];
+    loop {
+        let mut worked = false;
+        // Pedidos do cliente (poll / subscribe).
+        match nexo_sys::channel_try_recv(CHAN, &mut buf, &mut hs) {
+            Ok((n, nh)) => {
+                worked = true;
+                match input::decode_request_with_handles(&buf[..n], &hs[..nh]) {
+                    Ok(Request::Subscribe(rq)) => {
+                        if let Some(old) = push.replace(rq.chan) {
+                            let _ = nexo_sys::handle_close(old);
+                        }
+                        let m = input::SubscribeResponse {}
+                            .encode_msg(&mut reply)
+                            .unwrap_or(0);
+                        let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+                    }
+                    Ok(Request::Poll(_)) => {
+                        let mut resp = PollResponse {
+                            events: [0; 3500],
+                            events_len: 0,
+                        };
+                        // No modo assinado os eventos vao para o canal; poll devolve vazio.
+                        if push.is_none() {
+                            resp.events_len = drain(&mut q, &mut resp.events) as u32;
+                        }
+                        let m = resp.encode_msg(&mut reply).unwrap_or(0);
+                        let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+                    }
+                    Err(_) => {
+                        let m = input::encode_error(0, 1, &mut reply).unwrap_or(0);
+                        let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+                    }
+                }
+            }
+            Err(Status::WouldBlock) => {}
+            Err(Status::PeerClosed) => nexo_sys::exit(0),
+            Err(_) => fail(86, "recv"),
+        }
+        // Aviso de interrupção: drena e, se assinado, empurra o lote cru.
+        if let Some(ic) = irq_chan {
+            match nexo_sys::channel_try_recv(ic, &mut buf, &mut hs) {
+                Ok(_) => {
+                    worked = true;
+                    // Sem assinante, os eventos ficam na fila para o `poll` (só consome o aviso).
+                    if push.is_some() {
+                        let n = drain(&mut q, &mut batch);
+                        if n > 0
+                            && let Some(pc) = push
+                            && nexo_sys::channel_send(pc, &batch[..n], &[]) == Status::PeerClosed
+                        {
+                            let _ = nexo_sys::handle_close(pc);
+                            push = None;
+                        }
+                    }
+                }
+                Err(Status::WouldBlock) => {}
+                Err(_) => fail(87, "recv irq"),
+            }
+        }
+        if !worked {
+            match irq_chan {
+                Some(ic) => {
+                    let _ = nexo_sys::channel_wait_any(&[CHAN, ic]);
+                }
+                None => {
+                    // sem MSI-X: varre com um cochilo curto
+                    nexo_sys::sleep_ns(2_000_000);
+                }
+            }
+        }
     }
 }

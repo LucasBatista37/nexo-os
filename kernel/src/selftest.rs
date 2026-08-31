@@ -1621,13 +1621,13 @@ pub fn shell_mode() {
 }
 
 /// `input-test=1` na linha de comando: inputdev + utest(13) esperando teclas do host (QMP).
-pub fn input_test_mode() {
+pub fn input_test_mode(variant: u64) {
     use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
     let bdf = crate::pci::devices()
         .iter()
         .find(|d| d.is_virtio() && d.device == 0x1052)
         .map(|d| d.bdf)
-        .expect("input-test=1 exige virtio-keyboard-pci");
+        .expect("input-test exige virtio-keyboard-pci");
     let (a, b) = ChannelEnd::create_pair();
     let g = Handle {
         object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
@@ -1635,8 +1635,20 @@ pub fn input_test_mode() {
     };
     let _drv = crate::process::spawn_named("inputdev", 0, alloc::vec![g, channel_handle(a)])
         .expect("inputdev");
-    let client =
-        crate::process::spawn_named("utest", 13, alloc::vec![channel_handle(b)]).expect("utest");
+    let client = if variant == 2 {
+        // Cadeia completa: inputdev --subscribe--> canal --set_input--> wm --evento key--> janela.
+        let (wa, wb) = ChannelEnd::create_pair();
+        let _wm =
+            crate::process::spawn_named("wm", 0, alloc::vec![channel_handle(wa)]).expect("wm");
+        crate::process::spawn_named(
+            "utest",
+            31,
+            alloc::vec![channel_handle(wb), channel_handle(b)],
+        )
+        .expect("utest")
+    } else {
+        crate::process::spawn_named("utest", 13, alloc::vec![channel_handle(b)]).expect("utest")
+    };
     kinfo!("[INPUT] aguardando teclas injetadas pelo host");
     let code = crate::process::wait_and_reap(&client);
     kinfo!("[INPUT] teste de entrada terminou com {code}");

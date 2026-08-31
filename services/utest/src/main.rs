@@ -74,6 +74,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         28 => wm_shortcut(),
         29 => wm_present_client(),
         30 => wm_tile(),
+        31 => wm_real_input(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2399,6 +2400,79 @@ fn wm_input() -> ! {
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
     nexo_sys::exit(0)
+}
+
+/// Modo 31: entrada REAL de ponta a ponta — handle 0 = sessao `nexo.wm`, handle 1 = canal do
+/// `inputdev`. Cria uma janela (que ganha o foco na criacao), assina o inputdev (`subscribe`
+/// transferindo a ponta de um canal novo) e entrega a outra ponta ao wm (`set_input`). Teclas
+/// fisicas (injetadas pelo host via QMP) percorrem inputdev -> wm -> evento `key` da janela em
+/// foco. Sai com 0 apos 3 teclas (esperado: 30, 48, 28).
+fn wm_real_input() -> ! {
+    let wm_ch: nexo_sys::Handle = 0;
+    let drv: nexo_sys::Handle = 1;
+    let (a, a_base) = wm_create(wm_ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 0, 0, 255);
+    wm_commit(wm_ch, a);
+
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    // Assina o inputdev: a ponta `push_drv` vai para o driver, `push_wm` vira a fonte do wm.
+    let (push_wm, push_drv) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(700));
+    let m = nexo_proto::input::SubscribeRequest { chan: push_drv }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(701));
+    if nexo_sys::channel_send(drv, &out[..m], &[push_drv]) != Status::Ok {
+        nexo_sys::exit(702);
+    }
+    match nexo_sys::channel_recv(drv, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::input::decode_subscribe_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(703),
+    }
+    let m = nexo_proto::wm::SetInputRequest { chan: push_wm }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(704));
+    if nexo_sys::channel_send(wm_ch, &out[..m], &[push_wm]) != Status::Ok {
+        nexo_sys::exit(705);
+    }
+    match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(706),
+    }
+    nexo_sys::log("utest: input real: cadeia inputdev -> wm -> janela pronta");
+
+    let mut presses = 0u32;
+    let mut last = 0u32;
+    let start = nexo_sys::time_now();
+    loop {
+        let n = match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+            Ok((n, _)) => n,
+            _ => nexo_sys::exit(707),
+        };
+        if let Ok(ev) = nexo_proto::wm::decode_key_event(&buf[..n])
+            && ev.value == 1
+        {
+            presses += 1;
+            last = ev.code;
+            nexo_rt::log!(
+                "utest: input real: tecla code={} na janela {}",
+                ev.code,
+                ev.surface
+            );
+        }
+        if presses >= 3 {
+            nexo_rt::log!(
+                "utest: wm input real ok ({} teclas, ultima code={})",
+                presses,
+                last
+            );
+            nexo_sys::exit(0)
+        }
+        if nexo_sys::time_now() - start > 30_000_000_000 {
+            nexo_rt::log!("utest: input real: apenas {} tecla(s) em 30 s", presses);
+            nexo_sys::exit(708)
+        }
+    }
 }
 
 /// Modo 30: mosaico. Duas janelas totalmente sobrepostas; `tile` as organiza numa grade que cobre
