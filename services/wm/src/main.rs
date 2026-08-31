@@ -326,6 +326,47 @@ fn serve(
                 reply_err(ch, wm::LowerRequest::METHOD_ID, E_NO_SURFACE, out);
             }
         }
+        Request::Resize(rq) => {
+            if !mine(surfaces, rq.id) {
+                reply_err(ch, wm::ResizeRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            if rq.w <= 0 || rq.h <= 0 || rq.w > OUT_W || rq.h > OUT_H {
+                reply_err(ch, wm::ResizeRequest::METHOD_ID, E_INVALID, out);
+                return;
+            }
+            let i = rq.id as usize;
+            // Desmapeia e libera o buffer antigo (o cliente ainda tem o dele até fechar o handle).
+            let old_pages = surfaces[i].len.div_ceil(4096);
+            let _ = nexo_sys::memory_unmap(surfaces[i].base, old_pages * 4096);
+            let _ = nexo_sys::handle_close(surfaces[i].mem);
+            // Aloca o novo buffer.
+            let bytes = (rq.w * rq.h * 4) as u64;
+            let pages = bytes.div_ceil(4096);
+            let mem = match nexo_sys::memory_create(pages) {
+                Ok(h) => h,
+                Err(_) => {
+                    surfaces[i].used = false; // superfície perdeu o buffer; remove
+                    recompose(surfaces, out_base, out_bytes);
+                    reply_err(ch, wm::ResizeRequest::METHOD_ID, E_NO_RES, out);
+                    return;
+                }
+            };
+            let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| fail(59, "map resize"));
+            surfaces[i].rect.w = rq.w;
+            surfaces[i].rect.h = rq.h;
+            surfaces[i].mem = mem;
+            surfaces[i].base = base;
+            surfaces[i].len = bytes;
+            let client_mem = nexo_sys::handle_duplicate(mem, nexo_sys::abi::RIGHTS_MEMORY_DEFAULT)
+                .unwrap_or_else(|_| fail(60, "dup resize"));
+            recompose(surfaces, out_base, out_bytes);
+            let resp = wm::ResizeResponse { mem: client_mem };
+            let m = resp.encode_msg(out).unwrap_or(0);
+            if nexo_sys::channel_send(ch, &out[..m], &resp.handles()) != Status::Ok {
+                fail(61, "send resize");
+            }
+        }
         Request::Output(_) => {
             let client_out =
                 nexo_sys::handle_duplicate(out_mem, nexo_sys::abi::RIGHTS_MEMORY_DEFAULT)

@@ -65,6 +65,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         19 => wm_client(),
         20 => wm_multi_client(),
         21 => wm_restack(),
+        22 => wm_resize(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -267,6 +268,7 @@ fn syscall_fuzz(seed: u64) -> ! {
             || n == SYS_PROCESS_WAIT
             || n == SYS_CHANNEL_WAIT_ANY
             || n == SYS_MEMORY_CREATE
+            || n == SYS_MEMORY_UNMAP
         {
             continue;
         }
@@ -2328,6 +2330,105 @@ fn wm_restack() -> ! {
         nexo_sys::exit(493);
     }
     nexo_sys::log("utest: wm restack ok — raise/lower reordenam o z e a saida acompanha");
+    nexo_sys::exit(0)
+}
+
+/// Modo 22: redimensionamento de superficie. Cria uma superficie pequena (8x8), confere que uma
+/// area alem dela e fundo, redimensiona para 16x16 (o wm realoca o buffer; o cliente desmapeia e
+/// fecha o antigo, remapeia o novo), pinta e confere que a area nova agora aparece na saida.
+fn wm_resize() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+
+    // Cria A 8x8 em (0,0) z=0, guardando o handle do buffer.
+    let req = nexo_proto::wm::CreateSurfaceRequest {
+        x: 0,
+        y: 0,
+        w: 8,
+        h: 8,
+        z: 0,
+    };
+    let m = req
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(500));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(501);
+    }
+    let (n, nh) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(502));
+    let cs = nexo_proto::wm::decode_create_surface_response(&buf[..n])
+        .unwrap_or_else(|_| nexo_sys::exit(503));
+    if nh != 1 {
+        nexo_sys::exit(504);
+    }
+    let a = cs.id;
+    let old_handle = hs[0];
+    let old_base = nexo_sys::memory_map(old_handle).unwrap_or_else(|_| nexo_sys::exit(505));
+    wm_fill(old_base, 8, 8, 255, 0, 0);
+    wm_commit(ch, a);
+
+    // Mapeia a saida (paginas estaveis).
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(506));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(507);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(508));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(509));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(510));
+    let stride = outp.w;
+    // (2,2) dentro de A -> vermelho; (12,12) fora de A (8x8) -> fundo preto.
+    if wm_px(ob, stride, 2, 2) != (255, 0, 0) {
+        nexo_sys::exit(511);
+    }
+    if wm_px(ob, stride, 12, 12) != (0, 0, 0) {
+        nexo_sys::exit(512);
+    }
+
+    // Redimensiona A para 16x16.
+    let m = nexo_proto::wm::ResizeRequest {
+        id: a,
+        w: 16,
+        h: 16,
+    }
+    .encode_msg(&mut out)
+    .unwrap_or_else(|_| nexo_sys::exit(513));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(514);
+    }
+    let (n, nh) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(515));
+    let rz =
+        nexo_proto::wm::decode_resize_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(516));
+    if nh != 1 {
+        nexo_sys::exit(517);
+    }
+    let _ = rz;
+    let new_handle = hs[0];
+    // Desmapeia e fecha o buffer antigo (8x8 = 1 pagina), depois mapeia o novo.
+    if nexo_sys::memory_unmap(old_base, 4096) != Status::Ok {
+        nexo_sys::exit(518);
+    }
+    if nexo_sys::handle_close(old_handle) != Status::Ok {
+        nexo_sys::exit(519);
+    }
+    let new_base = nexo_sys::memory_map(new_handle).unwrap_or_else(|_| nexo_sys::exit(520));
+    wm_fill(new_base, 16, 16, 0, 0, 255); // azul
+    wm_commit(ch, a);
+
+    // Agora (12,12) e (2,2) estao dentro de A (16x16) -> azul.
+    if wm_px(ob, stride, 12, 12) != (0, 0, 255) {
+        nexo_sys::exit(521);
+    }
+    if wm_px(ob, stride, 2, 2) != (0, 0, 255) {
+        nexo_sys::exit(522);
+    }
+    nexo_sys::log("utest: wm resize ok — buffer realocado (munmap) e a area nova aparece na saida");
     nexo_sys::exit(0)
 }
 

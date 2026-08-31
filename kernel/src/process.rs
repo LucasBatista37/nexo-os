@@ -105,6 +105,30 @@ impl AddressSpace {
         self.mapper().map_4k(virt, phys, flags, &mut alloc)
     }
 
+    /// Desmapeia `[base, base+len)` (páginas **compartilhadas/não possuídas**, mapeadas por
+    /// `map_user_shared`/`map_user_mmio`): limpa as PTEs e invalida o TLB, **sem** liberar os
+    /// quadros físicos (que pertencem ao objeto de memória ou ao dispositivo). Páginas já
+    /// desmapeadas são ignoradas.
+    pub fn unmap_user_shared(&self, base: VirtAddr, len: u64) -> Result<(), MapError> {
+        if base.as_u64() >= USER_ADDRESS_LIMIT || base.as_u64().checked_add(len).is_none() {
+            return Err(MapError::Unaligned(base));
+        }
+        let mut mapper = self.mapper();
+        let pages = align_up(len, PAGE_SIZE) / PAGE_SIZE;
+        for i in 0..pages {
+            let v = base.add(i * PAGE_SIZE);
+            match mapper.unmap_4k(v) {
+                // unmap_4k devolve o quadro mas NÃO o libera: é compartilhado.
+                Ok(_) => cpu::invlpg(v.as_u64()),
+                Err(MapError::NotMapped(_)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        // As threads do processo podem estar em outra CPU: invalida o TLB delas também.
+        crate::x86::smp::flush_tlb_others();
+        Ok(())
+    }
+
     /// Endereço físico mapeado em `virt` (páginas de 4 KiB).
     pub fn translate(&self, virt: VirtAddr) -> Option<PhysAddr> {
         self.mapper().translate(virt).map(|t| t.phys)

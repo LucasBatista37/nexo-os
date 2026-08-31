@@ -81,8 +81,13 @@ pub const SYS_MEMORY_MAP: u64 = 29;
 /// (coalescida se a fila não estiver vazia); `RDX` = handle da ponta de leitura. Combina com
 /// [`SYS_CHANNEL_WAIT_ANY`] para esperar canal *ou* interrupção.
 pub const SYS_IRQ_CHANNEL: u64 = 27;
+/// Desmapeia `a1..a1+a2` do espaço do usuário (páginas compartilhadas mapeadas por
+/// [`SYS_MEMORY_MAP`]/[`SYS_MMIO_MAP`], na região de dispositivos): remove as PTEs e invalida o
+/// TLB **sem** liberar os quadros físicos (que pertencem ao objeto). Base/tamanho múltiplos de
+/// página. Necessário para realocar buffers (ex.: redimensionar superfícies do compositor).
+pub const SYS_MEMORY_UNMAP: u64 = 30;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 29;
+pub const SYS_MAX: u64 = 30;
 /// Máximo de páginas por objeto de memória (1 MiB).
 pub const MEMORY_MAX_PAGES: u64 = 256;
 /// Tipo de objeto: memória compartilhável.
@@ -340,6 +345,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_IRQ_CHANNEL => "irq_channel",
         SYS_MEMORY_CREATE => "memory_create",
         SYS_MEMORY_MAP => "memory_map",
+        SYS_MEMORY_UNMAP => "memory_unmap",
         _ => "?",
     }
 }

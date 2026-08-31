@@ -506,7 +506,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] implementar double/triple buffering e damage tracking — *rastreamento de danos (`nexo-wm::Damage`: acumula e coalesce; composição só repinta o dano) pronto e testado; double/triple buffering pende do serviço e do framebuffer real*;
 - [ ] integrar mouse e teclado pelo serviço de entrada;
 - [ ] implementar foco, atalhos e captura segura;
-- [-] implementar janelas, redimensionamento, maximização e mosaico — *janelas básicas no serviço `wm`: criar/mover/destruir superfícies com posição e z, de múltiplas sessões, e **restacking dinâmico** (`raise`/`lower` reordenam o z e a saída acompanha — auto-teste `user_wm_restack`); redimensionamento (falta `munmap` para realocar o buffer), maximização e mosaico pendentes*;
+- [-] implementar janelas, redimensionamento, maximização e mosaico — *no serviço `wm`: criar/mover/destruir superfícies com posição e z (múltiplas sessões), **restacking dinâmico** (`raise`/`lower` — auto-teste `user_wm_restack`) e **redimensionamento** (`resize` realoca o `MemoryObject` via a syscall `memory_unmap`/`munmap` — auto-teste `user_wm_resize`); maximização, mosaico e políticas de layout automático pendentes*;
 - [ ] implementar múltiplos displays emulado;
 - [ ] criar toolkit UI nativo e tokens de design;
 - [ ] criar gerenciamento de temas claro/escuro e alto contraste;

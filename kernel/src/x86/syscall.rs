@@ -217,6 +217,25 @@ fn sys_memory_map(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
     (Status::Ok, base)
 }
 
+/// Desmapeia `a1..a1+a2` (região de dispositivos) do processo, sem liberar os quadros.
+fn sys_memory_unmap(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
+    let base = f.rdi;
+    let len = f.rsi;
+    if base == 0
+        || len == 0
+        || !base.is_multiple_of(PAGE_SIZE)
+        || !len.is_multiple_of(PAGE_SIZE)
+        || base < USER_DEVICE_REGION
+        || base.checked_add(len).is_none_or(|e| e > USER_ADDRESS_LIMIT)
+    {
+        return (Status::InvalidArgs, 0);
+    }
+    match p.space.unmap_user_shared(VirtAddr::new(base), len) {
+        Ok(()) => (Status::Ok, 0),
+        Err(_) => (Status::InvalidArgs, 0),
+    }
+}
+
 fn sys_irq_channel(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let g = match device_grant(p, f.rdi as u32, RIGHT_SIGNAL) {
         Ok(g) => g,
@@ -729,6 +748,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_IRQ_CHANNEL => sys_irq_channel(&p, f),
         SYS_MEMORY_CREATE => sys_memory_create(&p, f),
         SYS_MEMORY_MAP => sys_memory_map(&p, f),
+        SYS_MEMORY_UNMAP => sys_memory_unmap(&p, f),
         SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
         SYS_PCI_ENUM | SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE | SYS_MMIO_MAP | SYS_DMA_ALLOC
         | SYS_IRQ_ALLOC | SYS_IRQ_WAIT | SYS_DEVICE_OPEN => sys_device(&p, f),

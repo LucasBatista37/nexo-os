@@ -381,6 +381,14 @@ pub fn memory_map(mem: Handle) -> Result<u64, Status> {
     if st.is_ok() { Ok(v) } else { Err(st) }
 }
 
+/// Desmapeia `base..base+len` (páginas compartilhadas na região de dispositivos) sem liberar os
+/// quadros físicos. Base e tamanho devem ser múltiplos de página.
+pub fn memory_unmap(base: u64, len: u64) -> Status {
+    // SAFETY: sem ponteiros; o kernel valida a faixa.
+    let (st, _) = unsafe { raw(abi::SYS_MEMORY_UNMAP, base, len, 0) };
+    st
+}
+
 /// Cria um canal que recebe 1 byte por disparo do vetor (coalescido); combine com
 /// [`channel_wait_any`] para esperar canal *ou* interrupção.
 pub fn irq_channel(dev: Handle, vector: u32) -> Result<Handle, Status> {

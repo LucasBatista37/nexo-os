@@ -75,6 +75,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
     ("user_wm_restack", test_user_wm_restack),
+    ("user_wm_resize", test_user_wm_resize),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -1901,6 +1902,39 @@ fn test_user_wm_restack() -> TestResult {
     check!(
         frames + 8 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Redimensionamento de superfície: o compositor realoca o `MemoryObject` (desmapeando o antigo
+/// via `memory_unmap`) e a área nova da superfície passa a aparecer na saída composta; nenhum
+/// quadro vaza (o buffer antigo é liberado quando as duas pontas o fecham).
+fn test_user_wm_resize() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(a),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let hclient = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 22, hclient).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, client));
+    let frames = settled_free_frames(frames0, 8);
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram (buffer antigo nao liberado): {frames0} -> {frames}"
     );
     Ok(())
 }

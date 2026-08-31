@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `d1f4c20`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `3e9af0b`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 150 · 🟡 49 · ⬜ 336 · ⛔ 0 → **33% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -182,7 +182,7 @@ Gate: ⬜ não iniciado.
 | 🟡 | implementar double/triple buffering e damage tracking | rastreamento de danos (`nexo-wm::Damage`: acumula e coalesce; composição só repinta o dano) pronto e testado; double/triple buffering pende do serviço e do framebuffer real |
 | ⬜ | integrar mouse e teclado pelo serviço de entrada |  |
 | ⬜ | implementar foco, atalhos e captura segura |  |
-| 🟡 | implementar janelas, redimensionamento, maximização e mosaico | janelas básicas no serviço `wm`: criar/mover/destruir superfícies com posição e z, de múltiplas sessões, e **restacking dinâmico** (`raise`/`lower` reordenam o z e a saída acompanha — auto-teste `user_wm_restack`); redimensionamento (falta `munmap` para realocar o buffer), maximização e mosaico pendentes |
+| 🟡 | implementar janelas, redimensionamento, maximização e mosaico | no serviço `wm`: criar/mover/destruir superfícies com posição e z (múltiplas sessões), **restacking dinâmico** (`raise`/`lower` — auto-teste `user_wm_restack`) e **redimensionamento** (`resize` realoca o `MemoryObject` via a syscall `memory_unmap`/`munmap` — auto-teste `user_wm_resize`); maximização, mosaico e políticas de layout automático pendentes |
 | ⬜ | implementar múltiplos displays emulado |  |
 | ⬜ | criar toolkit UI nativo e tokens de design |  |
 | ⬜ | criar gerenciamento de temas claro/escuro e alto contraste |  |
