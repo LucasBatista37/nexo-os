@@ -1,6 +1,7 @@
 //! Protocolo tipado `nexo.sock` v1.0 — **gerado por `tools/idlgen` de `idl/sock.idl`; nao editar**.
 
-use crate::{FLAG_ERROR, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
+#[allow(unused_imports)]
+use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
 
 /// FNV-1a de `"nexo.sock"`.
 pub const PROTOCOL_ID: u32 = 0x60281105;

@@ -1,6 +1,6 @@
 # nexo.net — interface de rede (services/netdev): quadros Ethernet crus.
 # Erros remotos: 1 = pedido invalido, 2 = dispositivo nao respondeu.
-protocol net 1.0
+protocol net 1.1
 
 # Endereco MAC da interface.
 method 1 mac {
@@ -27,4 +27,18 @@ method 3 recv {
     response {
         frame: bytes<1514>,
     }
+}
+
+# Assina o modo de eventos: a partir dai o driver envia cada quadro recebido como um
+# evento `frame` (sem resposta), em vez de guarda-lo para `recv`.
+method 4 subscribe {
+    request {
+    }
+    response {
+    }
+}
+
+# Evento: um quadro Ethernet recebido (so apos `subscribe`).
+event 5 frame {
+    frame: bytes<1514>,
 }

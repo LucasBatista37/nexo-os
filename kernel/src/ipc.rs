@@ -350,6 +350,12 @@ impl ChannelEnd {
     }
 
     /// Recebe (bloqueante). `Err(PeerClosed)` quando o par fechou e a fila está vazia.
+    /// `true` se a fila do PAR (o outro lado) tem mensagens — usada para coalescer avisos.
+    pub fn peer_readable(&self) -> bool {
+        let g = self.inner.lock();
+        !g.queues[1 - self.side].is_empty()
+    }
+
     /// `true` se um `recv` não bloquearia (mensagem na fila ou par fechado).
     pub fn readable(&self) -> bool {
         let g = self.inner.lock();

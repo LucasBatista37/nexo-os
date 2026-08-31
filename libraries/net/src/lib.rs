@@ -443,7 +443,15 @@ pub fn dns_parse(frame: &[u8], dns_ip: Ipv4Addr, src_port: u16, id: u16) -> Opti
         return None;
     }
     let (sport, dport, d) = udp_parse(ip.payload)?;
-    if sport != DNS_PORT || dport != src_port || d.len() < 12 {
+    if sport != DNS_PORT || dport != src_port {
+        return None;
+    }
+    dns_parse_payload(d, id)
+}
+
+/// Decodifica um payload UDP de resposta DNS (para filas de socket que já removeram os cabeçalhos).
+pub fn dns_parse_payload(d: &[u8], id: u16) -> Option<DnsAnswer> {
+    if d.len() < 12 {
         return None;
     }
     if be16(d, 0) != id || d[2] & 0x80 == 0 {

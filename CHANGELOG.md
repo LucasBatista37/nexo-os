@@ -127,6 +127,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `channel_wait_any` (syscall 26): bloqueia até algum de até 16 canais ter mensagem ou par fechado, devolvendo o índice (acordado pelo `send`/fecho; tique de cobertura de 10 ms para a janela de registro — objetos de evento de verdade virão depois). `readable()`/`register_waiter()` no kernel, wrapper no SDK, documentação na ABI.
 - Teste `user_wait_any` (utest modo 16): pronto imediato, ordem dos índices, par fechado, e os erros (`InvalidArgs`, `BadHandle`); o fuzzer de syscalls passa a pular a 26 (bloqueante por natureza). 40 testes no boot.
 
+### Adicionado (Fase 4, bloco 11 — rede orientada a eventos: canal de IRQ e eventos na IDL)
+- `irq_channel` (syscall 27): canal cuja ponta de leitura recebe 1 byte por disparo do vetor MSI (coalescido); com `channel_wait_any`, um driver espera {pedido do cliente, interrupção} sem varredura.
+- IDL ganhou **eventos** (`event <id> <nome> { … }` → mensagens `FLAG_EVENT` sem resposta, com decodificador próprio); `nexo.net` **v1.1**: método `subscribe` + evento `frame` — o `netdev` passa a empurrar cada quadro recebido, dormindo em `wait_any({canal, canal de IRQ})`.
+- `netd` idle agora dorme em `wait_any({cliente, driver})` (zero CPU ocioso) e recebe quadros por eventos; RPCs ao driver desviam eventos intercalados para uma fila local; DNS do `resolve` migrou para a fila UDP do próprio socket (novo `dns_parse_payload` na `nexo-netstack`).
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

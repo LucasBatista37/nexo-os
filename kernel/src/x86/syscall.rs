@@ -158,6 +158,32 @@ fn sys_channel_send(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     }
 }
 
+/// Cria um canal de interrupções: o kernel envia 1 byte por disparo do vetor (coalescido).
+fn sys_irq_channel(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
+    let g = match device_grant(p, f.rdi as u32, RIGHT_SIGNAL) {
+        Ok(g) => g,
+        Err(e) => return (e, 0),
+    };
+    let vector = f.rsi;
+    if vector > 0xff || !crate::irq::is_user_vector(vector as u8) {
+        return (Status::InvalidArgs, 0);
+    }
+    // So vetores desta concessão podem ser ligados a canais.
+    if !g.vectors.lock().contains(&(vector as u8)) {
+        return (Status::Denied, 0);
+    }
+    let (kernel_end, user_end) = ChannelEnd::create_pair();
+    crate::irq::attach_channel(vector as u8, kernel_end);
+    let handle = Handle {
+        object: Object::Channel(user_end),
+        rights: Rights(RIGHT_READ),
+    };
+    match p.handles.lock().insert(handle) {
+        Ok(i) => (Status::Ok, i as u64),
+        Err(e) => (e, 0),
+    }
+}
+
 /// Espera múltipla sobre canais: devolve o índice do primeiro pronto (mensagem ou par
 /// fechado). Registra a thread como waiter em todos e dorme em tiques curtos — o `send` do
 /// par acorda imediatamente; o tique de 10 ms cobre a janela entre a re-checagem e o sono.
@@ -642,6 +668,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_CHANNEL_RECV => sys_channel_recv(&p, f, false),
         SYS_CHANNEL_TRY_RECV => sys_channel_recv(&p, f, true),
         SYS_CHANNEL_WAIT_ANY => sys_channel_wait_any(&p, f),
+        SYS_IRQ_CHANNEL => sys_irq_channel(&p, f),
         SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
         SYS_PCI_ENUM | SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE | SYS_MMIO_MAP | SYS_DMA_ALLOC
         | SYS_IRQ_ALLOC | SYS_IRQ_WAIT | SYS_DEVICE_OPEN => sys_device(&p, f),

@@ -367,6 +367,14 @@ pub fn channel_wait_any(handles: &[Handle]) -> Result<usize, Status> {
     if st.is_ok() { Ok(v as usize) } else { Err(st) }
 }
 
+/// Cria um canal que recebe 1 byte por disparo do vetor (coalescido); combine com
+/// [`channel_wait_any`] para esperar canal *ou* interrupção.
+pub fn irq_channel(dev: Handle, vector: u32) -> Result<Handle, Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_IRQ_CHANNEL, dev as u64, vector as u64, 0) };
+    if st.is_ok() { Ok(v as Handle) } else { Err(st) }
+}
+
 /// Deriva uma concessão restrita à função PCI `bdf` (exige `ADMIN` na concessão raiz).
 pub fn device_open(root: Handle, bdf: u16) -> Result<Handle, Status> {
     // SAFETY: sem ponteiros.

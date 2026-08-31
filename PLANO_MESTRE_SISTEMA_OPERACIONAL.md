@@ -424,7 +424,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] implementar handles e tabela por processo — *`kernel/src/ipc.rs`, syscalls 8–13*;
 - [-] implementar direitos: ler, escrever, sinalizar, mapear, transferir e administrar — *ler/escrever/transferir/duplicar aplicados; sinalizar/mapear/administrar definidos, sem objetos que os usem*;
 - [x] implementar canais IPC e transferência de handles — *canais com filas por extremidade, bloqueio em recv, transferência testada entre processos*;
-- [-] implementar espera múltipla, eventos e timers — *espera múltipla de canais (`channel_wait_any`, syscall 26) com teste `user_wait_any`; objetos de evento e timers de usuário pendentes*;
+- [-] implementar espera múltipla, eventos e timers — *espera múltipla de canais (`channel_wait_any`), canal de interrupções (`irq_channel`) e eventos tipados na IDL (`nexo.net` v1.1: driver empurra quadros); objetos de evento genéricos e timers de usuário pendentes*;
 - [-] validar cópias entre usuário e kernel — *ponteiros validados por faixa e bit USER antes de copiar (`copy_from_user`); cópia para o usuário ainda não existe*;
 - [x] criar formato de protocolo tipado e gerador de código — *IDL própria (`idl/*.idl`) + `tools/idlgen` → `abi/proto` (cabeçalho NXIP, ipc-compat §2, testes de compatibilidade e fuzz-lite); `nexo.rng` migrado, demais protocolos na fila*;
 - [x] definir regras de compatibilidade do IPC — *docs/spec/ipc-compat.md*;

@@ -48,6 +48,7 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 22 | `irq_alloc` | dev, out (`IrqInfo`) | vetor (0x50–0x6f) com endereço/dados MSI para a BSP | `BadHandle`, `Denied` (sem `SIGNAL`), `NoMemory` (pool esgotado), `BadAddress` |
 | 23 | `irq_wait` | dev, vetor, visto | contagem atual de disparos (bloqueia até `> visto`) | `BadHandle`, `Denied` (sem `SIGNAL`), `InvalidArgs` |
 | 25 | `channel_try_recv` | como `channel_recv`, mas devolve `WouldBlock` (9) em vez de bloquear quando não há mensagem e o par está aberto | idem `channel_recv` |
+| 27 | `irq_channel` | dev (`SIGNAL`), vetor (de um `irq_alloc` da mesma concessão) → handle de canal (`READ`): 1 byte por disparo, coalescido se já houver aviso na fila; combina com `channel_wait_any` | `BadHandle`, `Denied` (sem `SIGNAL` ou vetor de outra concessão), `InvalidArgs`, `NoMemory` |
 | 26 | `channel_wait_any` | ptr (array de handles u32), n (1..=16) → índice do primeiro canal com mensagem ou par fechado (bloqueia; acordado pelo `send`/fecho do par, com tique de cobertura de 10 ms) | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs` (não-canal, n fora da faixa), `BadAddress` |
 | 24 | `device_open` | dev (raiz, `ADMIN`), bdf | handle de concessão restrita à função `bdf` com `RIGHTS_DEVICE_DEFAULT` (sem `ADMIN`) | `BadHandle`, `Denied` (sem `ADMIN` ou `bdf` fora do escopo), `NotFound` (função não enumerada), `NoMemory` (tabela cheia) |
 

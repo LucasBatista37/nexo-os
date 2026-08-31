@@ -10,7 +10,7 @@
 #![no_main]
 
 use nexo_netstack as nsk;
-use nexo_proto::net::{self as pnet, RecvRequest, SendRequest};
+use nexo_proto::net::{self as pnet, RecvRequest, SendRequest, SubscribeRequest};
 use nexo_proto::sock::{self, Request};
 use nexo_rt::log;
 use nexo_sys::Handle;
@@ -48,6 +48,9 @@ struct Netd {
     tcp: [Option<nsk::tcp::TcpSocket>; TCP_CONNS],
     dns: [([u8; 64], u8, [u8; 4]); DNS_CACHE],
     dns_len: usize,
+    /// Eventos `frame` que chegaram no meio de um RPC ao driver (consumidos por `net_event`).
+    evq: [([u8; 1514], u16); 16],
+    evq_len: usize,
 }
 
 static mut NETD: Netd = Netd {
@@ -71,6 +74,8 @@ static mut NETD: Netd = Netd {
     tcp: [const { None }; TCP_CONNS],
     dns: [([0; 64], 0, [0; 4]); DNS_CACHE],
     dns_len: 0,
+    evq: [([0; 1514], 0); 16],
+    evq_len: 0,
 };
 
 fn netd() -> &'static mut Netd {
@@ -85,6 +90,32 @@ fn fail(code: i64, what: &str) -> ! {
 
 // ---- E/S com o netdev (nexo.net) ----
 
+/// RPC ao driver: envia `msg[..m]` e espera a resposta; eventos `frame` que chegarem no
+/// meio vão para a fila `evq` (drenada por `net_event`). Devolve o tamanho da resposta.
+fn net_rpc(msg: &mut [u8; 4096], m: usize) -> usize {
+    if nexo_sys::channel_send(NET, &msg[..m], &[]) != Status::Ok {
+        fail(100, "send ao netdev");
+    }
+    let mut hs = [0u32; 1];
+    loop {
+        let n = match nexo_sys::channel_recv(NET, msg, &mut hs) {
+            Ok((n, _)) => n,
+            _ => fail(101, "resposta do netdev"),
+        };
+        if let Ok(ev) = pnet::decode_frame_event(&msg[..n]) {
+            let st = netd();
+            if st.evq_len < st.evq.len() {
+                let l = ev.frame().len().min(1514);
+                st.evq[st.evq_len].0[..l].copy_from_slice(&ev.frame()[..l]);
+                st.evq[st.evq_len].1 = l as u16;
+                st.evq_len += 1;
+            }
+            continue;
+        }
+        return n;
+    }
+}
+
 fn net_send(frame: &[u8]) {
     let mut msg = [0u8; 4096];
     let mut sr = SendRequest {
@@ -93,13 +124,46 @@ fn net_send(frame: &[u8]) {
     };
     sr.frame[..frame.len().min(1514)].copy_from_slice(&frame[..frame.len().min(1514)]);
     let m = sr.encode_msg(&mut msg).unwrap_or(0);
-    if nexo_sys::channel_send(NET, &msg[..m], &[]) != Status::Ok {
-        fail(100, "send ao netdev");
+    let n = net_rpc(&mut msg, m);
+    if pnet::decode_send_response(&msg[..n]).is_err() {
+        fail(101, "resposta do netdev");
     }
+}
+
+/// Assina o modo de eventos do driver (quadros passam a chegar como eventos no canal).
+fn net_subscribe() {
+    let mut msg = [0u8; 4096];
+    let m = SubscribeRequest {}.encode_msg(&mut msg).unwrap_or(0);
+    let n = net_rpc(&mut msg, m);
+    if pnet::decode_subscribe_response(&msg[..n]).is_err() {
+        fail(111, "subscribe resposta");
+    }
+}
+
+/// Lê um evento `frame` (da fila adiantada ou do canal, sem bloquear); 0 = nada.
+fn net_event(frame: &mut [u8; 1514]) -> usize {
+    {
+        let st = netd();
+        if st.evq_len > 0 {
+            let l = st.evq[0].1 as usize;
+            frame[..l].copy_from_slice(&st.evq[0].0[..l]);
+            st.evq.copy_within(1..st.evq_len, 0);
+            st.evq_len -= 1;
+            return l;
+        }
+    }
+    let mut msg = [0u8; 4096];
     let mut hs = [0u32; 1];
-    match nexo_sys::channel_recv(NET, &mut msg, &mut hs) {
-        Ok((n, _)) if pnet::decode_send_response(&msg[..n]).is_ok() => {}
-        _ => fail(101, "resposta do netdev"),
+    match nexo_sys::channel_try_recv(NET, &mut msg, &mut hs) {
+        Ok((n, _)) => match pnet::decode_frame_event(&msg[..n]) {
+            Ok(ev) => {
+                let l = ev.frame().len();
+                frame[..l].copy_from_slice(ev.frame());
+                l
+            }
+            Err(_) => 0,
+        },
+        Err(_) => 0,
     }
 }
 
@@ -210,7 +274,7 @@ fn pump() {
     let st = netd();
     let mut frame = [0u8; 1514];
     loop {
-        let n = net_recv(&mut frame);
+        let n = net_event(&mut frame);
         if n == 0 {
             return;
         }
@@ -314,6 +378,7 @@ fn resolve(name: &[u8]) -> Result<([u8; 4], bool), u32> {
         }
     }
     let id = (nexo_sys::time_now() & 0xffff) as u16 | 1;
+    let ui = udp_bind(40000).ok_or(E_NO_RES)?;
     let mut frame = [0u8; 1514];
     let n = nsk::dns_query(
         &mut frame,
@@ -328,36 +393,33 @@ fn resolve(name: &[u8]) -> Result<([u8; 4], bool), u32> {
     .ok_or(E_INVALID)?;
     net_send(&frame[..n]);
     let start = nexo_sys::time_now();
-    let mut rx = [0u8; 1514];
     loop {
-        let fl = net_recv(&mut rx);
-        if fl > 0 {
-            if let Some(ans) = nsk::dns_parse(&rx[..fl], st.lease.dns, 40000, id) {
+        pump();
+        let u = &mut netd().udp[ui];
+        while u.qlen > 0 {
+            let (ip, port, len, data) = u.queue[0];
+            u.queue.copy_within(1..u.qlen, 0);
+            u.qlen -= 1;
+            if ip == netd().lease.dns
+                && port == nsk::DNS_PORT
+                && let Some(ans) = nsk::dns_parse_payload(&data[..len as usize], id)
+            {
                 let addr = ans.a.ok_or(E_NOT_FOUND)?;
+                let stt = netd();
                 if name.len() <= 64 {
-                    let slot = st.dns_len % DNS_CACHE;
-                    st.dns[slot].0[..name.len()].copy_from_slice(name);
-                    st.dns[slot].1 = name.len() as u8;
-                    st.dns[slot].2 = addr;
-                    st.dns_len = (st.dns_len + 1).min(DNS_CACHE).max(slot + 1);
+                    let slot = stt.dns_len % DNS_CACHE;
+                    stt.dns[slot].0[..name.len()].copy_from_slice(name);
+                    stt.dns[slot].1 = name.len() as u8;
+                    stt.dns[slot].2 = addr;
+                    stt.dns_len = (stt.dns_len + 1).min(DNS_CACHE).max(slot + 1);
                 }
                 return Ok((addr, false));
             }
-            // outros quadros seguem o fluxo normal
-            let f = rx;
-            if let Some((_, _, et, p)) = nsk::eth_parse(&f[..fl])
-                && et == nsk::ETHERTYPE_IPV4
-                && let Some(ip) = nsk::ipv4_parse(p)
-                && ip.proto == nsk::IPPROTO_TCP
-            {
-                handle_tcp(&f[..fl]);
-            }
-        } else {
-            nexo_sys::sleep_ns(5_000_000);
         }
         if nexo_sys::time_now() - start > 10_000_000_000 {
             return Err(E_TIMEOUT);
         }
+        nexo_sys::sleep_ns(2_000_000);
     }
 }
 
@@ -410,6 +472,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         }
         nexo_sys::sleep_ns(5_000_000);
     }
+    net_subscribe();
     log!(
         "netd: pronto — ip {}.{}.{}.{} gw {}.{}.{}.{} dns {}.{}.{}.{}",
         lease.ip[0],
@@ -425,14 +488,20 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         lease.dns[2],
         lease.dns[3]
     );
-    // 4. laço de eventos
+    // 4. laço de eventos: com tudo ocioso, dorme em wait_any {cliente, driver};
+    // com TCP pendente, continua bombeando (retransmissões precisam do relógio).
     let mut out = [0u8; 4096];
     loop {
         pump();
+        let busy = netd().tcp.iter().any(|s| s.is_some());
         let (n, _) = match nexo_sys::channel_try_recv(CLIENT, &mut msg, &mut hs) {
             Ok(v) => v,
             Err(Status::WouldBlock) => {
-                nexo_sys::sleep_ns(2_000_000);
+                if busy {
+                    nexo_sys::sleep_ns(2_000_000);
+                } else {
+                    let _ = nexo_sys::channel_wait_any(&[CLIENT, NET]);
+                }
                 continue;
             }
             Err(Status::PeerClosed) => {

@@ -4,6 +4,7 @@
 Formato da IDL (linhas; `#` comenta):
   protocol <nome> <maior>.<menor>
   method <id> <nome> { request { campo: tipo [= padrao], ... } response { ... } }
+  event <id> <nome> { campo: tipo, ... }   (mensagem sem resposta; flags = evento)
 Tipos: u8 u16 u32 u64 i32 i64 bytes<N>. Campos com padrao devem ser os ultimos
 (leitores novos assumem o padrao quando o payload antigo e curto — ipc-compat §3).
 
@@ -44,12 +45,21 @@ def parse(text: str, path):
         if m:
             cur = {"id": int(m.group(1)), "name": m.group(2), "request": [], "response": []}
             continue
+        m = re.fullmatch(r"event (\d+) (\w+) \{", line)
+        if m:
+            cur = {"id": int(m.group(1)), "name": m.group(2), "event": [], "request": [], "response": []}
+            section = "event"
+            continue
         m = re.fullmatch(r"(request|response) \{", line)
         if m:
             section = m.group(1)
             continue
         if line == "}":
-            if section:
+            if section and "event" in cur and section == "event":
+                methods.append(cur)
+                cur = None
+                section = None
+            elif section:
                 section = None
             elif cur:
                 methods.append(cur)
@@ -58,8 +68,9 @@ def parse(text: str, path):
         m = re.fullmatch(r"(\w+): (u8|u16|u32|u64|i32|i64|bytes<(\d+)>)(?: = (-?\d+))?,?", line)
         if m and cur and section:
             ty = m.group(2)
-            cur[section].append({"name": m.group(1), "type": ty, "max": int(m.group(3)) if m.group(3) else None,
-                                 "default": m.group(4)})
+            key = section
+            cur[key].append({"name": m.group(1), "type": ty, "max": int(m.group(3)) if m.group(3) else None,
+                             "default": m.group(4)})
             continue
         sys.exit(f"{path}:{ln}: linha invalida: {line!r}")
     if not proto:
@@ -213,7 +224,8 @@ def generate(path: pathlib.Path) -> str:
     out = []
     out.append(f"//! Protocolo tipado `{full}` v{major}.{minor} — **gerado por `tools/idlgen` de `idl/{pname}.idl`; nao editar**.")
     out.append("")
-    out.append("use crate::{FLAG_ERROR, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};")
+    out.append("#[allow(unused_imports)]")
+    out.append("use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};")
     out.append("")
     out.append(f"/// FNV-1a de `\"{full}\"`.")
     out.append(f"pub const PROTOCOL_ID: u32 = 0x{fnv1a(full.encode()):08x};")
@@ -223,8 +235,29 @@ def generate(path: pathlib.Path) -> str:
     out.append(f"pub const VERSION_MINOR: u16 = {minor};")
     out.append("")
     names = {}
+    events = [m for m in methods if "event" in m]
+    methods = [m for m in methods if "event" not in m]
     for m in methods:
         names[m["id"]] = (gen_struct(out, full, m, "request"), gen_struct(out, full, m, "response"))
+    for ev in events:
+        ev["request"] = ev["event"]
+        name = gen_struct(out, full, ev, "request")
+        # renomeia: eventos usam sufixo Event e flags = FLAG_EVENT
+        old = f"{camel(ev['name'])}Request"
+        new = f"{camel(ev['name'])}Event"
+        text = "\n".join(out)
+        text = text.replace(old, new)
+        text = text.replace(
+            f"pub struct {new} {{",
+            f"pub struct {new} {{", 1)
+        out.clear()
+        out.extend(text.split("\n"))
+        # troca as flags do encode_msg deste evento (o ultimo gerado usa `flags: 0`)
+        for i in range(len(out) - 1, -1, -1):
+            if out[i].strip() == "flags: 0," :
+                out[i] = out[i].replace("flags: 0,", "flags: FLAG_EVENT,")
+                break
+        ev["struct_name"] = new
     # enum Request + decode_request
     out.append("/// Pedido decodificado.")
     out.append("#[derive(Clone, Debug, PartialEq, Eq)]")
@@ -265,6 +298,19 @@ def generate(path: pathlib.Path) -> str:
         out.append("    }")
         out.append("    if h.flags != FLAG_RESPONSE { return Err(ProtoError::Flags); }")
         out.append(f"    {rname}::decode_payload(p)")
+        out.append("}")
+        out.append("")
+    for ev in events:
+        n = ev["struct_name"]
+        out.append(f"/// Decodifica um evento `{ev['name']}` (mensagem sem resposta).")
+        out.append(f"pub fn decode_{ev['name']}_event(msg: &[u8]) -> Result<{n}, ProtoError> {{")
+        out.append("    let h = Header::decode(msg)?;")
+        out.append("    if h.protocol_id != PROTOCOL_ID { return Err(ProtoError::Protocol); }")
+        out.append("    if h.version_major != VERSION_MAJOR { return Err(ProtoError::Version); }")
+        out.append(f"    if h.method_id != {ev['id']} {{ return Err(ProtoError::Method); }}")
+        out.append("    if h.flags != FLAG_EVENT { return Err(ProtoError::Flags); }")
+        out.append("    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];")
+        out.append(f"    {n}::decode_payload(p)")
         out.append("}")
         out.append("")
     out.append("/// Codifica uma resposta de erro para o metodo `method_id`.")

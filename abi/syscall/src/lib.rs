@@ -69,8 +69,13 @@ pub const SYS_CHANNEL_TRY_RECV: u64 = 25;
 /// Espera múltipla: bloqueia até algum dos canais em `a0` (array de `a1` handles, ≤ 16) ter
 /// mensagem ou par fechado; `RDX` = índice do primeiro pronto. Exige `READ` em todos.
 pub const SYS_CHANNEL_WAIT_ANY: u64 = 26;
+/// Cria um canal de interrupções para o vetor `a1` (obtido por [`SYS_IRQ_ALLOC`] na mesma
+/// concessão `a0`, direito `SIGNAL`): o kernel envia uma mensagem de 1 byte a cada disparo
+/// (coalescida se a fila não estiver vazia); `RDX` = handle da ponta de leitura. Combina com
+/// [`SYS_CHANNEL_WAIT_ANY`] para esperar canal *ou* interrupção.
+pub const SYS_IRQ_CHANNEL: u64 = 27;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 26;
+pub const SYS_MAX: u64 = 27;
 /// Máximo de handles em uma espera múltipla.
 pub const WAIT_ANY_MAX: usize = 16;
 
@@ -318,6 +323,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_DEVICE_OPEN => "device_open",
         SYS_CHANNEL_TRY_RECV => "channel_try_recv",
         SYS_CHANNEL_WAIT_ANY => "channel_wait_any",
+        SYS_IRQ_CHANNEL => "irq_channel",
         _ => "?",
     }
 }

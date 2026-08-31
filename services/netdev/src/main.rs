@@ -1,11 +1,16 @@
 //! `netdev` — driver VirtIO-net em modo usuário (VirtIO 1.x, filas 0 = recepção e
 //! 1 = transmissão, cabeçalho `virtio_net_hdr` de 12 bytes, MAC da configuração do
 //! dispositivo). Handle 0 = concessão do dispositivo, handle 1 = canal com o protocolo
-//! tipado `nexo.net` v1.0 (`idl/net.idl`): `mac`, `send`, `recv` (sem bloquear).
+//! tipado `nexo.net` v1.0 (`idl/net.idl`): `mac`, `send`, `recv` (sem bloquear) e, após
+//! `subscribe`, cada quadro recebido vira um **evento** `frame` empurrado no canal — o laço
+//! então dorme em `channel_wait_any` sobre {canal, canal de interrupções} em vez de bloquear
+//! só no canal (zero varredura ociosa).
 #![no_std]
 #![no_main]
 
-use nexo_proto::net::{self, MacResponse, RecvResponse, Request, SendResponse};
+use nexo_proto::net::{
+    self, FrameEvent, MacResponse, RecvResponse, Request, SendResponse, SubscribeResponse,
+};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::{PciInfo, Status};
@@ -151,6 +156,11 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut reply = [0u8; 4096];
     let mut hs = [0u32; 1];
     let mut irq_seen = 0u64;
+    let mut subscribed = false;
+    // Canal de interrupções: permite esperar {pedido do cliente, IRQ do dispositivo} juntos.
+    let irq_chan = irq
+        .as_ref()
+        .and_then(|i| nexo_sys::irq_channel(DEV, i.vector).ok());
     // Fila local de quadros recebidos (a recepcao anda mesmo sem pedido `recv` pendente).
     let mut rxq: [([u8; FRAME_MAX], usize); 8] = [([0; FRAME_MAX], 0); 8];
     let mut rxq_len = 0usize;
@@ -177,8 +187,45 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             }
         }
         let _ = t.isr_ack();
-        let (n, _) = match nexo_sys::channel_recv(CHAN, &mut buf, &mut hs) {
+        // Modo de eventos: cada quadro da fila local vira um evento `frame` no canal.
+        if subscribed {
+            while rxq_len > 0 {
+                let (f, l) = rxq[0];
+                let mut ev = FrameEvent {
+                    frame: [0; FRAME_MAX],
+                    frame_len: l as u32,
+                };
+                ev.frame[..l].copy_from_slice(&f[..l]);
+                let m = ev.encode_msg(&mut reply).unwrap_or(0);
+                match nexo_sys::channel_send(CHAN, &reply[..m], &[]) {
+                    Status::Ok => {
+                        rxq.copy_within(1..rxq_len, 0);
+                        rxq_len -= 1;
+                    }
+                    Status::QueueFull => break, // tenta na proxima volta
+                    Status::PeerClosed => nexo_sys::exit(0),
+                    _ => fail(99, "evento"),
+                }
+            }
+        }
+        // Espera: pedido do cliente OU interrupção (quando temos o canal de IRQ).
+        let r = if let Some(ic) = irq_chan {
+            match nexo_sys::channel_wait_any(&[CHAN, ic]) {
+                Ok(0) => nexo_sys::channel_try_recv(CHAN, &mut buf, &mut hs),
+                Ok(_) => {
+                    // aviso de IRQ: drena o proprio aviso e volta ao topo para colher quadros
+                    let mut tiny = [0u8; 8];
+                    let _ = nexo_sys::channel_try_recv(ic, &mut tiny, &mut hs);
+                    continue;
+                }
+                Err(_) => fail(98, "wait_any"),
+            }
+        } else {
+            nexo_sys::channel_recv(CHAN, &mut buf, &mut hs)
+        };
+        let (n, _) = match r {
             Ok(v) => v,
+            Err(Status::WouldBlock) => continue,
             Err(Status::PeerClosed) => nexo_sys::exit(0),
             Err(_) => fail(97, "recv"),
         };
@@ -191,6 +238,11 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             }
         };
         match request {
+            Request::Subscribe(_) => {
+                subscribed = true;
+                let m = SubscribeResponse {}.encode_msg(&mut reply).unwrap_or(0);
+                let _ = nexo_sys::channel_send(CHAN, &reply[..m], &[]);
+            }
             Request::Mac(_) => {
                 let r = MacResponse {
                     addr: mac,

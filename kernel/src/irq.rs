@@ -4,6 +4,7 @@
 //! quem espera em [`wait`]; o driver programa o dispositivo com o endereço e
 //! os dados MSI devolvidos por [`alloc`].
 
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, Ordering};
 
@@ -18,6 +19,8 @@ pub const USER_VECTORS: usize = 32;
 static COUNTS: [AtomicU64; USER_VECTORS] = [const { AtomicU64::new(0) }; USER_VECTORS];
 static ALLOCATED: IrqLock<[bool; USER_VECTORS]> = IrqLock::new([false; USER_VECTORS]);
 static WAITERS: IrqLock<Vec<(u8, ThreadId)>> = IrqLock::new(Vec::new());
+/// Pontas de canal que recebem uma mensagem por disparo (coalescida); limpas quando o par fecha.
+static CHANNELS: IrqLock<Vec<(u8, Arc<crate::ipc::ChannelEnd>)>> = IrqLock::new(Vec::new());
 
 /// `true` se `vector` é um vetor de usuário.
 pub fn is_user_vector(vector: u8) -> bool {
@@ -62,7 +65,31 @@ pub fn alloc() -> Option<u8> {
 pub fn on_interrupt(vector: u8) {
     let i = (vector - USER_VECTOR_BASE) as usize;
     COUNTS[i].fetch_add(1, Ordering::Release);
+    // Canais de interrupção: uma mensagem por disparo, coalescida se já há uma na fila.
+    {
+        let mut chans = CHANNELS.lock();
+        chans.retain(|(v, end)| {
+            if *v != vector {
+                return true;
+            }
+            if end.peer_readable() {
+                return true; // já há aviso pendente: coalesce
+            }
+            !matches!(
+                end.send(crate::ipc::Message {
+                    data: alloc::vec![1u8],
+                    handles: Vec::new(),
+                }),
+                Err(nexo_syscall_abi::Status::PeerClosed)
+            )
+        });
+    }
     on_interrupt_wake_only(vector);
+}
+
+/// Regista uma ponta de canal para receber os disparos de `vector`.
+pub fn attach_channel(vector: u8, end: Arc<crate::ipc::ChannelEnd>) {
+    CHANNELS.lock().push((vector, end));
 }
 
 /// Contagem de disparos do vetor.
