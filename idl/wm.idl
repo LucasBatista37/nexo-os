@@ -1,0 +1,61 @@
+# nexo.wm — compositor de janelas (services/wm).
+# Fluxo: create_surface -> (o cliente escreve pixels no MemoryObject devolvido) -> commit.
+# O wm compoe todas as superficies na saida (outro MemoryObject) por ordem de z.
+# Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie inexistente.
+protocol wm 1.0
+
+# Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
+# MemoryObject com os pixels (stride = w).
+method 1 create_surface {
+    request {
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        z: i32,
+    }
+    response {
+        id: u32,
+        mem: handle,
+    }
+}
+
+# Marca a superficie `id` como suja (o cliente ja escreveu no buffer); o wm recompoe.
+method 2 commit {
+    request {
+        id: u32,
+    }
+    response {
+    }
+}
+
+# Move a superficie `id` para (x,y) (recompoe as regioes afetadas).
+method 3 move {
+    request {
+        id: u32,
+        x: i32,
+        y: i32,
+    }
+    response {
+    }
+}
+
+# Destroi a superficie `id`.
+method 4 destroy {
+    request {
+        id: u32,
+    }
+    response {
+    }
+}
+
+# Handle do MemoryObject da saida composta (para o teste/servidor de video inspecionar).
+method 5 output {
+    request {
+    }
+    response {
+        w: i32,
+        h: i32,
+        mem: handle,
+    }
+}

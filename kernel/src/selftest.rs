@@ -72,6 +72,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_vfs", test_user_vfs),
     ("user_wait_any", test_user_wait_any),
     ("user_shmem", test_user_shmem),
+    ("user_wm", test_user_wm),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -1798,6 +1799,41 @@ fn test_user_shmem() -> TestResult {
     check!(
         frames + 8 >= frames0,
         "quadros vazaram (memoria compartilhada nao liberada): {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Composição fim a fim entre processos: o serviço `wm` cria superfícies em memória
+/// compartilhada (o cliente escreve os pixels), compõe a cena com ordem-Z numa saída
+/// compartilhada, e o cliente confere os pixels compostos. Também verifica que nenhum
+/// quadro vaza quando ambos encerram (os `MemoryObject` são liberados no Drop).
+fn test_user_wm() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(a),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let hclient = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 19, hclient).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    // o cliente encerrou e fechou seu lado do canal; o wm sai com 0 ao ver PeerClosed
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, client));
+    let frames = settled_free_frames(frames0, 8);
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram (superficies/saida nao liberadas): {frames0} -> {frames}"
     );
     Ok(())
 }

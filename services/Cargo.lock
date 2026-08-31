@@ -13,6 +13,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-boot-abi"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-consoledev"
 version = "0.0.1"
 dependencies = [
@@ -63,6 +67,10 @@ name = "nexo-fat"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-font"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-fs"
 version = "0.0.1"
 dependencies = [
@@ -70,6 +78,14 @@ dependencies = [
  "nexo-rt",
  "nexo-sys",
  "nexofs",
+]
+
+[[package]]
+name = "nexo-gfx"
+version = "0.0.1"
+dependencies = [
+ "nexo-boot-abi",
+ "nexo-font",
 ]
 
 [[package]]
@@ -194,6 +210,24 @@ dependencies = [
 [[package]]
 name = "nexo-virtio"
 version = "0.0.1"
+
+[[package]]
+name = "nexo-wm"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+]
+
+[[package]]
+name = "nexo-wmd"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+ "nexo-wm",
+]
 
 [[package]]
 name = "nexofs"

@@ -62,6 +62,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         16 => wait_any_test(),
         17 => shmem_producer(),
         18 => shmem_consumer(),
+        19 => wm_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2135,6 +2136,124 @@ fn shmem_producer() -> ! {
             nexo_sys::exit(413)
         }
         nexo_sys::sleep_ns(5_000_000);
+    }
+}
+
+/// Modo 19: cliente do compositor `wm` (handle 0 = canal `nexo.wm`). Cria duas superficies
+/// sobrepostas com cores distintas em memoria compartilhada, faz commit e le a saida composta
+/// para conferir a ordem-Z — prova de composicao fim a fim entre processos.
+fn wm_client() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    // A: vermelha em (0,0) 8x8, z=0
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    wm_commit(ch, a);
+    // B: verde em (4,4) 8x8, z=1 (sobrepoe A no canto)
+    let (b, b_base) = wm_create(ch, 4, 4, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0);
+    wm_commit(ch, b);
+
+    // le a saida composta
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(440));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(441);
+    }
+    let (n, nh) = match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok(v) => v,
+        _ => nexo_sys::exit(442),
+    };
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(443));
+    if nh != 1 {
+        nexo_sys::exit(444);
+    }
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(445));
+    let stride = outp.w;
+    // (2,2): so A -> vermelho; (6,6): sobreposicao, B em cima -> verde;
+    // (10,10): so B -> verde; (30,30): fundo -> preto.
+    if wm_px(ob, stride, 2, 2) != (255, 0, 0) {
+        nexo_sys::exit(450);
+    }
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(451);
+    }
+    if wm_px(ob, stride, 10, 10) != (0, 255, 0) {
+        nexo_sys::exit(452);
+    }
+    if wm_px(ob, stride, 30, 30) != (0, 0, 0) {
+        nexo_sys::exit(453);
+    }
+    nexo_sys::log("utest: wm cliente ok — composicao Z de duas superficies conferida na saida");
+    nexo_sys::exit(0)
+}
+
+/// Cria uma superficie no compositor e devolve (id, base mapeada da memoria compartilhada).
+fn wm_create(ch: nexo_sys::Handle, x: i32, y: i32, w: i32, h: i32, z: i32) -> (u32, u64) {
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let req = nexo_proto::wm::CreateSurfaceRequest { x, y, w, h, z };
+    let m = req
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(430));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(431);
+    }
+    let (n, nh) = match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok(v) => v,
+        _ => nexo_sys::exit(432),
+    };
+    let resp = nexo_proto::wm::decode_create_surface_response(&buf[..n])
+        .unwrap_or_else(|_| nexo_sys::exit(433));
+    if nh != 1 {
+        nexo_sys::exit(434);
+    }
+    let base = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(435));
+    (resp.id, base)
+}
+
+/// Faz commit de uma superficie e espera a resposta do compositor.
+fn wm_commit(ch: nexo_sys::Handle, id: u32) {
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::CommitRequest { id }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(436));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(437);
+    }
+    if nexo_sys::channel_recv(ch, &mut buf, &mut hs).is_err() {
+        nexo_sys::exit(438);
+    }
+}
+
+/// Preenche uma superficie WxH (bytes Rgbx8888 = [r,g,b,0]) com uma cor solida.
+fn wm_fill(base: u64, w: i32, h: i32, r: u8, g: u8, b: u8) {
+    let px = (w * h) as usize;
+    for i in 0..px {
+        // SAFETY: base .. base+w*h*4 foi mapeada por memory_map (USER|RW) neste processo.
+        unsafe {
+            let p = (base as *mut u8).add(i * 4);
+            p.write(r);
+            p.add(1).write(g);
+            p.add(2).write(b);
+            p.add(3).write(0);
+        }
+    }
+}
+
+/// Le um pixel (r,g,b) da saida composta mapeada.
+fn wm_px(base: u64, stride: i32, x: i32, y: i32) -> (u8, u8, u8) {
+    // SAFETY: leitura dentro da saida mapeada (w*h*4 bytes).
+    unsafe {
+        let p = (base as *const u8).add(((y * stride + x) * 4) as usize);
+        (p.read(), p.add(1).read(), p.add(2).read())
     }
 }
 

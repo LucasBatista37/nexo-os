@@ -1,0 +1,23 @@
+[package]
+name = "nexo-wmd"
+description = "Compositor de janelas em modo usuario: cada cliente escreve pixels num MemoryObject compartilhado; o wm compoe a cena (nexo-wm) numa saida compartilhada"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+# O pacote é `nexo-wmd` (para não colidir com a biblioteca `nexo-wm`), mas o binário do
+# initrd chama-se `nexo-wm` conforme a convenção do build-image (nexo-<servico>).
+[[bin]]
+name = "nexo-wm"
+path = "src/main.rs"
+
+[dependencies]
+nexo-sys.workspace = true
+nexo-rt = { workspace = true, features = ["panic-handler"] }
+nexo-proto.workspace = true
+nexo-gfx.workspace = true
+nexo-wm.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

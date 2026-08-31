@@ -1,7 +1,7 @@
 # Workspace dos programas de usuario (alvo x86_64-unknown-none em ring 3, ver .cargo/config.toml).
 [workspace]
 resolver = "2"
-members = ["init", "svcmgr", "echo", "echo-client", "utest", "blockdev", "fs", "rngdev", "devmgr", "espfs", "vfs", "consoledev", "shell", "inputdev", "netdev", "netd"]
+members = ["init", "svcmgr", "echo", "echo-client", "utest", "blockdev", "fs", "rngdev", "devmgr", "espfs", "vfs", "consoledev", "shell", "inputdev", "netdev", "netd", "wm"]
 
 [workspace.package]
 version = "0.0.1"
@@ -18,6 +18,8 @@ nexo-fat = { path = "../libraries/fat" }
 nexo-proto = { path = "../abi/proto" }
 nexo-netstack = { path = "../libraries/net" }
 nexo-net = { path = "../sdk/nexo-net" }
+nexo-gfx = { path = "../libraries/gfx" }
+nexo-wm = { path = "../libraries/wm" }
 
 [profile.dev]
 panic = "abort"
