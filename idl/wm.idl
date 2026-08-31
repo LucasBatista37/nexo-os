@@ -7,7 +7,7 @@
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
 # 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
-protocol wm 1.16
+protocol wm 1.17
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -324,6 +324,37 @@ method 34 activate {
         id: u32,
     }
     response {
+    }
+}
+
+# Escala fracionaria por janela: o retangulo de exibicao vira buffer*num/den (a composicao escala
+# por vizinho mais proximo; o buffer nao muda). Ex.: 150%% = 3/2. Erro 1 se num/den invalidos ou o
+# resultado nao cabe na saida. So a sessao dona (erro 3).
+method 35 set_scale {
+    request {
+        id: u32,
+        num: u32,
+        den: u32,
+    }
+    response {
+    }
+}
+
+# Preferencia de acessibilidade: reducao de movimento (apps devem desligar animacoes). Mudar
+# exige a posse da entrada (erro 6); ler e livre (nao e sensivel).
+method 36 set_reduce_motion {
+    request {
+        enabled: u8,
+    }
+    response {
+    }
+}
+
+method 37 prefs {
+    request {
+    }
+    response {
+        reduce_motion: u8,
     }
 }
 

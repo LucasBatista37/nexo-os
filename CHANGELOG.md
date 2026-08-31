@@ -265,6 +265,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo.wm` v1.16: **modelo de privilégio de shell** — a sessão bootstrap (a que o kernel entrega ao subir o compositor) é o *shell*; só ela usa `surface_info{index}` (enumera janelas: id, contexto, display, título) e `activate{id}` (troca para o Contexto da janela, traz à frente e foca, com evento a11y — o clique da Faixa de Atividades). Sessões comuns recebem o erro remoto 7.
 - `utest` modo 40 + auto-teste de boot `user_wm_shell`: o shell enumera "editor" (ctx 0) e "chat" (ctx 1), ativa "chat" (a saída passa a mostrá-la — troca de contexto + frente + foco conferidos por pixel) e uma sessão comum é negada em `surface_info` e `activate`. 63 testes no boot.
 
+### Adicionado (Fase 5, bloco 26 — escala fracionária e redução de movimento)
+- `nexo.wm` v1.17: `set_scale{id,num,den}` — escala fracionária **por janela**: o retângulo de exibição vira buffer×num/den (200% = 2/1, 150% = 3/2) e a composição escala por vizinho mais próximo, sem realocar o buffer (o desacoplamento do bloco 15). Validação de razões e limites da saída.
+- Preferência de acessibilidade **redução de movimento**: `set_reduce_motion{enabled}` (mediado pela posse da entrada, erro 6) e `prefs{}` de leitura livre — apps consultam para desligar animações.
+- `utest` modo 41 + auto-teste de boot `user_wm_scale`: 200% e 150% conferidos por pixel (área ampliada mostra o conteúdo; fora dela, fundo), razão inválida recusada; a preferência muda só pela sessão dona da entrada e é legível por qualquer uma. 64 testes no boot.
+
 ### Adicionado (Fase 2, extra — memória compartilhada entre processos)
 - `MemoryObject` (`kind` 4) e syscalls `memory_create` (28, aloca N páginas zeradas ≤ 256) / `memory_map` (29, mapeia `USER|RW` cacheável na região de dispositivos). Transferir o handle por canal compartilha as **mesmas páginas físicas** entre processos; o objeto possui os frames e os libera quando ninguém mais o referencia (mapeamento sem posse, como MMIO). `sdk/nexo-sys` ganhou os wrappers.
 - Teste `user_shmem`: um produtor cria memória, escreve um marcador e transfere o handle a um consumidor por canal; o consumidor lê o marcador e responde na mesma memória; sem vazamento de quadros. 42 testes no boot. Base para o compositor (buffers de janela) e payloads grandes de IPC (ipc-compat §2.6).

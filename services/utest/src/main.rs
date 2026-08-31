@@ -84,6 +84,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         38 => wm_dnd(),
         39 => wm_a11y(),
         40 => wm_shell(),
+        41 => wm_scale(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2408,6 +2409,140 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 41: escala fracionaria + reducao de movimento. set_scale muda so o retangulo de exibicao
+/// (a composicao escala); a preferencia de reducao de movimento e mediada para escrita e livre
+/// para leitura.
+fn wm_scale() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    let (a, a_base) = wm_create(s1, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 255); // magenta
+    wm_commit(s1, a);
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1040));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1041);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1042));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1043));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1044));
+    let stride = outp.w;
+    if wm_px(ob, stride, 4, 4) != (255, 0, 255) || wm_px(ob, stride, 12, 12) != (0, 0, 0) {
+        nexo_sys::exit(1045);
+    }
+
+    let scale = |ch: nexo_sys::Handle,
+                 id: u32,
+                 num: u32,
+                 den: u32,
+                 out: &mut [u8; 256],
+                 buf: &mut [u8; 256],
+                 hs: &mut [u32; 1]|
+     -> bool {
+        let m = nexo_proto::wm::SetScaleRequest { id, num, den }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(1046));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(1047);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_set_scale_response(&buf[..n]).is_ok(),
+            _ => nexo_sys::exit(1048),
+        }
+    };
+    // 200%%: 8x8 exibida em 16x16
+    if !scale(s1, a, 2, 1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1049);
+    }
+    if wm_px(ob, stride, 12, 12) != (255, 0, 255) {
+        nexo_sys::exit(1050);
+    }
+    // 150%%: 12x12
+    if !scale(s1, a, 3, 2, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1051);
+    }
+    if wm_px(ob, stride, 10, 10) != (255, 0, 255) || wm_px(ob, stride, 14, 14) != (0, 0, 0) {
+        nexo_sys::exit(1052);
+    }
+    // invalido
+    if scale(s1, a, 0, 1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1053);
+    }
+
+    // reducao de movimento: escrita mediada, leitura livre
+    let prefs =
+        |ch: nexo_sys::Handle, out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 1]| -> u8 {
+            let m = nexo_proto::wm::PrefsRequest {}
+                .encode_msg(out)
+                .unwrap_or_else(|_| nexo_sys::exit(1054));
+            if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit(1055);
+            }
+            match nexo_sys::channel_recv(ch, buf, hs) {
+                Ok((n, _)) => {
+                    nexo_proto::wm::decode_prefs_response(&buf[..n])
+                        .unwrap_or_else(|_| nexo_sys::exit(1056))
+                        .reduce_motion
+                }
+                _ => nexo_sys::exit(1057),
+            }
+        };
+    let set_rm = |ch: nexo_sys::Handle,
+                  on: u8,
+                  out: &mut [u8; 256],
+                  buf: &mut [u8; 256],
+                  hs: &mut [u32; 1]|
+     -> bool {
+        let m = nexo_proto::wm::SetReduceMotionRequest { enabled: on }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(1058));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(1059);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_set_reduce_motion_response(&buf[..n]).is_ok(),
+            _ => nexo_sys::exit(1060),
+        }
+    };
+    if prefs(s1, &mut out, &mut buf, &mut hs) != 0 {
+        nexo_sys::exit(1061);
+    }
+    if !set_rm(s1, 1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1062);
+    }
+    if prefs(s1, &mut out, &mut buf, &mut hs) != 1 {
+        nexo_sys::exit(1063);
+    }
+    // sessao em segundo plano: nao muda, mas le
+    let (s2, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1064));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1065));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1066);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1067),
+    }
+    if set_rm(s2, 0, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1068);
+    }
+    if prefs(s2, &mut out, &mut buf, &mut hs) != 1 {
+        nexo_sys::exit(1069);
+    }
+    nexo_sys::log(
+        "utest: wm scale ok — escala fracionaria por composicao; reducao de movimento mediada",
+    );
     nexo_sys::exit(0)
 }
 

@@ -57,6 +57,8 @@ struct Outputs {
 struct Attention {
     banner: Option<([u8; 64], u32)>,
     dnd: bool,
+    /// Preferência de acessibilidade: apps devem desligar animações.
+    reduce_motion: bool,
 }
 
 /// Área de transferência mediada: conteúdo atual + anel de histórico (opt-in).
@@ -321,6 +323,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut attention = Attention {
         banner: None,
         dnd: false,
+        reduce_motion: false,
     };
     let mut clipboard = Clipboard {
         data: [0; 256],
@@ -885,6 +888,49 @@ fn serve(
             a11y_emit(a11y, 1, i as u32, &t[..tl as usize]);
             recompose(surfaces, outs, fb, *active_ctx, attention);
             let m = wm::ActivateResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::SetScale(rq) => {
+            if !mine(surfaces, rq.id) {
+                reply_err(ch, wm::SetScaleRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            let i = rq.id as usize;
+            if rq.num == 0 || rq.den == 0 {
+                reply_err(ch, wm::SetScaleRequest::METHOD_ID, E_INVALID, out);
+                return;
+            }
+            let w = (surfaces[i].buf_w as i64 * rq.num as i64 / rq.den as i64) as i32;
+            let h = (surfaces[i].buf_h as i64 * rq.num as i64 / rq.den as i64) as i32;
+            if w <= 0 || h <= 0 || w > OUT_W || h > OUT_H {
+                reply_err(ch, wm::SetScaleRequest::METHOD_ID, E_INVALID, out);
+                return;
+            }
+            surfaces[i].rect.w = w;
+            surfaces[i].rect.h = h;
+            recompose(surfaces, outs, fb, *active_ctx, attention);
+            let m = wm::SetScaleResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::SetReduceMotion(rq) => {
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(
+                    ch,
+                    wm::SetReduceMotionRequest::METHOD_ID,
+                    E_NO_INPUT_OWNER,
+                    out,
+                );
+                return;
+            }
+            attention.reduce_motion = rq.enabled != 0;
+            let m = wm::SetReduceMotionResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::Prefs(_) => {
+            let resp = wm::PrefsResponse {
+                reduce_motion: attention.reduce_motion as u8,
+            };
+            let m = resp.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::SetTitle(rq) => {

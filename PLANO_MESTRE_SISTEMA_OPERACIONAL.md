@@ -519,7 +519,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] implementar drag-and-drop por grants — *a sessão dona da **entrada** inicia o arrasto (`drag_start`, erro 6 para as demais); ao soltar (BTN_LEFT release), **só a sessão dona da janela sob o ponteiro** recebe os dados (evento `drop`) — ninguém mais pode lê-los; soltar no vazio ou sob captura descarta o payload — auto-teste `user_wm_dnd`. Payloads grandes (via handle de `MemoryObject` no evento) e o feedback visual do arrasto ficam para o shell*;
 - [-] implementar leitor de tela em arquitetura, ainda que simples — *a arquitetura existe: o compositor emite **eventos semânticos** (`a11y_subscribe` + evento `a11y`: foco mudou com o **título** da janela — `set_title` —, aviso publicado, Contexto trocado) num canal que um leitor de tela assina; auto-teste `user_wm_a11y` faz o papel do leitor e confere o fluxo. Pendem a síntese de voz/braille de verdade, mais eventos (texto/valor dos widgets via `nexo-ui`) e um modelo de permissão para tecnologia assistiva*;
 - [ ] implementar navegação completa por teclado;
-- [ ] implementar escala fracionária e redução de movimento;
+- [-] implementar escala fracionária e redução de movimento — *escala fracionária **por janela** (`set_scale{id,num,den}`: o retângulo de exibição vira buffer×num/den e a composição escala — 200%/150% conferidos por pixel) e a preferência **redução de movimento** (`set_reduce_motion` mediado pela entrada; `prefs` de leitura livre para apps desligarem animações) — auto-teste `user_wm_scale`. Pendem a escala global padrão do sistema (todas as janelas + DPI do texto) e filtros melhores que vizinho-mais-próximo*;
 - [ ] testar usabilidade com usuários externos;
 - [ ] publicar release `0.5-desktop`.
 
