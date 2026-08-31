@@ -119,6 +119,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `netd`: `tcp_listen{port}` no `nexo.sock` (bloqueia até aceitar; devolve conexão + par); SYNs de entrada roteados aos sockets em escuta.
 - Cenário `net`, fase 3: `run-qemu --net-hostfwd` encaminha uma porta do host para `10.0.2.15:8080`; o harness **conecta para dentro do Nexo**, o `netd` aceita, recebe `ola do host` e responde `nexo-listen-ok`.
 
+### Adicionado (Fase 4, bloco 9 — cliente HTTP sobre a API de sockets)
+- Cenário `net`, fase 4: um GET HTTP/1.0 completo pela API `nexo.sock` (conectar, enviar o pedido, juntar a resposta em vários `tcp_recv`, validar `HTTP/1.0 200` + corpo, fechar) contra um servidor HTTP no host — base do item "cliente HTTP para atualizações".
+- Capturas de rede para diagnóstico: `run-qemu --net-dump ARQ.pcap` (filter-dump do QEMU); o cenário `net` grava `build/logs/net.pcap`.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

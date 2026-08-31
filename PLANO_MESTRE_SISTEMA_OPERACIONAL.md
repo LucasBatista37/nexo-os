@@ -486,7 +486,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] expor permissões de rede por pacote;
 - [ ] portar uma biblioteca TLS auditada compatível com a licença;
 - [ ] criar armazenamento seguro de certificados;
-- [ ] implementar cliente HTTP para atualizações;
+- [-] implementar cliente HTTP para atualizações — *GET HTTP/1.0 com validação de status e corpo pela API `nexo.sock` (cenário `net`, servidor real no host); biblioteca de cliente, HTTP/1.1 e integração com atualizações pendentes*;
 - [-] fuzzar pacotes, parsers e estados de protocolo — *parsers de Ethernet/ARP/IPv4/ICMP/UDP/DHCP/DNS/TCP com fuzz-lite determinístico (20 000 mutações) no host, incluídos no fuzzing semanal do CI; fuzz de estados de protocolo e pacotes na pilha residente pendem do `netd`*;
 - [ ] criar captura de rede autorizada para diagnóstico;
 - [ ] publicar release `0.4-network`.

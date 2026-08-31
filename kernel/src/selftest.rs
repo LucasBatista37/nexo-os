@@ -1703,6 +1703,9 @@ pub fn net_test_mode() {
     if tcp_port == 0 || udp_port == 0 {
         return;
     }
+    let http_port = nexo_boot_abi::cmdline_value(crate::boot::cmdline(), "http-port")
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
     let (na, nb) = ChannelEnd::create_pair();
     let (sa, sb) = ChannelEnd::create_pair();
     let g2 = Handle {
@@ -1719,7 +1722,7 @@ pub fn net_test_mode() {
     .expect("netd");
     let client2 = crate::process::spawn_named(
         "utest",
-        15 | (tcp_port << 8) | (udp_port << 24),
+        15 | (tcp_port << 8) | (udp_port << 24) | (http_port << 40),
         alloc::vec![channel_handle(sb)],
     )
     .expect("utest 15");

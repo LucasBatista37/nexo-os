@@ -58,7 +58,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         12 => vfs_client(),
         13 => input_client(),
         14 => net_client(param as u16),
-        15 => sock_client(param as u16, (param >> 16) as u16),
+        15 => sock_client(param as u16, (param >> 16) as u16, (param >> 32) as u16),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1627,7 +1627,7 @@ fn tcp_check(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], port: u16) -> ! {
 
 /// Modo 15: cliente do `netd` (handle 0, protocolo `nexo.sock`): info, DNS com cache,
 /// eco UDP e conexao TCP com os servidores do harness no host (10.0.2.2).
-fn sock_client(tcp_port: u16, udp_port: u16) -> ! {
+fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
     use nexo_proto::sock::{
         InfoRequest, ResolveRequest, TcpCloseRequest, TcpConnectRequest, TcpRecvRequest,
         TcpSendRequest, UdpRecvRequest, UdpSendRequest, decode_info_response,
@@ -1825,5 +1825,67 @@ fn sock_client(tcp_port: u16, udp_port: u16) -> ! {
         366
     );
     nexo_rt::log!("utest: sock listen ok — servimos uma conexao de entrada na porta 8080");
+    // 6. cliente HTTP/1.0 minimo sobre a API de sockets
+    if http_port != 0 {
+        let h = call!(
+            TcpConnectRequest {
+                dst_ip: [10, 0, 2, 2],
+                dst_ip_len: 4,
+                dst_port: http_port,
+            },
+            decode_tcp_connect_response,
+            370
+        );
+        let req = b"GET /nexo.txt HTTP/1.0\r\nHost: 10.0.2.2\r\n\r\n";
+        let mut t3 = TcpSendRequest {
+            conn: h.conn,
+            data: [0; 1400],
+            data_len: req.len() as u32,
+        };
+        t3.data[..req.len()].copy_from_slice(req);
+        call!(t3, decode_tcp_send_response, 374);
+        let mut resp = [0u8; 2048];
+        let mut rlen = 0usize;
+        let start = nexo_sys::time_now();
+        loop {
+            let r = call!(
+                TcpRecvRequest { conn: h.conn },
+                decode_tcp_recv_response,
+                378
+            );
+            if !r.data().is_empty() && rlen + r.data().len() <= resp.len() {
+                resp[rlen..rlen + r.data().len()].copy_from_slice(r.data());
+                rlen += r.data().len();
+            }
+            let done = rlen >= 16 && resp[..rlen].windows(12).any(|w| w == b"nexo-http-ok");
+            if done {
+                break;
+            }
+            if r.closed != 0 {
+                nexo_rt::log!(
+                    "utest: http: conexao fechou com {} bytes sem o corpo esperado",
+                    rlen
+                );
+                nexo_sys::exit(382)
+            }
+            if nexo_sys::time_now() - start > 20_000_000_000 {
+                nexo_rt::log!("utest: http: sem resposta em 20 s ({} bytes)", rlen);
+                nexo_sys::exit(383)
+            }
+            nexo_sys::sleep_ns(20_000_000);
+        }
+        if !resp[..rlen].starts_with(b"HTTP/1.0 200") {
+            nexo_sys::exit(384);
+        }
+        call!(
+            TcpCloseRequest { conn: h.conn },
+            decode_tcp_close_response,
+            386
+        );
+        nexo_rt::log!(
+            "utest: http ok — GET /nexo.txt devolveu 200 e o corpo esperado ({} bytes)",
+            rlen
+        );
+    }
     nexo_sys::exit(0)
 }

@@ -508,15 +508,48 @@ def run_net_scenario(timeout: float) -> bool:
     cth = threading.Thread(target=connector, daemon=True)
     cth.start()
 
+    # servidor HTTP/1.0 minimo: responde 200 com corpo conhecido a qualquer GET
+    hsrv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    hsrv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    hsrv.bind(("127.0.0.1", 0))
+    hsrv.listen(1)
+    http_port = hsrv.getsockname()[1]
+
+    def hserve():
+        hsrv.settimeout(timeout)
+        while True:
+            try:
+                conn, _ = hsrv.accept()
+            except OSError:
+                return
+            try:
+                conn.settimeout(20)
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = conn.recv(512)
+                    if not chunk:
+                        break
+                    data += chunk
+                body = b"nexo-http-ok\n"
+                conn.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: "
+                             + str(len(body)).encode() + b"\r\n\r\n" + body)
+                conn.close()
+            except OSError:
+                pass
+
+    hth = threading.Thread(target=hserve, daemon=True)
+    hth.start()
+
     image = BUILD / "nexo-net.img"
     run([sys.executable, ROOT / "tools" / "build-image", "--no-build",
-         "--cmdline", f"selftest=0 net-test=1 tcp-port={tcp_port} udp-port={udp_port} exit",
+         "--cmdline", f"selftest=0 net-test=1 tcp-port={tcp_port} udp-port={udp_port} http-port={http_port} exit",
          "--out", image], stdout=subprocess.DEVNULL)
     logfile = BUILD / "logs" / "net.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
     log("=== cenario 'net' (ARP com o slirp) ===")
     rc = subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
                           "--disk", BUILD / "nexo-net-data.img", "--net", "--net-hostfwd", str(fwd_port),
+                             "--net-dump", BUILD / "logs" / "net.pcap",
                           "--timeout", str(timeout), "--log", logfile])
     text = logfile.read_bytes().decode("utf-8", errors="replace")
     ok = True
@@ -525,6 +558,7 @@ def run_net_scenario(timeout: float) -> bool:
         ok = False
     srv.close()
     usrv.close()
+    hsrv.close()
     for pat in [r"netdev: virtio-net bdf 0x[0-9a-f]+ mac 52:54:00:12:34:56 \(rx \d+, tx \d+, MSI-X\)",
                 r"utest: dhcp ok — ip 10\.0\.2\.15 mascara 255\.255\.255\.0 gw 10\.0\.2\.2 dns 10\.0\.2\.3",
                 r"utest: net: ARP reply do gateway",
@@ -539,6 +573,7 @@ def run_net_scenario(timeout: float) -> bool:
                 r"utest: sock tcp ok — conectou, enviou e recebeu por 10\.0\.2\.2:\d+",
                 r"utest: sock listen — conexao de entrada de 10\.0\.2\.2:\d+",
                 r"utest: sock listen ok — servimos uma conexao de entrada na porta 8080",
+                r"utest: http ok — GET /nexo\.txt devolveu 200 e o corpo esperado \(\d+ bytes\)",
                 r"\[NET\] fase 2 \(netd\) terminou com 0",
                 r"\[NET\] teste de rede terminou com 0",
                 r"NEXO: boot completo"]:
