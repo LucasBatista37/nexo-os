@@ -152,6 +152,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo-netstack::tcp`: fuzz-lite da **máquina de estados** — 3000 conexões (ativas e passivas) recebem sequências aleatórias de segmentos/ações e o teste verifica que a máquina nunca entra em pânico e mantém invariantes (`snd_una ≤ snd_nxt`, buffer de recepção nos limites, pendências ≤ slots). Entra no fuzzing semanal do CI (`cargo test ... fuzz`).
 - `tools/netcap` + `make netcap`: sobe o Nexo com a rede user-mode, grava um pcap de todos os pacotes da interface (`run-qemu --net-dump`) e imprime um resumo legível por protocolo (ARP/ICMP/TCP/UDP/ICMPv6) e por fluxo; `--summary-only ARQ.pcap` resume um pcap existente. Captura sempre local ao QEMU do usuário e explicitamente pedida — nunca uma escuta silenciosa.
 
+### Adicionado (Fase 4, bloco 17 — personalidade POSIX de sockets)
+- `sdk/nexo-net`: camada de compatibilidade **BSD sockets** sobre a API nativa `nexo.sock` (ADR-0014 §3: POSIX como personalidade em espaço de usuário, descritores → handles). API `socket`/`connect`/`send`/`recv`/`sendto`/`recvfrom`/`close`/`getaddrinfo`, `sockaddr_in`, `AF_INET`/`SOCK_STREAM`/`SOCK_DGRAM`, erros estilo `errno` (mapeados dos códigos remotos do `netd`). `no_std`, `forbid(unsafe_code)`, tabela de 16 descritores por processo.
+- `utest` (modo 15) faz um TCP connect/send/recv/close pela API POSIX contra o servidor do host — mesma conversa que o caminho nativo, agora pela personalidade.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

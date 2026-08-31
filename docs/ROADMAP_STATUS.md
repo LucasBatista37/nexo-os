@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `c581d7d`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `a7228dd`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 148 · 🟡 42 · ⬜ 345 · ⛔ 0 → **32% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 148 · 🟡 43 · ⬜ 344 · ⛔ 0 → **32% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -12,7 +12,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 | Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 17 | 2 | 0 | 95% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
 | Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 10 | 7 | 1 | 75% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
 | Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 17 | 3 | 1 | 88% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
-| Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 13 | 4 | 45% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
+| Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 14 | 3 | 47% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
 | Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
 | Fase 7 — Áudio, mídia, USB e hardware real (anos 5–7) | ⬜ não iniciado | 0 | 0 | 20 | 0% | 12–24 meses | USB/HID/armazenamento, NVMe/AHCI, áudio, Ethernet real, Wi-Fi, GPU/display, energia/suspensão, laboratório de hardware |
@@ -141,7 +141,7 @@ Gate: 🟡 critérios atendidos; release pendente. arquivos criados/alterados/re
 | ✅ | criar ferramenta de inspeção do disco no host | `tools/nexo-disk` (info/ls/cat/check), usado pelo cenário `storage` |
 | ⬜ | publicar release `0.3-storage` |  |
 
-### Fase 4 — Rede e serviços básicos (anos 3–4) — 45% (2 ✅, 13 🟡, 4 ⬜)
+### Fase 4 — Rede e serviços básicos (anos 3–4) — 47% (2 ✅, 14 🟡, 3 ⬜)
 
 Gate: ⬜ não iniciado. 
 
@@ -156,7 +156,7 @@ Gate: ⬜ não iniciado.
 | 🟡 | implementar DHCP | cliente completo (DISCOVER→OFFER→REQUEST→ACK com opções) obtém lease real do slirp no cenário `net`; renovação/temporizadores e serviço residente pendentes |
 | 🟡 | implementar DNS com cache e validação de entradas | consulta A + parser validado em `nexo-netstack`; `netd` resolve com cache (2ª consulta atendida do cache no cenário `net`); expiração por TTL e serviço para vários clientes pendentes |
 | 🟡 | criar API de sockets nativa | `nexo.sock` v1.0 no `netd` (info/resolve com cache/UDP por porta/TCP conectar-enviar-receber-fechar-escutar/`open` p/ múltiplas sessões), multi-cliente (até 8) com transferência de handles na IDL; saída, entrada e HTTP reais no cenário `net`; isolamento por sessão (sockets globais hoje) e eventos assíncronos ao cliente pendentes |
-| ⬜ | criar compatibilidade POSIX de sockets |  |
+| 🟡 | criar compatibilidade POSIX de sockets | `sdk/nexo-net`: API BSD (`socket`/`connect`/`send`/`recv`/`sendto`/`recvfrom`/`close`/`getaddrinfo`, `sockaddr_in`, `errno`) sobre `nexo.sock`, descritores→handles (ADR-0014); TCP verificado no cenário `net`; `poll`/`select`, `bind`/`accept` e integração com uma libc pendentes |
 | 🟡 | implementar IPv6 | `nexo-netstack::ipv6` (endereço link-local, cabeçalho, checksum, ICMPv6 echo, NDP NS/NA); `netd` responde a NS; cenário `net` confirma um NS bem-formado no pcap; SLAAC/roteamento e sockets IPv6 no `netd` pendentes |
 | 🟡 | implementar firewall por aplicativo e perfil | `nexo-netstack::firewall` (perfil negar-por-padrão: regras de sub-rede/porta/protocolo + DNS/escuta); `netd` aplica o perfil por sessão (`open{...rule_*}`), negando conexões/datagramas fora dele; cenário `net` comprova permitido/negado; perfis persistentes e por aplicativo instalado pendentes |
 | 🟡 | expor permissões de rede por pacote | cada sessão do `netd` tem um perfil que autoriza destino/porta/protocolo por pacote (firewall acima); interface de usuário para conceder/revogar pendente |

@@ -10,6 +10,8 @@ Ordem (§3.8): (1) ABI nativa C + SDK Rust; (2) biblioteca padrão e runtime pr�
 
 POSIX nunca dita a arquitetura: sem `fork` no kernel (spawn nativo), sem uid/gid como mecanismo de segurança primário, sem sinais assíncronos como base do IPC.
 
+**Primeiro passo implementado:** `sdk/nexo-net` — sockets BSD (`socket`/`connect`/`send`/`recv`/`close`/`getaddrinfo`, `sockaddr_in`, `errno`) sobre `nexo.sock`, com descritores inteiros mapeados para conexões/portas do `netd` (§3, passo 3). Exercitado no cenário `net`.
+
 ## Alternativas
 
 Ser uma distribuição Linux (rejeitado pelo escopo do projeto, §1.1); ignorar POSIX (rejeitado: portar ferramentas é o caminho mais curto para utilidade).

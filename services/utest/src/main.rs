@@ -1920,6 +1920,36 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
             rlen
         );
     }
+    // 6b. personalidade POSIX de sockets: socket()/connect()/send()/recv()/close() sobre nexo.sock,
+    //     contra o mesmo servidor TCP do host — prova a camada de compatibilidade BSD.
+    {
+        use nexo_net::{AF_INET, SOCK_STREAM, SockAddrIn, Sockets};
+        let mut s = Sockets::new(0);
+        let fd = s.socket(AF_INET, SOCK_STREAM);
+        if fd < 0 {
+            nexo_sys::exit(400 - fd as i64);
+        }
+        let addr = SockAddrIn {
+            addr: [10, 0, 2, 2],
+            port: tcp_port,
+        };
+        if s.connect(fd, &addr) != 0 {
+            nexo_sys::exit(401);
+        }
+        if s.send(fd, b"ola posix\n") < 0 {
+            nexo_sys::exit(402);
+        }
+        let mut buf = [0u8; 64];
+        let r = s.recv(fd, &mut buf);
+        if r <= 0 || &buf[..r as usize] != b"nexo-tcp-ok" {
+            nexo_rt::log!("utest: posix recv devolveu {}", r);
+            nexo_sys::exit(403);
+        }
+        s.close(fd);
+        nexo_rt::log!(
+            "utest: posix sockets ok — socket/connect/send/recv/close via BSD sobre nexo.sock"
+        );
+    }
     // 7. multi-cliente + firewall: abre uma segunda sessao RESTRITA (perfil que so permite TCP
     //    para 10.0.2.2:<tcp_port>, sem DNS nem escuta) e comprova que o netd nega o resto.
     {

@@ -1,0 +1,13 @@
+[package]
+name = "nexo-net"
+description = "Personalidade POSIX de sockets (BSD sobre nexo.sock) para programas de usuario do Nexo OS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexo-sys = { path = "../nexo-sys" }
+nexo-proto = { path = "../../abi/proto" }
+
+[lints]
+workspace = true

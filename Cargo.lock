@@ -45,6 +45,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-net"
+version = "0.0.1"
+dependencies = [
+ "nexo-proto",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-netstack"
 version = "0.0.1"
 

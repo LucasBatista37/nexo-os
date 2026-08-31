@@ -17,6 +17,7 @@ nexo-virtio = { path = "../libraries/virtio" }
 nexo-fat = { path = "../libraries/fat" }
 nexo-proto = { path = "../abi/proto" }
 nexo-netstack = { path = "../libraries/net" }
+nexo-net = { path = "../sdk/nexo-net" }
 
 [profile.dev]
 panic = "abort"
