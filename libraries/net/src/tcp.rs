@@ -663,4 +663,72 @@ mod tests {
         let mut sink = [0u8; RX_CAP];
         assert_eq!(s.take_rx(&mut sink), acked);
     }
+
+    /// Fuzz de estados: sequências aleatórias de segmentos/ações contra a máquina, checando que
+    /// ela nunca entra em pânico e mantém invariantes (Plano §Fase 4: "fuzzar estados de protocolo").
+    #[test]
+    fn fuzz_lite_state_machine_holds_invariants() {
+        let mut seed = 0x00c0_ffee_1234_5678u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let payloads: [&[u8]; 4] = [b"", b"a", b"abcd", &[7u8; 200]];
+        for _ in 0..3000 {
+            // metade das conexões abre ativa, metade passiva
+            let mut s = if next() & 1 == 0 {
+                let (s, _) = TcpSocket::connect(41000, IP, 80, 1000, 0);
+                s
+            } else {
+                TcpSocket::listen(41000, 2000)
+            };
+            let mut now = 0u64;
+            for _ in 0..24 {
+                match next() % 6 {
+                    0 => {
+                        let seq = (next() % 8000) as u32;
+                        let ack = (next() % 8000) as u32;
+                        let flags = (next() & 0x3f) as u8;
+                        let p = payloads[(next() % 4) as usize];
+                        // NS de entrada quando em Listen
+                        if s.state == State::Listen && flags & TCP_SYN != 0 {
+                            let seg = seg(seq, ack, TCP_SYN, p);
+                            let _ = s.on_syn(IP, &seg, now);
+                        } else {
+                            let _ = s.on_segment(&seg(seq, ack, flags, p), now);
+                        }
+                    }
+                    1 => {
+                        let p = payloads[(next() % 4) as usize];
+                        let _ = s.send(p, now);
+                    }
+                    2 => {
+                        let _ = s.close(now);
+                    }
+                    3 => {
+                        now += (next() % 3) * RTO_NS;
+                        let _ = s.poll(now);
+                    }
+                    4 => {
+                        let mut buf = [0u8; 64];
+                        let _ = s.take_rx(&mut buf);
+                    }
+                    _ => {
+                        let _ = s.window();
+                        let _ = s.inflight();
+                    }
+                }
+                // Invariantes: snd_una <= snd_nxt (janela); rx_len <= capacidade.
+                assert!(
+                    s.snd_nxt.wrapping_sub(s.snd_una) <= 0x8000_0000,
+                    "snd_una passou de snd_nxt"
+                );
+                assert!(s.rx_len <= RX_CAP, "rx buffer estourou");
+                let used = s.pend.iter().filter(|p| p.used).count();
+                assert!(used <= TX_SLOTS, "mais pendencias que slots");
+            }
+        }
+    }
 }

@@ -4,7 +4,7 @@
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz roadmap idl idl-check
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap idl idl-check
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 DURATION ?= 600
@@ -69,6 +69,11 @@ fuzz: image
 	mkdir -p build/logs
 	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-fuzz.img --disk build/nexo-fuzz-data.img --timeout $$(( $(DURATION) + 600 )) --log build/logs/fuzz.log; \
 	rc=$$?; if [ $$rc -eq 33 ]; then echo "[nexo] fuzz de $(DURATION)s: PASS"; else echo "[nexo] fuzz: FALHA (codigo $$rc)"; exit 1; fi
+
+# Captura de rede autorizada para diagnostico: sobe o Nexo com slirp, grava um pcap de TODOS
+# os pacotes da interface e imprime um resumo por protocolo/fluxo (tools/netcap).
+netcap:
+	tools/netcap
 
 # Regenera os protocolos tipados a partir de idl/*.idl (abi/proto/src/generated) e formata
 # (a saida do gerador so e estavel depois do rustfmt).

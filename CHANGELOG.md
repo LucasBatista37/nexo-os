@@ -148,6 +148,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo-netstack::firewall`: política de rede por perfil (`Profile`) — **negar por padrão**, até 8 regras (sub-rede IPv4/porta/protocolo) mais permissões `allow_dns`/`allow_listen`; `allows()` distingue "sem regra" de "protocolo/porta negados". 5 grupos de testes de host.
 - `nexo.sock` `open{chan, allow_dns, allow_listen, rule_*}` agora carrega o perfil da sessão-filha: o `netd` associa um `Profile` a cada cliente (o primeiro é irrestrito; os abertos por `open` são restritos pelo pai) e nega `tcp_connect`/`udp_send`/`tcp_listen`/`resolve` fora do perfil (erro remoto 7). `utest` (modo 15) comprova permitido/negado.
 
+### Adicionado (Fase 4, bloco 16 — captura autorizada e fuzz de estados de protocolo)
+- `nexo-netstack::tcp`: fuzz-lite da **máquina de estados** — 3000 conexões (ativas e passivas) recebem sequências aleatórias de segmentos/ações e o teste verifica que a máquina nunca entra em pânico e mantém invariantes (`snd_una ≤ snd_nxt`, buffer de recepção nos limites, pendências ≤ slots). Entra no fuzzing semanal do CI (`cargo test ... fuzz`).
+- `tools/netcap` + `make netcap`: sobe o Nexo com a rede user-mode, grava um pcap de todos os pacotes da interface (`run-qemu --net-dump`) e imprime um resumo legível por protocolo (ARP/ICMP/TCP/UDP/ICMPv6) e por fluxo; `--summary-only ARQ.pcap` resume um pcap existente. Captura sempre local ao QEMU do usuário e explicitamente pedida — nunca uma escuta silenciosa.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

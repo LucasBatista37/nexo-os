@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Captura de rede autorizada para diagnostico (Plano Mestre §Fase 4).
+
+Sobe o Nexo em QEMU com a rede user-mode (slirp) e grava TODOS os pacotes da interface em um
+pcap (via `run-qemu --net-dump`), depois imprime um resumo legivel por protocolo. A captura e
+sempre local ao QEMU do usuario e explicitamente pedida — nunca uma escuta silenciosa.
+
+Uso: tools/netcap [--cmdline "..."] [--out ARQ.pcap] [--timeout S] [--summary-only PCAP]
+"""
+import argparse
+import struct
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BUILD = ROOT / "build"
+
+
+def summarize(pcap: Path) -> int:
+    data = pcap.read_bytes()
+    if len(data) < 24 or data[:4] not in (b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4"):
+        print(f"erro: {pcap} nao parece um pcap classico", file=sys.stderr)
+        return 1
+    le = data[:4] == b"\xd4\xc3\xb2\xa1"
+    end = "<" if le else ">"
+    off = 24
+    counts = {"ARP": 0, "IPv4/ICMP": 0, "IPv4/TCP": 0, "IPv4/UDP": 0, "IPv6/ICMPv6": 0, "IPv6/outro": 0, "outro": 0}
+    flows = {}
+    total = 0
+    t0 = None
+    while off + 16 <= len(data):
+        _, _, incl, _ = struct.unpack_from(end + "IIII", data, off)
+        off += 16
+        p = data[off:off + incl]
+        off += incl
+        total += 1
+        if len(p) < 14:
+            counts["outro"] += 1
+            continue
+        et = p[12:14]
+        if et == b"\x08\x06":
+            counts["ARP"] += 1
+        elif et == b"\x08\x00" and len(p) >= 34:
+            proto = p[23]
+            ihl = (p[14] & 0xf) * 4
+            src = ".".join(map(str, p[26:30]))
+            dst = ".".join(map(str, p[30:34]))
+            if proto == 1:
+                counts["IPv4/ICMP"] += 1
+            elif proto == 6 and len(p) >= 14 + ihl + 4:
+                counts["IPv4/TCP"] += 1
+                sp, dp = struct.unpack_from(">HH", p, 14 + ihl)
+                flows[(src, sp, dst, dp, "tcp")] = flows.get((src, sp, dst, dp, "tcp"), 0) + 1
+            elif proto == 17 and len(p) >= 14 + ihl + 4:
+                counts["IPv4/UDP"] += 1
+                sp, dp = struct.unpack_from(">HH", p, 14 + ihl)
+                flows[(src, sp, dst, dp, "udp")] = flows.get((src, sp, dst, dp, "udp"), 0) + 1
+            else:
+                counts["outro"] += 1
+        elif et == b"\x86\xdd" and len(p) >= 54:
+            counts["IPv6/ICMPv6" if p[20] == 58 else "IPv6/outro"] += 1
+        else:
+            counts["outro"] += 1
+    print(f"captura: {pcap} ({total} pacotes)")
+    for k, v in counts.items():
+        if v:
+            print(f"  {k:14} {v}")
+    if flows:
+        print("fluxos (origem:porta -> destino:porta proto  pacotes):")
+        for (s, sp, d, dp, pr), n in sorted(flows.items(), key=lambda x: -x[1])[:12]:
+            print(f"  {s}:{sp} -> {d}:{dp} {pr}  {n}")
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--cmdline", default="net-test=1 exit", help="linha de comando do kernel")
+    ap.add_argument("--out", default=str(BUILD / "logs" / "netcap.pcap"))
+    ap.add_argument("--timeout", type=float, default=60.0)
+    ap.add_argument("--summary-only", default=None, help="apenas resume um pcap existente")
+    ap.add_argument("--no-build", action="store_true")
+    a = ap.parse_args()
+    if a.summary_only:
+        return summarize(Path(a.summary_only))
+    out = Path(a.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    image = BUILD / "nexo-netcap.img"
+    build = [sys.executable, ROOT / "tools" / "build-image", "--cmdline", a.cmdline, "--out", image]
+    if a.no_build:
+        build.insert(2, "--no-build")
+    subprocess.run(build, check=True, stdout=subprocess.DEVNULL)
+    print(f"[netcap] capturando (autorizada, local ao QEMU) em {out} ...")
+    subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
+                     "--disk", BUILD / "nexo-netcap-data.img", "--net", "--net-dump", out,
+                     "--timeout", str(a.timeout), "--log", BUILD / "logs" / "netcap.log"])
+    return summarize(out)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
