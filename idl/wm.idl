@@ -4,7 +4,7 @@
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes.
-protocol wm 1.1
+protocol wm 1.2
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -67,6 +67,24 @@ method 5 output {
 method 6 open {
     request {
         chan: handle,
+    }
+    response {
+    }
+}
+
+# Traz a superficie `id` para a frente (z acima de todas); recompoe.
+method 7 raise {
+    request {
+        id: u32,
+    }
+    response {
+    }
+}
+
+# Envia a superficie `id` para tras (z abaixo de todas); recompoe.
+method 8 lower {
+    request {
+        id: u32,
     }
     response {
     }

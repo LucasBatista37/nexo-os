@@ -294,6 +294,38 @@ fn serve(
                 reply_err(ch, wm::DestroyRequest::METHOD_ID, E_NO_SURFACE, out);
             }
         }
+        Request::Raise(rq) => {
+            if mine(surfaces, rq.id) {
+                let top = surfaces
+                    .iter()
+                    .filter(|s| s.used)
+                    .map(|s| s.z)
+                    .max()
+                    .unwrap_or(0);
+                surfaces[rq.id as usize].z = top.saturating_add(1);
+                recompose(surfaces, out_base, out_bytes);
+                let m = wm::RaiseResponse {}.encode_msg(out).unwrap_or(0);
+                let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+            } else {
+                reply_err(ch, wm::RaiseRequest::METHOD_ID, E_NO_SURFACE, out);
+            }
+        }
+        Request::Lower(rq) => {
+            if mine(surfaces, rq.id) {
+                let bottom = surfaces
+                    .iter()
+                    .filter(|s| s.used)
+                    .map(|s| s.z)
+                    .min()
+                    .unwrap_or(0);
+                surfaces[rq.id as usize].z = bottom.saturating_sub(1);
+                recompose(surfaces, out_base, out_bytes);
+                let m = wm::LowerResponse {}.encode_msg(out).unwrap_or(0);
+                let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+            } else {
+                reply_err(ch, wm::LowerRequest::METHOD_ID, E_NO_SURFACE, out);
+            }
+        }
         Request::Output(_) => {
             let client_out =
                 nexo_sys::handle_duplicate(out_mem, nexo_sys::abi::RIGHTS_MEMORY_DEFAULT)

@@ -64,6 +64,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         18 => shmem_consumer(),
         19 => wm_client(),
         20 => wm_multi_client(),
+        21 => wm_restack(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2271,6 +2272,82 @@ fn wm_multi_client() -> ! {
     }
     nexo_sys::log("utest: wm multi-cliente ok — duas sessoes compoem e o isolamento vale");
     nexo_sys::exit(0)
+}
+
+/// Modo 21: restacking de janelas. Duas superficies sobrepostas; alterna quem fica na frente com
+/// `raise`/`lower` e confere na saida composta que o pixel da sobreposicao muda de cor conforme o z.
+fn wm_restack() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    // A vermelha em (0,0), B verde em (4,4); overlap em (6,6). B comeca por cima (z=1).
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    wm_commit(ch, a);
+    let (b, b_base) = wm_create(ch, 4, 4, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0);
+    wm_commit(ch, b);
+
+    // Mapeia a saida uma vez (as paginas sao estaveis; cada recomposicao as reescreve).
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(480));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(481);
+    }
+    let (n, nh) = match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok(v) => v,
+        _ => nexo_sys::exit(482),
+    };
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(483));
+    if nh != 1 {
+        nexo_sys::exit(484);
+    }
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(485));
+    let stride = outp.w;
+
+    // B por cima -> verde
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(490);
+    }
+    // envia B para tras -> A (vermelho) por cima
+    wm_restack_op(ch, b, false);
+    if wm_px(ob, stride, 6, 6) != (255, 0, 0) {
+        nexo_sys::exit(491);
+    }
+    // traz B para frente -> verde de novo
+    wm_restack_op(ch, b, true);
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(492);
+    }
+    // traz A para frente -> vermelho
+    wm_restack_op(ch, a, true);
+    if wm_px(ob, stride, 6, 6) != (255, 0, 0) {
+        nexo_sys::exit(493);
+    }
+    nexo_sys::log("utest: wm restack ok — raise/lower reordenam o z e a saida acompanha");
+    nexo_sys::exit(0)
+}
+
+/// Envia `raise` (frente) ou `lower` (tras) para a superficie `id` e espera a resposta.
+fn wm_restack_op(ch: nexo_sys::Handle, id: u32, raise: bool) {
+    let mut out = [0u8; 64];
+    let mut buf = [0u8; 64];
+    let mut hs = [0u32; 1];
+    let m = if raise {
+        nexo_proto::wm::RaiseRequest { id }.encode_msg(&mut out)
+    } else {
+        nexo_proto::wm::LowerRequest { id }.encode_msg(&mut out)
+    }
+    .unwrap_or_else(|_| nexo_sys::exit(486));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(487);
+    }
+    if nexo_sys::channel_recv(ch, &mut buf, &mut hs).is_err() {
+        nexo_sys::exit(488);
+    }
 }
 
 /// Cria uma superficie no compositor e devolve (id, base mapeada da memoria compartilhada).
