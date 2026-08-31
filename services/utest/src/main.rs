@@ -83,6 +83,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         37 => wm_notify(),
         38 => wm_dnd(),
         39 => wm_a11y(),
+        40 => wm_shell(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2407,6 +2408,143 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 40: mecanismo da Faixa de Atividades. A sessao bootstrap (shell) enumera as janelas
+/// (surface_info: id/contexto/titulo) e ativa qualquer uma (activate: troca de contexto, traz a
+/// frente, foca); sessoes comuns sao negadas (erro 7).
+fn wm_shell() -> ! {
+    let s1: nexo_sys::Handle = 0; // sessao bootstrap = shell
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    let (a, a_base) = wm_create(s1, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    wm_commit(s1, a);
+    let (b, b_base) = wm_create(s1, 0, 0, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0);
+    wm_commit(s1, b);
+    let set_title = |ch: nexo_sys::Handle,
+                     id: u32,
+                     t: &[u8],
+                     out: &mut [u8; 256],
+                     buf: &mut [u8; 256],
+                     hs: &mut [u32; 1]| {
+        let mut rq = nexo_proto::wm::SetTitleRequest {
+            id,
+            title: [0; 32],
+            title_len: t.len() as u32,
+        };
+        rq.title[..t.len()].copy_from_slice(t);
+        let m = rq.encode_msg(out).unwrap_or_else(|_| nexo_sys::exit(1000));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(1001);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) if nexo_proto::wm::decode_set_title_response(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(1002),
+        }
+    };
+    set_title(s1, a, b"editor", &mut out, &mut buf, &mut hs);
+    set_title(s1, b, b"chat", &mut out, &mut buf, &mut hs);
+    // B vai para o contexto 1
+    let m = nexo_proto::wm::SetContextRequest { id: b, context: 1 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1003));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1004);
+    }
+    if nexo_sys::channel_recv(s1, &mut buf, &mut hs).is_err() {
+        nexo_sys::exit(1005);
+    }
+
+    // enumeracao pelo shell: acha "editor" (ctx 0) e "chat" (ctx 1)
+    let info = |ch: nexo_sys::Handle,
+                idx: u32,
+                out: &mut [u8; 256],
+                buf: &mut [u8; 256],
+                hs: &mut [u32; 1]|
+     -> Option<nexo_proto::wm::SurfaceInfoResponse> {
+        let m = nexo_proto::wm::SurfaceInfoRequest { index: idx }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(1006));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(1007);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_surface_info_response(&buf[..n]).ok(),
+            _ => nexo_sys::exit(1008),
+        }
+    };
+    let ia = info(s1, a, &mut out, &mut buf, &mut hs).unwrap_or_else(|| nexo_sys::exit(1009));
+    if ia.used != 1 || ia.context != 0 || ia.title() != b"editor" {
+        nexo_sys::exit(1010);
+    }
+    let ib = info(s1, b, &mut out, &mut buf, &mut hs).unwrap_or_else(|| nexo_sys::exit(1011));
+    if ib.used != 1 || ib.context != 1 || ib.title() != b"chat" {
+        nexo_sys::exit(1012);
+    }
+
+    // saida: ctx 0 ativo mostra A
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1013));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1014);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1015));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1016));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1017));
+    let stride = outp.w;
+    if wm_px(ob, stride, 4, 4) != (255, 0, 0) {
+        nexo_sys::exit(1018);
+    }
+
+    // activate(B): troca para o ctx 1, traz B a frente e foca — o clique da Faixa.
+    let m = nexo_proto::wm::ActivateRequest { id: b }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1019));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1020);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_activate_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1021),
+    }
+    if wm_px(ob, stride, 4, 4) != (0, 255, 0) {
+        nexo_sys::exit(1022);
+    }
+
+    // sessao comum: negada (erro 7)
+    let (s2, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1023));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1024));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1025);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1026),
+    }
+    if info(s2, 0, &mut out, &mut buf, &mut hs).is_some() {
+        nexo_sys::exit(1027);
+    }
+    let m = nexo_proto::wm::ActivateRequest { id: a }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1028));
+    if nexo_sys::channel_send(s2, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1029);
+    }
+    match nexo_sys::channel_recv(s2, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_activate_response(&buf[..n]).is_err() => {}
+        _ => nexo_sys::exit(1030),
+    }
+    nexo_sys::log("utest: wm shell ok — shell enumera e ativa janelas; sessao comum e negada");
     nexo_sys::exit(0)
 }
 

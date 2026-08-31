@@ -5,8 +5,9 @@
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
-# superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada).
-protocol wm 1.15
+# superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
+# 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
+protocol wm 1.16
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -298,6 +299,32 @@ method 28 drag_start {
 event 29 drop {
     surface: u32,
     data: bytes<256>,
+}
+
+# Enumeracao de janelas (privilegio do SHELL — a sessao bootstrap; erro 7 para as demais): devolve
+# o slot `index` (0..7). `used` = 0 significa slot vazio (os demais campos sao zero). Base da
+# Faixa de Atividades.
+method 33 surface_info {
+    request {
+        index: u32,
+    }
+    response {
+        used: u8,
+        id: u32,
+        context: u8,
+        display: u8,
+        title: bytes<32>,
+    }
+}
+
+# Ativa a janela `id` (privilegio do SHELL): troca para o contexto dela se preciso, traz para a
+# frente e da o foco (com evento a11y). E o clique na Faixa de Atividades.
+method 34 activate {
+    request {
+        id: u32,
+    }
+    response {
+    }
 }
 
 # Titulo da janela (mostrado por leitores de tela e, futuramente, pela Faixa de Atividades).

@@ -75,6 +75,7 @@ const E_NO_SURFACE: u32 = 3;
 const E_NO_SESSION: u32 = 4;
 const E_GRABBED: u32 = 5;
 const E_NO_INPUT_OWNER: u32 = 6;
+const E_NOT_SHELL: u32 = 7;
 
 struct Slot {
     used: bool,
@@ -830,6 +831,60 @@ fn serve(
                 recompose(surfaces, outs, fb, *active_ctx, attention);
             }
             let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::SurfaceInfo(rq) => {
+            // Privilégio do shell: só a sessão bootstrap (slot 0) enumera janelas.
+            if owner != 0 {
+                reply_err(ch, wm::SurfaceInfoRequest::METHOD_ID, E_NOT_SHELL, out);
+                return;
+            }
+            let i = rq.index as usize;
+            if i >= MAX_SURFACES {
+                reply_err(ch, wm::SurfaceInfoRequest::METHOD_ID, E_INVALID, out);
+                return;
+            }
+            let sl = &surfaces[i];
+            let mut resp = wm::SurfaceInfoResponse {
+                used: sl.used as u8,
+                id: if sl.used { i as u32 } else { 0 },
+                context: if sl.used { sl.context } else { 0 },
+                display: if sl.used { sl.display } else { 0 },
+                title: [0; 32],
+                title_len: 0,
+            };
+            if sl.used {
+                let (t, tl) = sl.title;
+                resp.title[..tl as usize].copy_from_slice(&t[..tl as usize]);
+                resp.title_len = tl;
+            }
+            let m = resp.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::Activate(rq) => {
+            if owner != 0 {
+                reply_err(ch, wm::ActivateRequest::METHOD_ID, E_NOT_SHELL, out);
+                return;
+            }
+            let i = rq.id as usize;
+            if i >= MAX_SURFACES || !surfaces[i].used {
+                reply_err(ch, wm::ActivateRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            // troca para o contexto da janela, traz à frente e dá o foco (com evento a11y)
+            *active_ctx = surfaces[i].context;
+            let top = surfaces
+                .iter()
+                .filter(|s| s.used)
+                .map(|s| s.z)
+                .max()
+                .unwrap_or(0);
+            surfaces[i].z = top.saturating_add(1);
+            *focused = Some(i);
+            let (t, tl) = surfaces[i].title;
+            a11y_emit(a11y, 1, i as u32, &t[..tl as usize]);
+            recompose(surfaces, outs, fb, *active_ctx, attention);
+            let m = wm::ActivateResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::SetTitle(rq) => {
