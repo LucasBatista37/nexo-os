@@ -78,6 +78,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         32 => wm_grab(),
         33 => wm_displays(),
         34 => greeter_driver(),
+        35 => wm_context(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2402,6 +2403,114 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 35: Contextos. Duas janelas no mesmo lugar; move B para o contexto 1 (some da tela, com
+/// o estado preservado), troca o contexto ativo (a saida e o foco acompanham) e confere que
+/// cliques/teclas ignoram janelas de contextos ocultos.
+fn wm_context() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0); // A vermelha (ctx 0, foco na criacao)
+    wm_commit(ch, a);
+    let (b, b_base) = wm_create(ch, 0, 0, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0); // B verde por cima (ctx 0)
+    wm_commit(ch, b);
+
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(800));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(801);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(802));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(803));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(804));
+    let stride = outp.w;
+    if wm_px(ob, stride, 4, 4) != (0, 255, 0) {
+        nexo_sys::exit(805); // B por cima no ctx 0
+    }
+
+    // helper de RPCs vazios
+    macro_rules! rpc_ok {
+        ($req:expr, $dec:path, $code:expr) => {{
+            let m = $req
+                .encode_msg(&mut out)
+                .unwrap_or_else(|_| nexo_sys::exit($code));
+            if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit($code + 1);
+            }
+            match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+                Ok((n, _)) if $dec(&buf[..n]).is_ok() => {}
+                _ => nexo_sys::exit($code + 2),
+            }
+        }};
+    }
+
+    // B vai para o contexto 1: some da tela (A aparece), estado preservado.
+    rpc_ok!(
+        nexo_proto::wm::SetContextRequest { id: b, context: 1 },
+        nexo_proto::wm::decode_set_context_response,
+        810
+    );
+    if wm_px(ob, stride, 4, 4) != (255, 0, 0) {
+        nexo_sys::exit(813);
+    }
+
+    // Ativa o contexto 1: so B aparece; o foco vai para B.
+    rpc_ok!(
+        nexo_proto::wm::SwitchContextRequest { context: 1 },
+        nexo_proto::wm::decode_switch_context_response,
+        814
+    );
+    if wm_px(ob, stride, 4, 4) != (0, 255, 0) {
+        nexo_sys::exit(817);
+    }
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(818));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(819));
+    if nexo_sys::channel_send(ch, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(820);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(821),
+    }
+    wm_key(inj, 30, 1);
+    let ev = wm_recv_key(ch, &mut buf, &mut hs);
+    if ev.surface != b || ev.code != 30 {
+        nexo_sys::exit(822); // foco acompanhou a troca de contexto
+    }
+    // clique em (4,4): so o contexto ativo conta -> B (A oculta nao e clicavel)
+    wm_click(inj, 4, 4);
+    wm_key(inj, 48, 1);
+    let ev = wm_recv_key(ch, &mut buf, &mut hs);
+    if ev.surface != b || ev.code != 48 {
+        nexo_sys::exit(823);
+    }
+
+    // Volta ao contexto 0: A reaparece intacta e recebe o foco.
+    rpc_ok!(
+        nexo_proto::wm::SwitchContextRequest { context: 0 },
+        nexo_proto::wm::decode_switch_context_response,
+        824
+    );
+    if wm_px(ob, stride, 4, 4) != (255, 0, 0) {
+        nexo_sys::exit(827);
+    }
+    wm_key(inj, 49, 1);
+    let ev = wm_recv_key(ch, &mut buf, &mut hs);
+    if ev.surface != a || ev.code != 49 {
+        nexo_sys::exit(828);
+    }
+    nexo_sys::log("utest: wm contextos ok — troca mostra so o contexto ativo e move o foco");
     nexo_sys::exit(0)
 }
 

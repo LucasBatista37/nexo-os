@@ -87,6 +87,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wm_grab", test_user_wm_grab),
     ("user_wm_displays", test_user_wm_displays),
     ("user_greeter", test_user_greeter),
+    ("user_wm_context", test_user_wm_context),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2363,6 +2364,38 @@ fn test_user_greeter() -> TestResult {
     let frames = settled_free_frames(frames0, 8);
     check!(dc == 0, "driver saiu com {dc}");
     check!(gc == 0, "greeter saiu com {gc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Contextos (protótipo): só as janelas do contexto ativo são compostas e recebem entrada; a
+/// troca preserva o estado das ocultas e move o foco para a janela de maior z do novo contexto.
+fn test_user_wm_context() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(a),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let hclient = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 35, hclient).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, client));
+    let frames = settled_free_frames(frames0, 8);
+    check!(cc == 0, "cliente saiu com {cc}");
     check!(wc == 0, "wm saiu com {wc}");
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");

@@ -5,7 +5,7 @@
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra superficie.
-protocol wm 1.10
+protocol wm 1.11
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -175,6 +175,29 @@ method 16 grab {
 method 17 ungrab {
     request {
         id: u32,
+    }
+    response {
+    }
+}
+
+# Contextos (prototipo do modelo do plano): grupos de janelas. So as janelas do contexto ATIVO
+# sao compostas e recebem cliques/atalhos; as dos outros ficam ocultas com o estado preservado
+# (buffers intactos). Superficies nascem no contexto 0. Ha 4 contextos (0..3).
+method 19 set_context {
+    request {
+        id: u32,
+        context: u8,
+    }
+    response {
+    }
+}
+
+# Ativa o contexto `context` (erro 1 se nao existe): recompoe mostrando so as janelas dele e move
+# o foco para a janela de maior z do contexto (ou nenhuma). A captura (grab) sobrevive a troca —
+# uma tela segura nao pode ser contornada trocando de contexto.
+method 20 switch_context {
+    request {
+        context: u8,
     }
     response {
     }
