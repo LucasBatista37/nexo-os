@@ -4,7 +4,7 @@
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes.
-protocol wm 1.3
+protocol wm 1.4
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -100,5 +100,17 @@ method 9 resize {
     }
     response {
         mem: handle,
+    }
+}
+
+# Registra a fonte de entrada (mouse/teclado): transfere a ponta de leitura de um canal por onde
+# chegam eventos evdev crus (8 bytes cada: [type u16][code u16][value u32]). Em producao o servico
+# de entrada alimenta esse canal; o wm move o ponteiro (EV_ABS) e, no clique (BTN_LEFT), traz para
+# a frente a superficie sob o ponteiro (foco por clique).
+method 10 set_input {
+    request {
+        chan: handle,
+    }
+    response {
     }
 }

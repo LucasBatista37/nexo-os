@@ -21,6 +21,13 @@ const OUT_H: i32 = 48;
 const MAX_SURFACES: usize = 8;
 const MAX_CLIENTS: usize = 8;
 
+/// Códigos evdev usados pela fonte de entrada (formato Linux input).
+const EV_KEY: u16 = 1;
+const EV_ABS: u16 = 3;
+const ABS_X: u16 = 0;
+const ABS_Y: u16 = 1;
+const BTN_LEFT: u16 = 0x110;
+
 /// Erros remotos do protocolo `nexo.wm`.
 const E_INVALID: u32 = 1;
 const E_NO_RES: u32 = 2;
@@ -128,6 +135,11 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         MAX_CLIENTS
     );
 
+    // Fonte de entrada (mouse/teclado) e estado do ponteiro/foco.
+    let mut input_ch: Option<Handle> = None;
+    let mut px: i32 = 0;
+    let mut py: i32 = 0;
+
     let mut buf = [0u8; 512];
     let mut out = [0u8; 512];
     let mut hbuf = [0u32; 1];
@@ -181,6 +193,15 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
                 continue;
             }
+            // `set_input` registra a fonte de entrada (mouse/teclado).
+            if let Request::SetInput(rq) = &request {
+                if let Some(old) = input_ch.replace(rq.chan) {
+                    let _ = nexo_sys::handle_close(old);
+                }
+                let m = wm::SetInputResponse {}.encode_msg(&mut out).unwrap_or(0);
+                let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+                continue;
+            }
             serve(
                 request,
                 slot,
@@ -192,11 +213,67 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 &mut out,
             );
         }
+        // Processa eventos de entrada (evdev crus, 8 bytes cada).
+        if let Some(ich) = input_ch {
+            match nexo_sys::channel_try_recv(ich, &mut buf, &mut hbuf) {
+                Ok((n, _)) => {
+                    worked = true;
+                    let mut off = 0;
+                    let mut click = false;
+                    while off + 8 <= n {
+                        let ty = u16::from_le_bytes([buf[off], buf[off + 1]]);
+                        let code = u16::from_le_bytes([buf[off + 2], buf[off + 3]]);
+                        let value = u32::from_le_bytes([
+                            buf[off + 4],
+                            buf[off + 5],
+                            buf[off + 6],
+                            buf[off + 7],
+                        ]);
+                        match (ty, code) {
+                            (EV_ABS, ABS_X) => px = value as i32,
+                            (EV_ABS, ABS_Y) => py = value as i32,
+                            (EV_KEY, BTN_LEFT) if value == 1 => click = true,
+                            _ => {}
+                        }
+                        off += 8;
+                    }
+                    if click {
+                        // foco por clique: traz para a frente a superfície sob o ponteiro.
+                        let hit = surfaces
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, s)| s.used && s.rect.contains(px, py))
+                            .max_by_key(|(_, s)| s.z)
+                            .map(|(i, _)| i);
+                        if let Some(i) = hit {
+                            let top = surfaces
+                                .iter()
+                                .filter(|s| s.used)
+                                .map(|s| s.z)
+                                .max()
+                                .unwrap_or(0);
+                            surfaces[i].z = top.saturating_add(1);
+                            recompose(&surfaces, out_base, out_bytes);
+                        }
+                    }
+                }
+                Err(Status::WouldBlock) => {}
+                Err(Status::PeerClosed) => {
+                    let _ = nexo_sys::handle_close(ich);
+                    input_ch = None;
+                }
+                Err(_) => fail(62, "recv entrada"),
+            }
+        }
         if !worked {
-            let mut waits = [0 as Handle; MAX_CLIENTS];
+            let mut waits = [0 as Handle; MAX_CLIENTS + 1];
             let mut wn = 0;
             for s in sessions.iter().flatten() {
                 waits[wn] = *s;
+                wn += 1;
+            }
+            if let Some(ich) = input_ch {
+                waits[wn] = ich;
                 wn += 1;
             }
             let _ = nexo_sys::channel_wait_any(&waits[..wn]);
@@ -381,7 +458,7 @@ fn serve(
                 fail(58, "send output");
             }
         }
-        Request::Open(_) => {} // tratado no laço principal
+        Request::Open(_) | Request::SetInput(_) => {} // tratados no laço principal
     }
 }
 

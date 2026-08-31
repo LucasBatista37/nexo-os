@@ -66,6 +66,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         20 => wm_multi_client(),
         21 => wm_restack(),
         22 => wm_resize(),
+        23 => wm_input(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2331,6 +2332,96 @@ fn wm_restack() -> ! {
     }
     nexo_sys::log("utest: wm restack ok — raise/lower reordenam o z e a saida acompanha");
     nexo_sys::exit(0)
+}
+
+/// Modo 23: foco por clique. Cria duas superficies sobrepostas, registra uma fonte de entrada
+/// (canal de eventos evdev) e injeta cliques: a superficie sob o ponteiro vem para a frente, o que
+/// e observavel na saida composta (o pixel da sobreposicao muda de cor). Usa polling porque a
+/// entrada e assincrona (o wm processa o evento no seu proprio laco).
+fn wm_input() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0); // A vermelha
+    wm_commit(ch, a);
+    let (b, b_base) = wm_create(ch, 4, 4, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0); // B verde (por cima)
+    wm_commit(ch, b);
+
+    // Mapeia a saida.
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(530));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(531);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(532));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(533));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(534));
+    let stride = outp.w;
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(535); // B por cima no inicio
+    }
+
+    // Registra a fonte de entrada: transfere a ponta de leitura de um canal novo ao wm.
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(536));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(537));
+    if nexo_sys::channel_send(ch, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(538);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(539),
+    }
+
+    // Clique sobre A (2,2): A vem para a frente -> (6,6) fica vermelho.
+    wm_click(inj, 2, 2);
+    wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 540);
+    // Clique sobre B (10,10): B vem para a frente -> (6,6) fica verde.
+    wm_click(inj, 10, 10);
+    wm_wait_px(ob, stride, 6, 6, (0, 255, 0), 541);
+    // Clique sobre A de novo (2,2): -> vermelho.
+    wm_click(inj, 2, 2);
+    wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
+
+    nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Injeta um clique em (x,y): eventos evdev ABS_X, ABS_Y e BTN_LEFT (press) num canal de entrada.
+fn wm_click(inj: nexo_sys::Handle, x: i32, y: i32) {
+    let mut ev = [0u8; 24];
+    let put = |ev: &mut [u8], off: usize, ty: u16, code: u16, value: u32| {
+        ev[off..off + 2].copy_from_slice(&ty.to_le_bytes());
+        ev[off + 2..off + 4].copy_from_slice(&code.to_le_bytes());
+        ev[off + 4..off + 8].copy_from_slice(&value.to_le_bytes());
+    };
+    put(&mut ev, 0, 3, 0, x as u32); // EV_ABS, ABS_X
+    put(&mut ev, 8, 3, 1, y as u32); // EV_ABS, ABS_Y
+    put(&mut ev, 16, 1, 0x110, 1); // EV_KEY, BTN_LEFT, press
+    if nexo_sys::channel_send(inj, &ev, &[]) != Status::Ok {
+        nexo_sys::exit(545);
+    }
+}
+
+/// Espera (com timeout) o pixel (x,y) da saida virar `want`; sai com `code` se estourar.
+fn wm_wait_px(base: u64, stride: i32, x: i32, y: i32, want: (u8, u8, u8), code: i64) {
+    let start = nexo_sys::time_now();
+    loop {
+        if wm_px(base, stride, x, y) == want {
+            return;
+        }
+        if nexo_sys::time_now() - start > 5_000_000_000 {
+            nexo_sys::exit(code);
+        }
+        nexo_sys::sleep_ns(2_000_000);
+    }
 }
 
 /// Modo 22: redimensionamento de superficie. Cria uma superficie pequena (8x8), confere que uma

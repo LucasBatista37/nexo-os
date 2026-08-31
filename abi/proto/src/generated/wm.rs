@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.wm` v1.3 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
+//! Protocolo tipado `nexo.wm` v1.4 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x1b0edd71;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 3;
+pub const VERSION_MINOR: u16 = 4;
 
 /// `nexo.wm.create_surface` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -958,6 +958,88 @@ impl ResizeResponse {
     }
 }
 
+/// `nexo.wm.set_input` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetInputRequest {
+    /// Handle `chan` (viaja no vetor de handles, nunca no payload).
+    pub chan: u32,
+}
+
+impl SetInputRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 10;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 1;
+    /// Handles na ordem de declaracao (para passar ao `channel_send`).
+    pub fn handles(&self) -> [u32; 1] {
+        [self.chan]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        let chan: u32 = 0; // injetado por decode_*_with_handles
+        Ok(SetInputRequest { chan })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.set_input` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetInputResponse {}
+
+impl SetInputResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 10;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(SetInputResponse {})
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// Pedido decodificado.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // Sem alocador no espaço de usuário: variantes grandes (buffers embutidos) são inerentes.
@@ -981,6 +1063,8 @@ pub enum Request {
     Lower(LowerRequest),
     /// `resize`.
     Resize(ResizeRequest),
+    /// `set_input`.
+    SetInput(SetInputRequest),
 }
 
 /// Decodifica um pedido injetando os handles recebidos (ordem de declaracao por metodo).
@@ -1033,6 +1117,12 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
                 return Err(ProtoError::Length);
             }
         }
+        Request::SetInput(rq) => {
+            if hs.len() != 1 {
+                return Err(ProtoError::Length);
+            }
+            rq.chan = hs[0];
+        }
     }
     Ok(r)
 }
@@ -1062,6 +1152,7 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
         7 => Ok(Request::Raise(RaiseRequest::decode_payload(p)?)),
         8 => Ok(Request::Lower(LowerRequest::decode_payload(p)?)),
         9 => Ok(Request::Resize(ResizeRequest::decode_payload(p)?)),
+        10 => Ok(Request::SetInput(SetInputRequest::decode_payload(p)?)),
         _ => Err(ProtoError::Method),
     }
 }
@@ -1307,6 +1398,33 @@ pub fn decode_resize_response(msg: &[u8]) -> Result<ResizeResponse, ProtoError> 
         return Err(ProtoError::Flags);
     }
     ResizeResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `set_input` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_set_input_response(msg: &[u8]) -> Result<SetInputResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 10 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    SetInputResponse::decode_payload(p)
 }
 
 /// Codifica uma resposta de erro para o metodo `method_id`.
