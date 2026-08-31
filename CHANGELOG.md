@@ -123,6 +123,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Cenário `net`, fase 4: um GET HTTP/1.0 completo pela API `nexo.sock` (conectar, enviar o pedido, juntar a resposta em vários `tcp_recv`, validar `HTTP/1.0 200` + corpo, fechar) contra um servidor HTTP no host — base do item "cliente HTTP para atualizações".
 - Capturas de rede para diagnóstico: `run-qemu --net-dump ARQ.pcap` (filter-dump do QEMU); o cenário `net` grava `build/logs/net.pcap`.
 
+### Adicionado (Fase 4, bloco 10 — espera múltipla de canais)
+- `channel_wait_any` (syscall 26): bloqueia até algum de até 16 canais ter mensagem ou par fechado, devolvendo o índice (acordado pelo `send`/fecho; tique de cobertura de 10 ms para a janela de registro — objetos de evento de verdade virão depois). `readable()`/`register_waiter()` no kernel, wrapper no SDK, documentação na ABI.
+- Teste `user_wait_any` (utest modo 16): pronto imediato, ordem dos índices, par fechado, e os erros (`InvalidArgs`, `BadHandle`); o fuzzer de syscalls passa a pular a 26 (bloqueante por natureza). 40 testes no boot.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

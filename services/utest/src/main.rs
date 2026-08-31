@@ -59,6 +59,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         13 => input_client(),
         14 => net_client(param as u16),
         15 => sock_client(param as u16, (param >> 16) as u16, (param >> 32) as u16),
+        16 => wait_any_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -256,7 +257,11 @@ fn syscall_fuzz(seed: u64) -> ! {
             _ => rng.next() % (SYS_MAX + 1),
         };
         // Bloqueantes/terminais ficam de fora: exit, recv sem par, wait.
-        if n == SYS_EXIT || n == SYS_CHANNEL_RECV || n == SYS_PROCESS_WAIT {
+        if n == SYS_EXIT
+            || n == SYS_CHANNEL_RECV
+            || n == SYS_PROCESS_WAIT
+            || n == SYS_CHANNEL_WAIT_ANY
+        {
             continue;
         }
         let arg = |rng: &mut Rng| -> u64 {
@@ -1887,5 +1892,56 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
             rlen
         );
     }
+    nexo_sys::exit(0)
+}
+
+/// Modo 16: espera múltipla (`channel_wait_any`) — pronto imediato, mensagem chegando e
+/// par fechado, tudo dentro de um só processo (os dois lados dos canais são nossos).
+fn wait_any_test() -> ! {
+    let (a1, b1) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(400));
+    let (a2, b2) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(401));
+    // 1. mensagem ja na fila do canal 2 -> indice 1
+    if nexo_sys::channel_send(b2, b"oi", &[]) != Status::Ok {
+        nexo_sys::exit(402);
+    }
+    match nexo_sys::channel_wait_any(&[a1, a2]) {
+        Ok(1) => {}
+        r => {
+            nexo_rt::log!("utest: wait_any pronto-imediato devolveu {:?}", r);
+            nexo_sys::exit(403)
+        }
+    }
+    let mut buf = [0u8; 16];
+    let mut hs = [0u32; 1];
+    let _ = nexo_sys::channel_recv(a2, &mut buf, &mut hs);
+    // 2. canal 1 na frente do array -> indice 0
+    if nexo_sys::channel_send(b1, b"outra", &[]) != Status::Ok {
+        nexo_sys::exit(404);
+    }
+    match nexo_sys::channel_wait_any(&[a1, a2]) {
+        Ok(0) => {}
+        r => {
+            nexo_rt::log!("utest: wait_any indice 0 devolveu {:?}", r);
+            nexo_sys::exit(405)
+        }
+    }
+    let _ = nexo_sys::channel_recv(a1, &mut buf, &mut hs);
+    // 3. par fechado conta como pronto
+    let _ = nexo_sys::handle_close(b2);
+    match nexo_sys::channel_wait_any(&[a1, a2]) {
+        Ok(1) => {}
+        r => {
+            nexo_rt::log!("utest: wait_any par-fechado devolveu {:?}", r);
+            nexo_sys::exit(406)
+        }
+    }
+    // 4. erros: array vazio e handle que nao e canal
+    if nexo_sys::channel_wait_any(&[]) != Err(Status::InvalidArgs) {
+        nexo_sys::exit(407);
+    }
+    if nexo_sys::channel_wait_any(&[9999]) != Err(Status::BadHandle) {
+        nexo_sys::exit(408);
+    }
+    nexo_sys::log("utest: wait_any ok");
     nexo_sys::exit(0)
 }

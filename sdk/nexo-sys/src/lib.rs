@@ -353,6 +353,20 @@ pub fn channel_try_recv(
     }
 }
 
+/// Espera até algum dos canais ter mensagem (ou par fechado); devolve o índice do pronto.
+pub fn channel_wait_any(handles: &[Handle]) -> Result<usize, Status> {
+    // SAFETY: ponteiro e tamanho vêm de uma slice válida.
+    let (st, v) = unsafe {
+        raw(
+            abi::SYS_CHANNEL_WAIT_ANY,
+            handles.as_ptr() as u64,
+            handles.len() as u64,
+            0,
+        )
+    };
+    if st.is_ok() { Ok(v as usize) } else { Err(st) }
+}
+
 /// Deriva uma concessão restrita à função PCI `bdf` (exige `ADMIN` na concessão raiz).
 pub fn device_open(root: Handle, bdf: u16) -> Result<Handle, Status> {
     // SAFETY: sem ponteiros.

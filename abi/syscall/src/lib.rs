@@ -66,8 +66,13 @@ pub const SYS_DEVICE_OPEN: u64 = 24;
 /// Como [`SYS_CHANNEL_RECV`], mas devolve [`Status::WouldBlock`] em vez de bloquear quando
 /// não há mensagem (e o par continua aberto).
 pub const SYS_CHANNEL_TRY_RECV: u64 = 25;
+/// Espera múltipla: bloqueia até algum dos canais em `a0` (array de `a1` handles, ≤ 16) ter
+/// mensagem ou par fechado; `RDX` = índice do primeiro pronto. Exige `READ` em todos.
+pub const SYS_CHANNEL_WAIT_ANY: u64 = 26;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 25;
+pub const SYS_MAX: u64 = 26;
+/// Máximo de handles em uma espera múltipla.
+pub const WAIT_ANY_MAX: usize = 16;
 
 /// Tipo de objeto: concessão de acesso a dispositivos.
 pub const KIND_DEVICE: u32 = 3;
@@ -312,6 +317,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_IRQ_WAIT => "irq_wait",
         SYS_DEVICE_OPEN => "device_open",
         SYS_CHANNEL_TRY_RECV => "channel_try_recv",
+        SYS_CHANNEL_WAIT_ANY => "channel_wait_any",
         _ => "?",
     }
 }

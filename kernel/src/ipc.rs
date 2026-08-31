@@ -350,6 +350,18 @@ impl ChannelEnd {
     }
 
     /// Recebe (bloqueante). `Err(PeerClosed)` quando o par fechou e a fila está vazia.
+    /// `true` se um `recv` não bloquearia (mensagem na fila ou par fechado).
+    pub fn readable(&self) -> bool {
+        let g = self.inner.lock();
+        !g.queues[self.side].is_empty() || g.closed[1 - self.side]
+    }
+
+    /// Registra `t` para ser acordada quando este lado receber mensagem (ou o par fechar).
+    /// Entradas obsoletas são drenadas no próximo `send`/`close` (acordar a mais é inócuo).
+    pub fn register_waiter(&self, t: crate::sched::ThreadId) {
+        self.inner.lock().waiters[self.side].push(t);
+    }
+
     /// Como [`ChannelEnd::recv`], mas devolve `WouldBlock` em vez de bloquear.
     pub fn try_recv(&self) -> Result<Message, Status> {
         let mut g = self.inner.lock();

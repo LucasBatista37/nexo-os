@@ -70,6 +70,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_fs", test_user_fs),
     ("user_devmgr", test_user_devmgr),
     ("user_vfs", test_user_vfs),
+    ("user_wait_any", test_user_wait_any),
     ("symbols", test_symbols),
 ];
 
@@ -1667,6 +1668,13 @@ pub fn fuzz_mode(secs: u64) -> bool {
         kinfo!("[FUZZ] PASS rodadas={rounds} syscalls={}", rounds * 20_000);
     }
     ok
+}
+
+/// Espera múltipla de canais exercitada de um processo de usuário (utest modo 16).
+fn test_user_wait_any() -> TestResult {
+    let code = run_utest(16)?;
+    check!(code == 0, "wait_any saiu com {code}");
+    Ok(())
 }
 
 /// `net-test=1` na linha de comando: netdev + utest(14) trocando ARP com o slirp do QEMU.
