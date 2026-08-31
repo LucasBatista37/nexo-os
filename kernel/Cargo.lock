@@ -30,6 +30,7 @@ name = "nexo-gfx"
 version = "0.0.1"
 dependencies = [
  "nexo-boot-abi",
+ "nexo-font",
 ]
 
 [[package]]

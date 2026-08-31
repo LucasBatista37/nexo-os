@@ -1796,6 +1796,19 @@ fn test_gfx() -> TestResult {
         "clip nao respeitado (fora)"
     );
     check!(s.get(6, 6) == Color::WHITE, "clip nao respeitado (dentro)");
+    // rasterizacao de texto: um glifo acende pixels
+    s.reset_clip();
+    s.clear(Color::BLACK);
+    nexo_gfx::text::draw_glyph(&mut s, 'A', 0, 0, 1, Color::WHITE, None);
+    let lit = (0..8)
+        .flat_map(|y| (0..8i32).map(move |x| (x, y)))
+        .filter(|&(x, y)| s.get(x, y) == Color::WHITE)
+        .count();
+    check!(lit > 0, "texto nao desenhou");
+    check!(
+        nexo_gfx::text::text_width("ok", 2) == 32,
+        "largura de texto incorreta"
+    );
     Ok(())
 }
 

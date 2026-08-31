@@ -8,6 +8,9 @@
 
 pub use nexo_boot_abi::PixelFormat;
 
+/// Rasterização de texto sobre uma [`Surface`] com a fonte 8×8 (ver `text.rs`).
+pub mod text;
+
 /// Cor RGBA de 8 bits por canal (alfa direto, não pré-multiplicado).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Color {

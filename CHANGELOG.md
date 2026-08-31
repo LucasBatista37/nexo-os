@@ -160,6 +160,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `libraries/gfx` (`nexo-gfx`): renderizador 2D `no_std`/`forbid(unsafe_code)` sobre uma `Surface` (buffer do chamador com largura/altura/stride/formato `Rgbx8888`/`Bgrx8888`) — `Color` RGBA, `Rect` com interseção, `put`/`get`, **composição alfa src-over** (`blend`), `fill_rect`/`stroke_rect`/`clear`, `blit` entre superfícies (converte formatos) e **retângulo de clipping**. 7 grupos de testes de host (ordem de bytes por formato, alfa, clipping, stride, blit).
 - Auto-teste `gfx` no boot: renderiza numa superfície de rascunho no heap e confere pixels — o renderizador roda no ambiente `no_std`/alloc do kernel. 41 testes no boot.
 
+### Adicionado (Fase 5, bloco 2 — rasterização de texto e fallback de fontes)
+- `nexo-gfx::text`: rasteriza strings sobre uma `Surface` com a fonte bitmap 8×8 (`nexo-font`) — `draw_glyph`/`draw_text` (escala inteira, cor de frente, fundo opcional, `\n` quebra linha), `text_width`/`cell_width`/`cell_height`; glifos fora da faixa imprimível caem no glifo de **fallback** da fonte. 4 grupos de testes de host (dimensões, desenho + fundo, quebra de linha, fallback).
+- O auto-teste `gfx` do boot passou a desenhar um glifo e conferir a largura de texto.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.
