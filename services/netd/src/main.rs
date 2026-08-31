@@ -31,19 +31,7 @@ const UDP_SOCKS: usize = 4;
 const UDP_QUEUE: usize = 4;
 const UDP_MAX: usize = 1400;
 const TCP_CONNS: usize = 4;
-const RX_MAX: usize = 4096;
 const DNS_CACHE: usize = 8;
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum TcpState {
-    Closed,
-    SynSent,
-    Established,
-    FinWait1,
-    FinWait2,
-    CloseWait,
-    LastAck,
-}
 
 struct UdpSock {
     used: bool,
@@ -52,25 +40,12 @@ struct UdpSock {
     qlen: usize,
 }
 
-struct TcpConn {
-    state: TcpState,
-    reset: bool,
-    peer_closed: bool,
-    remote_ip: [u8; 4],
-    remote_port: u16,
-    local_port: u16,
-    snd_nxt: u32,
-    rcv_nxt: u32,
-    rx: [u8; RX_MAX],
-    rx_len: usize,
-}
-
 struct Netd {
     mac: [u8; 6],
     gw_mac: [u8; 6],
     lease: nsk::DhcpLease,
     udp: [UdpSock; UDP_SOCKS],
-    tcp: [TcpConn; TCP_CONNS],
+    tcp: [Option<nsk::tcp::TcpSocket>; TCP_CONNS],
     dns: [([u8; 64], u8, [u8; 4]); DNS_CACHE],
     dns_len: usize,
 }
@@ -93,20 +68,7 @@ static mut NETD: Netd = Netd {
             qlen: 0,
         }
     }; UDP_SOCKS],
-    tcp: [const {
-        TcpConn {
-            state: TcpState::Closed,
-            reset: false,
-            peer_closed: false,
-            remote_ip: [0; 4],
-            remote_port: 0,
-            local_port: 0,
-            snd_nxt: 0,
-            rcv_nxt: 0,
-            rx: [0; RX_MAX],
-            rx_len: 0,
-        }
-    }; TCP_CONNS],
+    tcp: [const { None }; TCP_CONNS],
     dns: [([0; 64], 0, [0; 4]); DNS_CACHE],
     dns_len: 0,
 };
@@ -162,107 +124,69 @@ fn net_recv(frame: &mut [u8; 1514]) -> usize {
     }
 }
 
-// ---- maquina de estados TCP (docs/spec/tcp-states.md) ----
+// ---- TCP: a maquina de estados vive em nexo_netstack::tcp (testavel no host);
+// aqui so montamos/enviamos os quadros e bombeamos o temporizador de retransmissao ----
 
-fn tcp_emit(conn: &TcpConn, flags: u8, payload: &[u8]) {
+/// Emite um segmento de `sock` (payload é copiado antes para evitar reemprestimos).
+fn emit_seg(sock: &nsk::tcp::TcpSocket, seg: nsk::tcp::TxSeg) {
     let st = netd();
+    let (mac, gw, ip) = (st.mac, st.gw_mac, st.lease.ip);
+    let mut payload = [0u8; nsk::tcp::MSS];
+    let pl = seg.payload_len.min(nsk::tcp::MSS);
+    payload[..pl].copy_from_slice(&sock.tx_payload()[..pl]);
     let mut frame = [0u8; 1514];
     let n = nsk::tcp_write(
         &mut frame,
-        st.mac,
-        st.gw_mac,
-        st.lease.ip,
-        conn.remote_ip,
-        conn.local_port,
-        conn.remote_port,
-        conn.snd_nxt,
-        conn.rcv_nxt,
-        flags,
-        (RX_MAX - conn.rx_len) as u16,
-        payload,
+        mac,
+        gw,
+        ip,
+        sock.remote_ip,
+        sock.local_port,
+        sock.remote_port,
+        seg.seq,
+        seg.ack,
+        seg.flags,
+        sock.window(),
+        &payload[..pl],
     );
     net_send(&frame[..n]);
 }
 
 fn handle_tcp(frame: &[u8]) {
+    let now = nexo_sys::time_now();
     let st = netd();
-    for c in st.tcp.iter_mut() {
-        if c.state == TcpState::Closed {
-            continue;
-        }
-        let Some(seg) = nsk::tcp_parse(frame, c.remote_ip, c.local_port) else {
+    for slot in st.tcp.iter_mut() {
+        let Some(sock) = slot else { continue };
+        let Some(seg) = nsk::tcp_parse(frame, sock.remote_ip, sock.local_port) else {
             continue;
         };
-        if seg.src_port != c.remote_port {
+        if seg.src_port != sock.remote_port {
             continue;
         }
-        if seg.flags & nsk::TCP_RST != 0 {
-            c.state = TcpState::Closed;
-            c.reset = true;
-            return;
-        }
-        match c.state {
-            TcpState::SynSent => {
-                if seg.flags & (nsk::TCP_SYN | nsk::TCP_ACK) == nsk::TCP_SYN | nsk::TCP_ACK
-                    && seg.ack == c.snd_nxt
-                {
-                    c.rcv_nxt = seg.seq.wrapping_add(1);
-                    c.state = TcpState::Established;
-                    tcp_emit(c, nsk::TCP_ACK, b"");
-                }
-            }
-            TcpState::Established | TcpState::FinWait1 | TcpState::FinWait2 => {
-                let mut advanced = false;
-                if !seg.payload.is_empty() && seg.seq == c.rcv_nxt {
-                    let take = seg.payload.len().min(RX_MAX - c.rx_len);
-                    if take == seg.payload.len() {
-                        c.rx[c.rx_len..c.rx_len + take].copy_from_slice(seg.payload);
-                        c.rx_len += take;
-                        c.rcv_nxt = c.rcv_nxt.wrapping_add(take as u32);
-                        advanced = true;
-                    }
-                    // sem espaço: não confirma; o par retransmite (sem retransmissão própria)
-                }
-                if seg.flags & nsk::TCP_FIN != 0
-                    && seg.seq.wrapping_add(seg.payload.len() as u32) == c.rcv_nxt
-                {
-                    c.rcv_nxt = c.rcv_nxt.wrapping_add(1);
-                    c.peer_closed = true;
-                    advanced = true;
-                    c.state = match c.state {
-                        TcpState::Established => TcpState::CloseWait,
-                        // FIN do par depois (ou junto) do ACK do nosso FIN: fecha
-                        _ => TcpState::Closed,
-                    };
-                }
-                if c.state == TcpState::FinWait1
-                    && seg.flags & nsk::TCP_ACK != 0
-                    && seg.ack == c.snd_nxt
-                {
-                    c.state = if c.peer_closed {
-                        TcpState::Closed
-                    } else {
-                        TcpState::FinWait2
-                    };
-                }
-                if advanced {
-                    tcp_emit(c, nsk::TCP_ACK, b"");
-                }
-            }
-            TcpState::LastAck => {
-                if seg.flags & nsk::TCP_ACK != 0 && seg.ack == c.snd_nxt {
-                    c.state = TcpState::Closed;
-                }
-            }
-            TcpState::Closed | TcpState::CloseWait => {}
+        if let Some(out) = sock.on_segment(&seg, now) {
+            emit_seg(sock, out);
         }
         return;
+    }
+}
+
+/// Retransmissoes devidas (RTO/MAX_RETRIES de nexo_netstack::tcp).
+fn tcp_timers() {
+    let now = nexo_sys::time_now();
+    let st = netd();
+    for slot in st.tcp.iter_mut() {
+        if let Some(sock) = slot
+            && let Some(out) = sock.poll(now)
+        {
+            emit_seg(sock, out);
+        }
     }
 }
 
 // ---- bomba de quadros ----
 
 fn pump() {
+    tcp_timers();
     let st = netd();
     let mut frame = [0u8; 1514];
     loop {
@@ -606,63 +530,42 @@ fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
                 return sock::encode_error(sock::TcpConnectRequest::METHOD_ID, E_INVALID, out)
                     .unwrap_or(0);
             }
-            let Some(i) =
-                (0..TCP_CONNS).find(|&i| st.tcp[i].state == TcpState::Closed && !st.tcp[i].reset)
-            else {
+            let Some(i) = (0..TCP_CONNS).find(|&i| {
+                st.tcp[i].is_none()
+                    || st.tcp[i]
+                        .as_ref()
+                        .is_some_and(|c| c.state == nsk::tcp::State::Closed)
+            }) else {
                 return sock::encode_error(sock::TcpConnectRequest::METHOD_ID, E_NO_RES, out)
                     .unwrap_or(0);
             };
-            let iss = (nexo_sys::time_now() as u32) | 1;
-            {
-                let c = &mut st.tcp[i];
-                c.remote_ip.copy_from_slice(rq.dst_ip());
-                c.remote_port = rq.dst_port;
-                c.local_port = 41000 + i as u16;
-                c.snd_nxt = iss.wrapping_add(1);
-                c.rcv_nxt = 0;
-                c.rx_len = 0;
-                c.reset = false;
-                c.peer_closed = false;
-                c.state = TcpState::SynSent;
-            }
-            // SYN com seq = iss
-            {
-                let c = &st.tcp[i];
-                let mut frame = [0u8; 1514];
-                let n = nsk::tcp_write(
-                    &mut frame,
-                    st.mac,
-                    st.gw_mac,
-                    st.lease.ip,
-                    c.remote_ip,
-                    c.local_port,
-                    c.remote_port,
-                    iss,
-                    0,
-                    nsk::TCP_SYN,
-                    RX_MAX as u16,
-                    b"",
-                );
-                net_send(&frame[..n]);
-            }
+            let mut dst = [0u8; 4];
+            dst.copy_from_slice(rq.dst_ip());
+            let now = nexo_sys::time_now();
+            let iss = (now as u32) | 1;
+            let (sock_new, syn) =
+                nsk::tcp::TcpSocket::connect(41000 + i as u16, dst, rq.dst_port, iss, now);
+            emit_seg(&sock_new, syn);
+            st.tcp[i] = Some(sock_new);
             let start = nexo_sys::time_now();
             loop {
                 pump();
-                match st.tcp[i].state {
-                    TcpState::Established => {
+                let state = st.tcp[i].as_ref().map(|c| (c.state, c.reset));
+                match state {
+                    Some((nsk::tcp::State::Established, _)) => {
                         break sock::TcpConnectResponse { conn: i as u32 }
                             .encode_msg(out)
                             .unwrap_or(0);
                     }
-                    TcpState::Closed => {
-                        st.tcp[i].reset = false;
+                    Some((nsk::tcp::State::Closed, _)) | None => {
+                        st.tcp[i] = None;
                         break sock::encode_error(sock::TcpConnectRequest::METHOD_ID, E_RESET, out)
                             .unwrap_or(0);
                     }
                     _ => {}
                 }
                 if nexo_sys::time_now() - start > 10_000_000_000 {
-                    st.tcp[i].state = TcpState::Closed;
+                    st.tcp[i] = None;
                     break sock::encode_error(sock::TcpConnectRequest::METHOD_ID, E_TIMEOUT, out)
                         .unwrap_or(0);
                 }
@@ -671,83 +574,97 @@ fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
         }
         Request::TcpSend(rq) => {
             let i = rq.conn as usize;
-            if i >= TCP_CONNS {
+            if i >= TCP_CONNS || st.tcp[i].is_none() {
                 return sock::encode_error(sock::TcpSendRequest::METHOD_ID, E_INVALID, out)
                     .unwrap_or(0);
             }
-            let state = st.tcp[i].state;
-            if state != TcpState::Established && state != TcpState::CloseWait {
-                let e = if st.tcp[i].reset { E_RESET } else { E_NOT_CONN };
-                return sock::encode_error(sock::TcpSendRequest::METHOD_ID, e, out).unwrap_or(0);
-            }
             let data = rq.data();
-            tcp_emit(&st.tcp[i], nsk::TCP_ACK | nsk::TCP_PSH, data);
-            st.tcp[i].snd_nxt = st.tcp[i].snd_nxt.wrapping_add(data.len() as u32);
-            sock::TcpSendResponse {
-                sent: data.len() as u32,
+            let start = nexo_sys::time_now();
+            loop {
+                let now = nexo_sys::time_now();
+                let r = st.tcp[i].as_mut().map(|c| c.send(data, now));
+                match r {
+                    Some(Ok(seg)) => {
+                        let sock = st.tcp[i].as_ref().unwrap();
+                        emit_seg(sock, seg);
+                        break sock::TcpSendResponse {
+                            sent: data.len() as u32,
+                        }
+                        .encode_msg(out)
+                        .unwrap_or(0);
+                    }
+                    Some(Err(true)) => {
+                        // pendencia anterior ainda sem ACK: bombeia e tenta de novo
+                        pump();
+                        if nexo_sys::time_now() - start > 5_000_000_000 {
+                            break sock::encode_error(
+                                sock::TcpSendRequest::METHOD_ID,
+                                E_TIMEOUT,
+                                out,
+                            )
+                            .unwrap_or(0);
+                        }
+                        nexo_sys::sleep_ns(2_000_000);
+                    }
+                    _ => {
+                        let e = if st.tcp[i].as_ref().is_some_and(|c| c.reset) {
+                            E_RESET
+                        } else {
+                            E_NOT_CONN
+                        };
+                        break sock::encode_error(sock::TcpSendRequest::METHOD_ID, e, out)
+                            .unwrap_or(0);
+                    }
+                }
             }
-            .encode_msg(out)
-            .unwrap_or(0)
         }
         Request::TcpRecv(rq) => {
             let i = rq.conn as usize;
-            if i >= TCP_CONNS {
+            if i >= TCP_CONNS || st.tcp[i].is_none() {
                 return sock::encode_error(sock::TcpRecvRequest::METHOD_ID, E_INVALID, out)
                     .unwrap_or(0);
             }
-            let c = &mut st.tcp[i];
+            let c = st.tcp[i].as_mut().unwrap();
             let mut resp = sock::TcpRecvResponse {
                 data: [0; 1400],
                 data_len: 0,
-                closed: (c.peer_closed || c.reset || c.state == TcpState::Closed) as u8,
+                closed: (c.peer_closed || c.reset || c.state == nsk::tcp::State::Closed) as u8,
             };
-            let take = c.rx_len.min(1400);
-            if take > 0 {
-                resp.data[..take].copy_from_slice(&c.rx[..take]);
-                resp.data_len = take as u32;
-                c.rx.copy_within(take..c.rx_len, 0);
-                c.rx_len -= take;
-            }
+            resp.data_len = c.take_rx(&mut resp.data) as u32;
             resp.encode_msg(out).unwrap_or(0)
         }
         Request::TcpClose(rq) => {
             let i = rq.conn as usize;
-            if i >= TCP_CONNS {
+            if i >= TCP_CONNS || st.tcp[i].is_none() {
                 return sock::encode_error(sock::TcpCloseRequest::METHOD_ID, E_INVALID, out)
                     .unwrap_or(0);
             }
-            let state = st.tcp[i].state;
-            match state {
-                TcpState::Established | TcpState::CloseWait => {
-                    tcp_emit(&st.tcp[i], nsk::TCP_FIN | nsk::TCP_ACK, b"");
-                    st.tcp[i].snd_nxt = st.tcp[i].snd_nxt.wrapping_add(1);
-                    st.tcp[i].state = if state == TcpState::Established {
-                        TcpState::FinWait1
-                    } else {
-                        TcpState::LastAck
-                    };
-                    // espera (curta) o fecho ordenado; melhor esforco
-                    let start = nexo_sys::time_now();
-                    while st.tcp[i].state != TcpState::Closed
-                        && nexo_sys::time_now() - start < 3_000_000_000
-                    {
-                        pump();
-                        nexo_sys::sleep_ns(2_000_000);
-                    }
-                    st.tcp[i].state = TcpState::Closed;
-                    st.tcp[i].reset = false;
-                    sock::TcpCloseResponse {}.encode_msg(out).unwrap_or(0)
+            let was_reset = st.tcp[i].as_ref().is_some_and(|c| c.reset);
+            let start = nexo_sys::time_now();
+            // espera a pendencia anterior, emite o FIN e acompanha o fecho (melhor esforco)
+            loop {
+                pump();
+                let now = nexo_sys::time_now();
+                let (state, fin) = {
+                    let c = st.tcp[i].as_mut().unwrap();
+                    (c.state, c.close(now))
+                };
+                if let Some(f) = fin {
+                    let sock = st.tcp[i].as_ref().unwrap();
+                    emit_seg(sock, f);
+                } else if state == nsk::tcp::State::Closed {
+                    break;
                 }
-                _ => {
-                    st.tcp[i].state = TcpState::Closed;
-                    let e = if st.tcp[i].reset { E_RESET } else { 0 };
-                    st.tcp[i].reset = false;
-                    if e != 0 {
-                        sock::encode_error(sock::TcpCloseRequest::METHOD_ID, e, out).unwrap_or(0)
-                    } else {
-                        sock::TcpCloseResponse {}.encode_msg(out).unwrap_or(0)
-                    }
+                if nexo_sys::time_now() - start > 3_000_000_000 {
+                    break;
                 }
+                nexo_sys::sleep_ns(2_000_000);
+            }
+            st.tcp[i] = None;
+            if was_reset {
+                sock::encode_error(sock::TcpCloseRequest::METHOD_ID, E_RESET, out).unwrap_or(0)
+            } else {
+                sock::TcpCloseResponse {}.encode_msg(out).unwrap_or(0)
             }
         }
     }

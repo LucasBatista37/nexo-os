@@ -647,6 +647,9 @@ pub fn tcp_parse(frame: &[u8], from_ip: Ipv4Addr, dst_port: u16) -> Option<TcpSe
     })
 }
 
+/// Máquina de estados TCP do cliente (testável no host; ver `docs/spec/tcp-states.md`).
+pub mod tcp;
+
 #[cfg(test)]
 mod tests {
     extern crate std;

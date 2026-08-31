@@ -14,11 +14,17 @@ ESTABLISHED ──FIN do par/ACK──▶ CLOSE_WAIT ──close()/FIN──▶ 
 qualquer estado ──RST──▶ CLOSED (erro 4 na próxima operação)
 ```
 
+A máquina de estados vive em `nexo-netstack::tcp` (`libraries/net/src/tcp.rs`) e é coberta por
+uma suíte de host (handshake, dados nos dois sentidos, retransmissões até RST, fecho ativo e
+passivo, RST em qualquer estado, contrapressão de recepção); o `netd` só monta os quadros e
+bombeia o temporizador.
+
 Regras da v0 (deliberadas e documentadas):
 
-- **Sem retransmissão própria**: segmentos enviados uma vez; dados recebidos fora de ordem ou
-  sem espaço na janela **não são confirmados**, forçando o par a retransmitir. Janela anunciada
-  = espaço livre no buffer de 4 KiB por conexão.
+- **Retransmissão simples**: uma pendência (dados ou SYN/FIN) por vez, reenviada a cada 500 ms
+  até 5 vezes; esgotando, a conexão é considerada reiniciada (erro 4). Dados recebidos fora de
+  ordem provocam ACK duplicado; sem espaço na janela, não são confirmados (o par retransmite).
+  Janela anunciada = espaço livre no buffer de 4 KiB por conexão.
 - **TIME_WAIT imediato**: após o fecho ordenado o slot volta a `CLOSED` na hora (portas locais
   41000+i giram por slot; colisão de encarnações é improvável no cenário de teste e será
   tratada com ISNs melhores junto com a retransmissão).
@@ -26,7 +32,7 @@ Regras da v0 (deliberadas e documentadas):
   sem *keepalive*, uma pendência de dados por chamada `tcp_send`.
 - ISN derivado do relógio monotônico.
 
-Cobertura de teste: cenário `net` (handshake, dados nos dois sentidos, fecho com FIN a partir
-do cliente e RST no caminho cru do `utest` 14) e testes de host dos segmentos
-(`cargo test -p nexo-netstack`). Retransmissão, escuta e uma suíte dedicada de estados são o
+Cobertura de teste: suíte de host da máquina de estados e dos segmentos
+(`cargo test -p nexo-netstack`) e o cenário `net` (handshake, dados e fecho reais pelo `netd`;
+RST no caminho cru do `utest` 14). Escuta/aceitação e janelas deslizantes de verdade são o
 próximo passo deste item do plano.

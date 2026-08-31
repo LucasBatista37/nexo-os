@@ -110,6 +110,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Máquina de estados TCP do cliente documentada em `docs/spec/tcp-states.md` (SYN_SENT → ESTABLISHED → FIN_WAIT/CLOSE_WAIT/LAST_ACK; RST; limitações da v0: sem retransmissão própria, TIME_WAIT imediato).
 - Cenário `net`, fase 2: `netdev` + `netd` + cliente — info do lease, resolução com cache comprovado (2ª consulta `cached=1`), eco UDP e conexão TCP completa com os servidores do harness no host (que agora atendem múltiplas conexões).
 
+### Adicionado (Fase 4, bloco 7 — máquina de estados TCP testável e retransmissão)
+- `nexo-netstack::tcp`: a máquina de estados TCP saiu do `netd` para a biblioteca (`TcpSocket`: connect/on_segment/send/close/poll/take_rx), **com retransmissão** (RTO 500 ms, 5 tentativas → conexão reiniciada) e ACK duplicado para segmentos fora de ordem; suíte de host com 7 testes de estados (handshake, dados, retransmissões até RST, fecho ativo/passivo, RST, contrapressão).
+- `netd` reescrito sobre a biblioteca: só monta quadros e bombeia o temporizador (`tcp_timers` no laço de eventos); `docs/spec/tcp-states.md` atualizado.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.
