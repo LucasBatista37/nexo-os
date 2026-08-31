@@ -661,6 +661,9 @@ pub mod tcp;
 /// IPv6 mínimo: cabeçalho, ICMPv6, NDP (ver `libraries/net/src/ipv6.rs`).
 pub mod ipv6;
 
+/// Política de rede por perfil — firewall do `netd` (ver `libraries/net/src/firewall.rs`).
+pub mod firewall;
+
 #[cfg(test)]
 mod tests {
     extern crate std;

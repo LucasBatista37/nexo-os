@@ -144,6 +144,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo-netstack::ipv6`: endereço link-local (EUI-64), cabeçalho IPv6 fixo, checksum ICMPv6/UDP/TCP com pseudo-cabeçalho, ICMPv6 echo e **NDP** — Neighbor Solicitation/Advertisement com endereços multicast solicited-node e MAC `33:33`; `no_std`, sem alocação. 4 grupos de testes de host (incl. NS→NA→echo completo e fuzz-lite).
 - `netd` responde a Neighbor Solicitations pelo seu link-local (nó IPv6 alcançável). Cenário `net`: o guest emite um NS válido pela `nexo-netstack` e o harness confirma no pcap (`build/logs/net.pcap`) um ICMPv6 tipo 135 bem-formado saindo na interface.
 
+### Adicionado (Fase 4, bloco 15 — firewall por perfil e permissões de rede por sessão)
+- `nexo-netstack::firewall`: política de rede por perfil (`Profile`) — **negar por padrão**, até 8 regras (sub-rede IPv4/porta/protocolo) mais permissões `allow_dns`/`allow_listen`; `allows()` distingue "sem regra" de "protocolo/porta negados". 5 grupos de testes de host.
+- `nexo.sock` `open{chan, allow_dns, allow_listen, rule_*}` agora carrega o perfil da sessão-filha: o `netd` associa um `Profile` a cada cliente (o primeiro é irrestrito; os abertos por `open` são restritos pelo pai) e nega `tcp_connect`/`udp_send`/`tcp_listen`/`resolve` fora do perfil (erro remoto 7). `utest` (modo 15) comprova permitido/negado.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

@@ -1491,6 +1491,22 @@ impl TcpCloseResponse {
 pub struct OpenRequest {
     /// Handle `chan` (viaja no vetor de handles, nunca no payload).
     pub chan: u32,
+    /// Campo `allow_dns`.
+    pub allow_dns: u8,
+    /// Campo `allow_listen`.
+    pub allow_listen: u8,
+    /// Bytes de `rule_ip` (ate 4).
+    pub rule_ip: [u8; 4],
+    /// Tamanho valido de `rule_ip`.
+    pub rule_ip_len: u32,
+    /// Campo `rule_prefix`.
+    pub rule_prefix: u8,
+    /// Campo `rule_port_lo`.
+    pub rule_port_lo: u16,
+    /// Campo `rule_port_hi`.
+    pub rule_port_hi: u16,
+    /// Campo `rule_protos`.
+    pub rule_protos: u8,
 }
 
 impl OpenRequest {
@@ -1502,15 +1518,119 @@ impl OpenRequest {
     pub fn handles(&self) -> [u32; 1] {
         [self.chan]
     }
+    /// Fatia valida de `rule_ip`.
+    pub fn rule_ip(&self) -> &[u8] {
+        &self.rule_ip[..(self.rule_ip_len as usize).min(4)]
+    }
     /// Codifica o payload; devolve o tamanho.
-    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
-        Ok(0)
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.allow_dns.to_le_bytes());
+        o += 1;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.allow_listen.to_le_bytes());
+        o += 1;
+        let n = self.rule_ip_len as usize;
+        if n > 4 {
+            return Err(ProtoError::TooBig);
+        }
+        if o + 4 + n > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&(n as u32).to_le_bytes());
+        out[o + 4..o + 4 + n].copy_from_slice(&self.rule_ip[..n]);
+        o += 4 + n;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.rule_prefix.to_le_bytes());
+        o += 1;
+        if o + 2 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 2].copy_from_slice(&self.rule_port_lo.to_le_bytes());
+        o += 2;
+        if o + 2 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 2].copy_from_slice(&self.rule_port_hi.to_le_bytes());
+        o += 2;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.rule_protos.to_le_bytes());
+        o += 1;
+        Ok(o)
     }
     /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
     /// ausentes assumem o padrao — ipc-compat §3).
-    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
         let chan: u32 = 0; // injetado por decode_*_with_handles
-        Ok(OpenRequest { chan })
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let allow_dns = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let allow_listen = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
+        let mut rule_ip = [0u8; 4];
+        let rule_ip_len: u32;
+        {
+            if o + 4 > b.len() {
+                return Err(ProtoError::Short);
+            }
+            let l = u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as usize;
+            if l > 4 {
+                return Err(ProtoError::TooBig);
+            }
+            if o + 4 + l > b.len() {
+                return Err(ProtoError::Short);
+            }
+            rule_ip[..l].copy_from_slice(&b[o + 4..o + 4 + l]);
+            rule_ip_len = l as u32;
+            o += 4 + l;
+        }
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let rule_prefix = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
+        if o + 2 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let rule_port_lo = u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
+        o += 2;
+        if o + 2 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let rule_port_hi = u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
+        o += 2;
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let rule_protos = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
+        let _ = o;
+        Ok(OpenRequest {
+            chan,
+            allow_dns,
+            allow_listen,
+            rule_ip,
+            rule_ip_len,
+            rule_prefix,
+            rule_port_lo,
+            rule_port_hi,
+            rule_protos,
+        })
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
     pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {

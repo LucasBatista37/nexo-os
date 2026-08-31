@@ -185,20 +185,28 @@ mod tests {
     fn handle_fields_travel_out_of_payload() {
         use generated::sock::*;
         // `open` tem um campo handle: nao entra no payload; e injetado no decode.
-        let req = OpenRequest { chan: 7 };
+        let mk = |chan: u32| OpenRequest {
+            chan,
+            allow_dns: 1,
+            allow_listen: 0,
+            rule_ip: [10, 0, 2, 0],
+            rule_ip_len: 4,
+            rule_prefix: 24,
+            rule_port_lo: 1,
+            rule_port_hi: 65535,
+            rule_protos: 3,
+        };
+        let req = mk(7);
         assert_eq!(OpenRequest::HANDLE_COUNT, 1);
         assert_eq!(req.handles(), [7]);
         let mut buf = [0u8; 64];
         let n = req.encode_msg(&mut buf).unwrap();
-        assert_eq!(n, HEADER_LEN); // payload vazio
+        assert!(n > HEADER_LEN); // handle fora do payload; perfil dentro
         // decode sem handles: chan volta 0; com o handle injetado, volta o valor recebido
-        assert_eq!(
-            decode_request(&buf[..n]).unwrap(),
-            Request::Open(OpenRequest { chan: 0 })
-        );
+        assert_eq!(decode_request(&buf[..n]).unwrap(), Request::Open(mk(0)));
         assert_eq!(
             decode_request_with_handles(&buf[..n], &[42]).unwrap(),
-            Request::Open(OpenRequest { chan: 42 })
+            Request::Open(mk(42))
         );
         // numero errado de handles -> erro
         assert_eq!(

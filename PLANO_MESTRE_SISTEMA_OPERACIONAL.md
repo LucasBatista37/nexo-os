@@ -482,8 +482,8 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] criar API de sockets nativa — *`nexo.sock` v1.0 no `netd` (info/resolve com cache/UDP por porta/TCP conectar-enviar-receber-fechar-escutar/`open` p/ múltiplas sessões), multi-cliente (até 8) com transferência de handles na IDL; saída, entrada e HTTP reais no cenário `net`; isolamento por sessão (sockets globais hoje) e eventos assíncronos ao cliente pendentes*;
 - [ ] criar compatibilidade POSIX de sockets;
 - [-] implementar IPv6 — *`nexo-netstack::ipv6` (endereço link-local, cabeçalho, checksum, ICMPv6 echo, NDP NS/NA); `netd` responde a NS; cenário `net` confirma um NS bem-formado no pcap; SLAAC/roteamento e sockets IPv6 no `netd` pendentes*;
-- [ ] implementar firewall por aplicativo e perfil;
-- [ ] expor permissões de rede por pacote;
+- [-] implementar firewall por aplicativo e perfil — *`nexo-netstack::firewall` (perfil negar-por-padrão: regras de sub-rede/porta/protocolo + DNS/escuta); `netd` aplica o perfil por sessão (`open{...rule_*}`), negando conexões/datagramas fora dele; cenário `net` comprova permitido/negado; perfis persistentes e por aplicativo instalado pendentes*;
+- [-] expor permissões de rede por pacote — *cada sessão do `netd` tem um perfil que autoriza destino/porta/protocolo por pacote (firewall acima); interface de usuário para conceder/revogar pendente*;
 - [ ] portar uma biblioteca TLS auditada compatível com a licença;
 - [ ] criar armazenamento seguro de certificados;
 - [-] implementar cliente HTTP para atualizações — *GET HTTP/1.0 com validação de status e corpo pela API `nexo.sock` (cenário `net`, servidor real no host); biblioteca de cliente, HTTP/1.1 e integração com atualizações pendentes*;

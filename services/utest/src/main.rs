@@ -1920,14 +1920,26 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
             rlen
         );
     }
-    // 7. multi-cliente: abre uma segunda sessao no netd (transfere uma ponta de canal via `open`)
-    //    e usa `info` por ela — prova que o handle viajou e o netd atende dois clientes.
+    // 7. multi-cliente + firewall: abre uma segunda sessao RESTRITA (perfil que so permite TCP
+    //    para 10.0.2.2:<tcp_port>, sem DNS nem escuta) e comprova que o netd nega o resto.
     {
-        use nexo_proto::sock::{OpenRequest, decode_info_response, decode_open_response};
+        use nexo_proto::sock::{
+            OpenRequest, ResolveRequest, TcpConnectRequest, UdpSendRequest, decode_open_response,
+            decode_resolve_response, decode_tcp_connect_response, decode_udp_send_response,
+        };
         let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(388));
-        let m = OpenRequest { chan: theirs }
-            .encode_msg(&mut msg)
-            .unwrap_or(0);
+        let open = OpenRequest {
+            chan: theirs,
+            allow_dns: 0,
+            allow_listen: 0,
+            rule_ip: [10, 0, 2, 2],
+            rule_ip_len: 4,
+            rule_prefix: 32,
+            rule_port_lo: tcp_port,
+            rule_port_hi: tcp_port,
+            rule_protos: 1, // so TCP
+        };
+        let m = open.encode_msg(&mut msg).unwrap_or(0);
         // o handle `theirs` sai da nossa tabela e entra na do netd
         if nexo_sys::channel_send(0, &msg[..m], &[theirs]) != Status::Ok {
             nexo_sys::exit(389);
@@ -1936,19 +1948,71 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
             Ok((n, _)) if decode_open_response(&msg[..n]).is_ok() => {}
             _ => nexo_sys::exit(390),
         }
-        // pela nova sessao: info deve devolver o mesmo lease
-        let m = InfoRequest {}.encode_msg(&mut msg).unwrap_or(0);
-        if nexo_sys::channel_send(mine, &msg[..m], &[]) != Status::Ok {
-            nexo_sys::exit(391);
-        }
-        match nexo_sys::channel_recv(mine, &mut msg, &mut hs) {
-            Ok((n, _)) => match decode_info_response(&msg[..n]) {
-                Ok(r) if r.ip() == [10, 0, 2, 15] => {}
+        let mut ask = |req_bytes: &[u8], out: &mut [u8; 4096]| -> usize {
+            if nexo_sys::channel_send(mine, req_bytes, &[]) != Status::Ok {
+                nexo_sys::exit(391);
+            }
+            match nexo_sys::channel_recv(mine, out, &mut hs) {
+                Ok((n, _)) => n,
                 _ => nexo_sys::exit(392),
-            },
-            _ => nexo_sys::exit(393),
+            }
+        };
+        // permitido: TCP para 10.0.2.2:<tcp_port>
+        let m = TcpConnectRequest {
+            dst_ip: [10, 0, 2, 2],
+            dst_ip_len: 4,
+            dst_port: tcp_port,
         }
-        nexo_rt::log!("utest: sock multi-cliente ok — 2a sessao aberta por `open` e atendida");
+        .encode_msg(&mut msg)
+        .unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_tcp_connect_response(&msg[..n]).is_err() {
+            nexo_rt::log!("utest: firewall: conexao permitida foi negada");
+            nexo_sys::exit(394);
+        }
+        // negado: TCP para outra porta (mesmo host)
+        let m = TcpConnectRequest {
+            dst_ip: [10, 0, 2, 2],
+            dst_ip_len: 4,
+            dst_port: tcp_port.wrapping_add(1),
+        }
+        .encode_msg(&mut msg)
+        .unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_tcp_connect_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_sys::exit(395);
+        }
+        // negado: DNS (perfil sem allow_dns)
+        let mut r = ResolveRequest {
+            name: [0; 253],
+            name_len: 11,
+        };
+        r.name[..11].copy_from_slice(b"example.com");
+        let m = r.encode_msg(&mut msg).unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_resolve_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_sys::exit(396);
+        }
+        // negado: UDP (perfil so-TCP)
+        let mut u = UdpSendRequest {
+            dst_ip: [10, 0, 2, 2],
+            dst_ip_len: 4,
+            dst_port: 9,
+            src_port: 40300,
+            data: [0; 1400],
+            data_len: 1,
+        };
+        u.data[0] = b'x';
+        let m = u.encode_msg(&mut msg).unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_udp_send_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_sys::exit(397);
+        }
+        nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
     }
     nexo_sys::exit(0)
 }

@@ -105,11 +105,20 @@ method 8 tcp_close {
     }
 }
 
-# Abre uma sessao adicional: o handle `chan` (uma ponta de canal criada pelo cliente) passa a
-# ser atendido pelo netd como mais um cliente; a resposta vai no canal em que o pedido chegou.
+# Abre uma sessao adicional com um PERFIL de rede (firewall): o handle `chan` (ponta de um canal
+# criado pelo cliente) passa a ser atendido como novo cliente, restrito a uma regra de destino
+# (`rule_*`: sub-rede/porta/protocolo) e as permissoes `allow_dns`/`allow_listen`. O pai, ja
+# privilegiado, restringe o filho; modelo negar-por-padrao. rule_protos: bit0 TCP, bit1 UDP.
 method 11 open {
     request {
         chan: handle,
+        allow_dns: u8,
+        allow_listen: u8,
+        rule_ip: bytes<4>,
+        rule_prefix: u8,
+        rule_port_lo: u16,
+        rule_port_hi: u16,
+        rule_protos: u8,
     }
     response {
     }

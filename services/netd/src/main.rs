@@ -30,6 +30,7 @@ const E_TIMEOUT: u32 = 3;
 const E_RESET: u32 = 4;
 const E_NOT_FOUND: u32 = 5;
 const E_NOT_CONN: u32 = 6;
+const E_DENIED: u32 = 7;
 
 // ---- estado global (uma thread; padrao addr_of_mut como no vfs) ----
 const UDP_SOCKS: usize = 4;
@@ -505,14 +506,18 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     // 4. laço de eventos multi-cliente: varre todos os clientes sem bloquear; ocioso, dorme em
     // wait_any({todos os clientes, driver}); com TCP pendente, continua bombeando o relógio.
     let mut out = [0u8; 4096];
-    let mut clients: [Option<Handle>; MAX_CLIENTS] = [None; MAX_CLIENTS];
-    clients[0] = Some(CLIENT);
+    // Cada cliente carrega um perfil (firewall). O primeiro (cliente de sistema) é irrestrito;
+    // os abertos por `open` recebem o perfil que o pai definir (negar por padrão).
+    let mut clients: [Option<(Handle, nsk::firewall::Profile)>; MAX_CLIENTS] = [None; MAX_CLIENTS];
+    clients[0] = Some((CLIENT, nsk::firewall::Profile::unrestricted()));
     let mut hbuf = [0u32; 8];
     loop {
         pump();
         let mut worked = false;
         for slot in 0..MAX_CLIENTS {
-            let Some(ch) = clients[slot] else { continue };
+            let Some((ch, profile)) = clients[slot] else {
+                continue;
+            };
             let (n, nh) = match nexo_sys::channel_try_recv(ch, &mut msg, &mut hbuf) {
                 Ok(v) => v,
                 Err(Status::WouldBlock) => continue,
@@ -536,13 +541,28 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     continue;
                 }
             };
-            // `open` registra o novo canal como cliente (o handle ja chegou na nossa tabela).
+            // `open` registra o novo canal como cliente com o perfil do pedido (firewall).
             if let Request::Open(rq) = &request {
                 let new = rq.chan;
+                // Monta o perfil da sessão-filha a partir dos campos do pedido.
+                let mut child = nsk::firewall::Profile::deny_all();
+                child.allow_dns = rq.allow_dns != 0;
+                child.allow_listen = rq.allow_listen != 0;
+                if rq.rule_protos != 0 && rq.rule_ip().len() == 4 {
+                    let mut ip = [0u8; 4];
+                    ip.copy_from_slice(rq.rule_ip());
+                    child.add_rule(nsk::firewall::Rule {
+                        base: ip,
+                        prefix: rq.rule_prefix,
+                        port_lo: rq.rule_port_lo,
+                        port_hi: rq.rule_port_hi,
+                        protos: rq.rule_protos,
+                    });
+                }
                 let placed = (0..MAX_CLIENTS).find(|&i| clients[i].is_none());
                 let m = match placed {
                     Some(i) => {
-                        clients[i] = Some(new);
+                        clients[i] = Some((new, child));
                         sock::OpenResponse {}.encode_msg(&mut out).unwrap_or(0)
                     }
                     None => {
@@ -554,7 +574,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
                 continue;
             }
-            let m = serve(request, &mut out);
+            let m = serve(request, &profile, &mut out);
             if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
                 fail(108, "resposta ao cliente");
             }
@@ -569,7 +589,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             // dorme ate um cliente OU o driver terem trafego
             let mut waits = [NET; MAX_CLIENTS + 1];
             let mut wn = 1;
-            for c in clients.iter().flatten() {
+            for (c, _) in clients.iter().flatten() {
                 waits[wn] = *c;
                 wn += 1;
             }
@@ -598,7 +618,7 @@ fn wait_dhcp(kind: u8, xid: u32) -> nsk::DhcpLease {
     }
 }
 
-fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
+fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096]) -> usize {
     let st = netd();
     match request {
         // `open` é tratado no laço de eventos (registra o novo cliente); nunca chega aqui.
@@ -622,16 +642,22 @@ fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
             .encode_msg(out)
             .unwrap_or(0)
         }
-        Request::Resolve(rq) => match resolve(rq.name()) {
-            Ok((addr, cached)) => sock::ResolveResponse {
-                addr,
-                addr_len: 4,
-                cached: cached as u8,
+        Request::Resolve(rq) => {
+            if profile.allows_dns().is_err() {
+                return sock::encode_error(sock::ResolveRequest::METHOD_ID, E_DENIED, out)
+                    .unwrap_or(0);
             }
-            .encode_msg(out)
-            .unwrap_or(0),
-            Err(e) => sock::encode_error(sock::ResolveRequest::METHOD_ID, e, out).unwrap_or(0),
-        },
+            match resolve(rq.name()) {
+                Ok((addr, cached)) => sock::ResolveResponse {
+                    addr,
+                    addr_len: 4,
+                    cached: cached as u8,
+                }
+                .encode_msg(out)
+                .unwrap_or(0),
+                Err(e) => sock::encode_error(sock::ResolveRequest::METHOD_ID, e, out).unwrap_or(0),
+            }
+        }
         Request::UdpSend(rq) => {
             if rq.dst_ip().len() != 4 || rq.data().is_empty() {
                 return sock::encode_error(sock::UdpSendRequest::METHOD_ID, E_INVALID, out)
@@ -643,6 +669,13 @@ fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
             }
             let mut dst = [0u8; 4];
             dst.copy_from_slice(rq.dst_ip());
+            if profile
+                .allows(dst, rq.dst_port, nsk::firewall::PROTO_UDP)
+                .is_err()
+            {
+                return sock::encode_error(sock::UdpSendRequest::METHOD_ID, E_DENIED, out)
+                    .unwrap_or(0);
+            }
             udp_emit(dst, rq.dst_port, rq.src_port, rq.data());
             sock::UdpSendResponse {}.encode_msg(out).unwrap_or(0)
         }
@@ -675,6 +708,17 @@ fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
             if rq.dst_ip().len() != 4 {
                 return sock::encode_error(sock::TcpConnectRequest::METHOD_ID, E_INVALID, out)
                     .unwrap_or(0);
+            }
+            {
+                let mut d = [0u8; 4];
+                d.copy_from_slice(rq.dst_ip());
+                if profile
+                    .allows(d, rq.dst_port, nsk::firewall::PROTO_TCP)
+                    .is_err()
+                {
+                    return sock::encode_error(sock::TcpConnectRequest::METHOD_ID, E_DENIED, out)
+                        .unwrap_or(0);
+                }
             }
             let Some(i) = (0..TCP_CONNS).find(|&i| {
                 st.tcp[i].is_none()
@@ -780,6 +824,10 @@ fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
             resp.encode_msg(out).unwrap_or(0)
         }
         Request::TcpListen(rq) => {
+            if profile.allows_listen().is_err() {
+                return sock::encode_error(sock::TcpListenRequest::METHOD_ID, E_DENIED, out)
+                    .unwrap_or(0);
+            }
             let Some(i) = (0..TCP_CONNS).find(|&i| {
                 st.tcp[i].is_none()
                     || st.tcp[i]
