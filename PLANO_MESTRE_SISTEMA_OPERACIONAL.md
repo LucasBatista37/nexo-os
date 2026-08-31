@@ -501,9 +501,9 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] criar renderer 2D por software — *`libraries/gfx` (`nexo-gfx`): superfícies, retângulos, blit e clipping; auto-teste `gfx` no boot; primitivas geométricas ricas pendentes*;
 - [-] implementar cores, composição alfa, clipping e transformações — *cores RGBA, composição alfa src-over e clipping retangular em `nexo-gfx` (testes de host); transformações (escala/rotação) pendentes*;
 - [-] implementar rasterização de texto e fallback de fontes — *`nexo-gfx::text` desenha strings com a fonte bitmap 8×8 (escala, cor, fundo, quebra de linha) e cai no glifo de fallback para caracteres fora da faixa; testes de host e no auto-teste `gfx`; fontes vetoriais/hinting e Unicode amplo pendentes*;
-- [ ] definir protocolo de superfícies e buffers;
-- [ ] implementar compositor em espaço de usuário;
-- [ ] implementar double/triple buffering e damage tracking;
+- [-] definir protocolo de superfícies e buffers — *modelo de superfície/janela (retângulo + buffer + z + dano) definido em `nexo-wm`; a IDL `nexo.wm` e o transporte por `MemoryObject` compartilhado ficam para o bloco do serviço*;
+- [-] implementar compositor em espaço de usuário — *motor de composição em `nexo-wm` (janelas por z sobre fundo, testado no host); o serviço em ring 3 e o transporte por memória compartilhada pendem de `MemoryObject`*;
+- [-] implementar double/triple buffering e damage tracking — *rastreamento de danos (`nexo-wm::Damage`: acumula e coalesce; composição só repinta o dano) pronto e testado; double/triple buffering pende do serviço e do framebuffer real*;
 - [ ] integrar mouse e teclado pelo serviço de entrada;
 - [ ] implementar foco, atalhos e captura segura;
 - [ ] implementar janelas, redimensionamento, maximização e mosaico;

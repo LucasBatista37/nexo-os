@@ -71,6 +71,21 @@ impl Rect {
     pub fn is_empty(&self) -> bool {
         self.w <= 0 || self.h <= 0
     }
+    /// Envelope (bounding box) que contém `self` e `o` (retângulos vazios são ignorados).
+    pub fn union(&self, o: &Rect) -> Rect {
+        if self.is_empty() {
+            return *o;
+        }
+        if o.is_empty() {
+            return *self;
+        }
+        let x0 = self.x.min(o.x);
+        let y0 = self.y.min(o.y);
+        let x1 = (self.x + self.w).max(o.x + o.w);
+        let y1 = (self.y + self.h).max(o.y + o.h);
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    }
+
     /// `true` se contém `(px, py)`.
     pub fn contains(&self, px: i32, py: i32) -> bool {
         px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h

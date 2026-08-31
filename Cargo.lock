@@ -99,5 +99,12 @@ name = "nexo-virtio"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-wm"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+]
+
+[[package]]
 name = "nexofs"
 version = "0.0.1"

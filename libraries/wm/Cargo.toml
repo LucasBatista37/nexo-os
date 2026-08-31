@@ -1,0 +1,12 @@
+[package]
+name = "nexo-wm"
+description = "Motor de composicao de janelas do Nexo OS: cena com z-order e rastreamento de danos, compondo superficies com nexo-gfx — sem alocacao, testavel no host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexo-gfx = { path = "../gfx" }
+
+[lints]
+workspace = true

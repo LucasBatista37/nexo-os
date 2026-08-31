@@ -164,6 +164,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo-gfx::text`: rasteriza strings sobre uma `Surface` com a fonte bitmap 8×8 (`nexo-font`) — `draw_glyph`/`draw_text` (escala inteira, cor de frente, fundo opcional, `\n` quebra linha), `text_width`/`cell_width`/`cell_height`; glifos fora da faixa imprimível caem no glifo de **fallback** da fonte. 4 grupos de testes de host (dimensões, desenho + fundo, quebra de linha, fallback).
 - O auto-teste `gfx` do boot passou a desenhar um glifo e conferir a largura de texto.
 
+### Adicionado (Fase 5, bloco 3 — motor de composição e rastreamento de danos)
+- `libraries/wm` (`nexo-wm`): motor de composição `no_std`/`forbid(unsafe_code)` — dada uma lista de `Window` (retângulo + buffer de pixels do cliente + z + formato) e uma região de dano, compõe as janelas visíveis sobre um fundo na superfície de saída **por ordem de z** (ordenação estável, independente da ordem de entrada), redesenhando só os pixels dentro do dano. `Damage` acumula até 16 retângulos sujos e coalesce no envelope quando enche (`bounds`/`rects`/`clear`); `Rect::union` no `nexo-gfx`. 4 grupos de testes de host (z-order, ordem de entrada, dano limitando o repintar, coalescência).
+- Nota de arquitetura: o **serviço** compositor e o transporte por `MemoryObject` compartilhado (buffers dos clientes) ficam para um bloco futuro — dependem de memória compartilhada entre processos, ainda não implementada.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

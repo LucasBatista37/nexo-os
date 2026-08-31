@@ -21,6 +21,7 @@ members = [
     "libraries/fat",
     "libraries/net",
     "libraries/gfx",
+    "libraries/wm",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
     "sdk/nexo-net",
