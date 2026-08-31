@@ -139,12 +139,20 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut input_ch: Option<Handle> = None;
     let mut px: i32 = 0;
     let mut py: i32 = 0;
+    let mut focused: Option<usize> = None;
 
     let mut buf = [0u8; 512];
     let mut out = [0u8; 512];
     let mut hbuf = [0u32; 1];
     loop {
         let mut worked = false;
+        // Solta o foco se a superfície focada foi destruída/desconectada (evita apontar para um
+        // slot reutilizado por uma superfície nova antes do próximo `create`).
+        if let Some(i) = focused
+            && !surfaces[i].used
+        {
+            focused = None;
+        }
         for slot in 0..MAX_CLIENTS {
             let Some(ch) = sessions[slot] else {
                 continue;
@@ -219,7 +227,6 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 Ok((n, _)) => {
                     worked = true;
                     let mut off = 0;
-                    let mut click = false;
                     while off + 8 <= n {
                         let ty = u16::from_le_bytes([buf[off], buf[off + 1]]);
                         let code = u16::from_le_bytes([buf[off + 2], buf[off + 3]]);
@@ -229,31 +236,47 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                             buf[off + 6],
                             buf[off + 7],
                         ]);
-                        match (ty, code) {
-                            (EV_ABS, ABS_X) => px = value as i32,
-                            (EV_ABS, ABS_Y) => py = value as i32,
-                            (EV_KEY, BTN_LEFT) if value == 1 => click = true,
-                            _ => {}
-                        }
                         off += 8;
-                    }
-                    if click {
-                        // foco por clique: traz para a frente a superfície sob o ponteiro.
-                        let hit = surfaces
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, s)| s.used && s.rect.contains(px, py))
-                            .max_by_key(|(_, s)| s.z)
-                            .map(|(i, _)| i);
-                        if let Some(i) = hit {
-                            let top = surfaces
-                                .iter()
-                                .filter(|s| s.used)
-                                .map(|s| s.z)
-                                .max()
-                                .unwrap_or(0);
-                            surfaces[i].z = top.saturating_add(1);
-                            recompose(&surfaces, out_base, out_bytes);
+                        match (ty, code, value) {
+                            (EV_ABS, ABS_X, v) => px = v as i32,
+                            (EV_ABS, ABS_Y, v) => py = v as i32,
+                            (EV_KEY, BTN_LEFT, 1) => {
+                                // foco por clique: traz para a frente a superfície sob o ponteiro.
+                                let hit = surfaces
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, s)| s.used && s.rect.contains(px, py))
+                                    .max_by_key(|(_, s)| s.z)
+                                    .map(|(i, _)| i);
+                                if let Some(i) = hit {
+                                    let top = surfaces
+                                        .iter()
+                                        .filter(|s| s.used)
+                                        .map(|s| s.z)
+                                        .max()
+                                        .unwrap_or(0);
+                                    surfaces[i].z = top.saturating_add(1);
+                                    focused = Some(i);
+                                    recompose(&surfaces, out_base, out_bytes);
+                                }
+                            }
+                            (EV_KEY, BTN_LEFT, _) => {} // release do botão: ignora
+                            (EV_KEY, c, v) => {
+                                // tecla comum: entrega à janela em foco (se houver).
+                                if let Some(i) = focused
+                                    && surfaces[i].used
+                                    && let Some(sess) = sessions[surfaces[i].owner]
+                                {
+                                    let ev = wm::KeyEvent {
+                                        surface: i as u32,
+                                        code: c as u32,
+                                        value: v,
+                                    };
+                                    let m = ev.encode_msg(&mut out).unwrap_or(0);
+                                    let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }

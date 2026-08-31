@@ -67,6 +67,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         21 => wm_restack(),
         22 => wm_resize(),
         23 => wm_input(),
+        24 => wm_keyboard(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2392,6 +2393,67 @@ fn wm_input() -> ! {
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
     nexo_sys::exit(0)
+}
+
+/// Modo 24: entrega de teclado a janela em foco. Cria uma superficie, foca-a por clique e injeta
+/// teclas (EV_KEY); confere que chegam como eventos `key` na sessao dona da superficie focada.
+fn wm_keyboard() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    wm_commit(ch, a);
+
+    // Registra a fonte de entrada.
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(550));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(551));
+    if nexo_sys::channel_send(ch, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(552);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(553),
+    }
+
+    // Foca A com um clique e injeta uma tecla (press) e depois o release.
+    wm_click(inj, 2, 2);
+    wm_key(inj, 30, 1); // KEY_A press
+    let ev = wm_recv_key(ch, &mut buf, &mut hs);
+    if ev.surface != a || ev.code != 30 || ev.value != 1 {
+        nexo_sys::exit(560);
+    }
+    wm_key(inj, 30, 0); // release
+    let ev = wm_recv_key(ch, &mut buf, &mut hs);
+    if ev.surface != a || ev.code != 30 || ev.value != 0 {
+        nexo_sys::exit(561);
+    }
+    nexo_sys::log("utest: wm teclado ok — teclas chegam a janela em foco");
+    nexo_sys::exit(0)
+}
+
+/// Recebe um evento `key` do compositor na sessao `ch`.
+fn wm_recv_key(
+    ch: nexo_sys::Handle,
+    buf: &mut [u8; 128],
+    hs: &mut [u32; 1],
+) -> nexo_proto::wm::KeyEvent {
+    let (n, _) = nexo_sys::channel_recv(ch, buf, hs).unwrap_or_else(|_| nexo_sys::exit(562));
+    nexo_proto::wm::decode_key_event(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(563))
+}
+
+/// Injeta uma tecla evdev (EV_KEY code value) num canal de entrada.
+fn wm_key(inj: nexo_sys::Handle, code: u16, value: u32) {
+    let mut ev = [0u8; 8];
+    ev[0..2].copy_from_slice(&1u16.to_le_bytes()); // EV_KEY
+    ev[2..4].copy_from_slice(&code.to_le_bytes());
+    ev[4..8].copy_from_slice(&value.to_le_bytes());
+    if nexo_sys::channel_send(inj, &ev, &[]) != Status::Ok {
+        nexo_sys::exit(546);
+    }
 }
 
 /// Injeta um clique em (x,y): eventos evdev ABS_X, ABS_Y e BTN_LEFT (press) num canal de entrada.

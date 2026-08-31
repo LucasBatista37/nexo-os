@@ -4,7 +4,7 @@
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes.
-protocol wm 1.4
+protocol wm 1.5
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -113,4 +113,12 @@ method 10 set_input {
     }
     response {
     }
+}
+
+# Evento: uma tecla (EV_KEY que nao seja BTN_LEFT) entregue a janela em foco. `surface` = id da
+# superficie focada; `code` = codigo evdev da tecla; `value` = 1 (press) ou 0 (release).
+event 11 key {
+    surface: u32,
+    code: u32,
+    value: u32,
 }

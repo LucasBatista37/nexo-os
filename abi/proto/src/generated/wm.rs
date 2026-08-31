@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.wm` v1.4 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
+//! Protocolo tipado `nexo.wm` v1.5 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x1b0edd71;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 4;
+pub const VERSION_MINOR: u16 = 5;
 
 /// `nexo.wm.create_surface` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1040,6 +1040,87 @@ impl SetInputResponse {
     }
 }
 
+/// `nexo.wm.key` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyEvent {
+    /// Campo `surface`.
+    pub surface: u32,
+    /// Campo `code`.
+    pub code: u32,
+    /// Campo `value`.
+    pub value: u32,
+}
+
+impl KeyEvent {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 11;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.surface.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.code.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.value.to_le_bytes());
+        o += 4;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let surface = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let code = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let value = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let _ = o;
+        Ok(KeyEvent {
+            surface,
+            code,
+            value,
+        })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_EVENT,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// Pedido decodificado.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // Sem alocador no espaço de usuário: variantes grandes (buffers embutidos) são inerentes.
@@ -1425,6 +1506,25 @@ pub fn decode_set_input_response(msg: &[u8]) -> Result<SetInputResponse, ProtoEr
         return Err(ProtoError::Flags);
     }
     SetInputResponse::decode_payload(p)
+}
+
+/// Decodifica um evento `key` (mensagem sem resposta).
+pub fn decode_key_event(msg: &[u8]) -> Result<KeyEvent, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 11 {
+        return Err(ProtoError::Method);
+    }
+    if h.flags != FLAG_EVENT {
+        return Err(ProtoError::Flags);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    KeyEvent::decode_payload(p)
 }
 
 /// Codifica uma resposta de erro para o metodo `method_id`.

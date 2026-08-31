@@ -192,6 +192,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `services/wm` processa entrada: `EV_ABS`/`ABS_X`/`ABS_Y` movem o ponteiro; `EV_KEY`/`BTN_LEFT` (press) fazem **foco por clique** — a superfície de maior z cujo retângulo contém o ponteiro é trazida para a frente (recompõe).
 - `utest` modo 23 + auto-teste de boot `user_wm_input`: com duas superfícies sobrepostas, registra uma fonte de entrada e injeta cliques evdev sintéticos; confere na saída composta (com *polling*, pois a entrada é assíncrona) que o pixel da sobreposição muda de cor conforme a janela clicada vem para a frente. 47 testes no boot.
 
+### Adicionado (Fase 5, bloco 9 — teclado à janela em foco)
+- `nexo.wm` v1.5: evento `key{surface,code,value}` (`FLAG_EVENT`) — o compositor entrega cada tecla (`EV_KEY` que não seja `BTN_LEFT`) à **janela em foco**, na sessão dona da superfície. O foco é definido pelo clique (bloco 8); o foco é solto se a superfície focada é destruída/desconecta (não vaza para um slot reutilizado).
+- `utest` modo 24 + auto-teste de boot `user_wm_keyboard`: cria uma superfície, foca-a por clique e injeta teclas (press/release); confere que chegam como eventos `key` com o id da superfície e o código/valor corretos. 48 testes no boot.
+
 ### Adicionado (Fase 2, extra — memória compartilhada entre processos)
 - `MemoryObject` (`kind` 4) e syscalls `memory_create` (28, aloca N páginas zeradas ≤ 256) / `memory_map` (29, mapeia `USER|RW` cacheável na região de dispositivos). Transferir o handle por canal compartilha as **mesmas páginas físicas** entre processos; o objeto possui os frames e os libera quando ninguém mais o referencia (mapeamento sem posse, como MMIO). `sdk/nexo-sys` ganhou os wrappers.
 - Teste `user_shmem`: um produtor cria memória, escreve um marcador e transfere o handle a um consumidor por canal; o consumidor lê o marcador e responde na mesma memória; sem vazamento de quadros. 42 testes no boot. Base para o compositor (buffers de janela) e payloads grandes de IPC (ipc-compat §2.6).
