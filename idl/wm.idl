@@ -4,7 +4,7 @@
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes.
-protocol wm 1.6
+protocol wm 1.7
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -112,6 +112,27 @@ method 10 set_input {
         chan: handle,
     }
     response {
+    }
+}
+
+# Maximiza a superficie `id`: move para (0,0) e redimensiona para a saida inteira; guarda o
+# retangulo anterior para o `restore`. Realoca o buffer (novo handle; o conteudo antigo e perdido).
+method 13 maximize {
+    request {
+        id: u32,
+    }
+    response {
+        mem: handle,
+    }
+}
+
+# Restaura a superficie `id` ao retangulo anterior a maximizacao. Realoca o buffer (novo handle).
+method 14 restore {
+    request {
+        id: u32,
+    }
+    response {
+        mem: handle,
     }
 }
 

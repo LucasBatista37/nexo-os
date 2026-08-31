@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `7804a83`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `8b1ff4f`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 150 · 🟡 53 · ⬜ 332 · ⛔ 0 → **33% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -182,7 +182,7 @@ Gate: ⬜ não iniciado.
 | 🟡 | implementar double/triple buffering e damage tracking | rastreamento de danos (`nexo-wm::Damage`: acumula e coalesce; composição só repinta o dano) pronto e testado; double/triple buffering pende do serviço e do framebuffer real |
 | 🟡 | integrar mouse e teclado pelo serviço de entrada | o compositor `wm` tem uma **fonte de entrada** (`set_input`, canal de eventos evdev crus): move o ponteiro (EV_ABS), reage ao clique (BTN_LEFT — `user_wm_input`) e entrega as teclas (EV_KEY) à janela em foco como eventos `key` (`user_wm_keyboard`). Falta ligar o serviço `inputdev` real a esse canal (hoje a fonte é sintética/injetada) |
 | 🟡 | implementar foco, atalhos e captura segura | foco por clique (o clique traz a superfície sob o ponteiro para a frente e passa a receber o teclado — `user_wm_input`/`user_wm_keyboard`). Atalhos globais e captura segura (grab exclusivo de entrada) pendentes |
-| 🟡 | implementar janelas, redimensionamento, maximização e mosaico | no serviço `wm`: criar/mover/destruir superfícies com posição e z (múltiplas sessões), **restacking dinâmico** (`raise`/`lower` — auto-teste `user_wm_restack`) e **redimensionamento** (`resize` realoca o `MemoryObject` via a syscall `memory_unmap`/`munmap` — auto-teste `user_wm_resize`); maximização, mosaico e políticas de layout automático pendentes |
+| 🟡 | implementar janelas, redimensionamento, maximização e mosaico | no serviço `wm`: criar/mover/destruir superfícies com posição e z (múltiplas sessões), **restacking dinâmico** (`raise`/`lower` — `user_wm_restack`), **redimensionamento** (`resize` via `memory_unmap`/`munmap` — `user_wm_resize`) e **maximizar/restaurar** (`maximize`/`restore` guardam o retângulo anterior — `user_wm_maximize`); falta o mosaico/tiling (políticas de layout automático de várias janelas) |
 | ⬜ | implementar múltiplos displays emulado |  |
 | 🟡 | criar toolkit UI nativo e tokens de design | `libraries/ui` (`nexo-ui`): tokens de design (`Theme`), widgets `Label`/`Button` (com estados e hit-test) e layout `VStack`, desenhados sobre `nexo-gfx`; testes de host e auto-teste `user_wm_ui` (botão renderizado pela pilha app→ui→gfx→compositor). Faltam mais widgets (campos de texto, listas, menus), foco/tab e um sistema de layout completo |
 | 🟡 | criar gerenciamento de temas claro/escuro e alto contraste | `nexo-ui::Theme` tem variantes claro, escuro e alto contraste (tokens de cor); os widgets pintam só a partir do tema. Faltam troca de tema em runtime, persistência da preferência e mais tokens (tipografia, espaçamento, raios) |

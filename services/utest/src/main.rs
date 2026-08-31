@@ -70,6 +70,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         24 => wm_keyboard(),
         25 => wm_alpha(),
         26 => wm_ui(),
+        27 => wm_maximize(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2395,6 +2396,126 @@ fn wm_input() -> ! {
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
     nexo_sys::exit(0)
+}
+
+/// Modo 27: maximizar/restaurar janela. Cria uma superficie pequena, maximiza (preenche a saida),
+/// e restaura (volta ao retangulo anterior) — conferindo na saida composta a cada passo. Cada
+/// realocacao devolve um novo buffer, que o cliente remapeia.
+fn wm_maximize() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+
+    // Cria A 8x8 em (4,4), guardando o handle e o tamanho do buffer.
+    let req = nexo_proto::wm::CreateSurfaceRequest {
+        x: 4,
+        y: 4,
+        w: 8,
+        h: 8,
+        z: 0,
+    };
+    let m = req
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(600));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(601);
+    }
+    let (n, nh) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(602));
+    let cs = nexo_proto::wm::decode_create_surface_response(&buf[..n])
+        .unwrap_or_else(|_| nexo_sys::exit(603));
+    if nh != 1 {
+        nexo_sys::exit(604);
+    }
+    let a = cs.id;
+    let mut handle = hs[0];
+    let mut base = nexo_sys::memory_map(handle).unwrap_or_else(|_| nexo_sys::exit(605));
+    let mut bytes = 8u64 * 8 * 4;
+    wm_fill(base, 8, 8, 255, 0, 0);
+    wm_commit(ch, a);
+
+    // Mapeia a saida.
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(606));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(607);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(608));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(609));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(610));
+    let stride = outp.w;
+    // Inicial: A em (4,4) 8x8 -> (5,5) vermelho, (30,30) fundo.
+    if wm_px(ob, stride, 5, 5) != (255, 0, 0) {
+        nexo_sys::exit(611);
+    }
+    if wm_px(ob, stride, 30, 30) != (0, 0, 0) {
+        nexo_sys::exit(612);
+    }
+
+    // Maximiza: A passa a preencher a saida inteira (outp.w x outp.h).
+    let m = nexo_proto::wm::MaximizeRequest { id: a }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(613));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(614);
+    }
+    let (n, nh) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(615));
+    if nexo_proto::wm::decode_maximize_response(&buf[..n]).is_err() || nh != 1 {
+        nexo_sys::exit(616);
+    }
+    base = wm_realloc_apply(base, bytes, handle, hs[0]);
+    handle = hs[0];
+    bytes = (outp.w * outp.h * 4) as u64;
+    wm_fill(base, outp.w, outp.h, 0, 0, 255); // azul, tela cheia
+    wm_commit(ch, a);
+    if wm_px(ob, stride, 30, 30) != (0, 0, 255) {
+        nexo_sys::exit(617);
+    }
+    if wm_px(ob, stride, 0, 0) != (0, 0, 255) {
+        nexo_sys::exit(618);
+    }
+
+    // Restaura: A volta a (4,4) 8x8.
+    let m = nexo_proto::wm::RestoreRequest { id: a }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(619));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(620);
+    }
+    let (n, nh) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(621));
+    if nexo_proto::wm::decode_restore_response(&buf[..n]).is_err() || nh != 1 {
+        nexo_sys::exit(622);
+    }
+    base = wm_realloc_apply(base, bytes, handle, hs[0]);
+    wm_fill(base, 8, 8, 0, 255, 0); // verde
+    wm_commit(ch, a);
+    if wm_px(ob, stride, 5, 5) != (0, 255, 0) {
+        nexo_sys::exit(623);
+    }
+    if wm_px(ob, stride, 30, 30) != (0, 0, 0) {
+        nexo_sys::exit(624);
+    }
+    nexo_sys::log("utest: wm maximize ok — maximizar preenche a tela e restaurar volta ao tamanho");
+    nexo_sys::exit(0)
+}
+
+/// Aplica no cliente uma realocacao do compositor: desmapeia e fecha o buffer antigo, mapeia o
+/// novo handle e devolve a nova base.
+fn wm_realloc_apply(old_base: u64, old_bytes: u64, old_handle: u32, new_handle: u32) -> u64 {
+    let old_pages = old_bytes.div_ceil(4096);
+    if nexo_sys::memory_unmap(old_base, old_pages * 4096) != Status::Ok {
+        nexo_sys::exit(630);
+    }
+    if nexo_sys::handle_close(old_handle) != Status::Ok {
+        nexo_sys::exit(631);
+    }
+    nexo_sys::memory_map(new_handle).unwrap_or_else(|_| nexo_sys::exit(632))
 }
 
 /// Modo 26: toolkit de UI (`nexo-ui`) desenhado atraves do compositor. O cliente pinta o fundo do

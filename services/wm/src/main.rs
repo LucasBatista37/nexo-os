@@ -41,6 +41,8 @@ struct Slot {
     z: i32,
     /// Opacidade da janela (255 = opaca).
     alpha: u8,
+    /// Retângulo salvo antes de maximizar (para `restore`).
+    saved: Option<Rect>,
     /// Handle do wm para o `MemoryObject` (mantido para ler os pixels e liberar no fim).
     mem: Handle,
     base: u64,
@@ -53,10 +55,45 @@ const EMPTY: Slot = Slot {
     rect: Rect::new(0, 0, 0, 0),
     z: 0,
     alpha: 255,
+    saved: None,
     mem: 0,
     base: 0,
     len: 0,
 };
+
+/// Realoca o buffer da superfície `i` para `new_w`×`new_h`: desmapeia/libera o antigo (o cliente
+/// ainda tem o dele até fechar o handle), cria e mapeia o novo e atualiza `rect.w/h`. Devolve o
+/// handle a entregar ao cliente, ou `None` se a alocação falhar (a superfície perde o buffer e é
+/// removida).
+fn realloc_surface(
+    surfaces: &mut [Slot; MAX_SURFACES],
+    i: usize,
+    new_w: i32,
+    new_h: i32,
+) -> Option<Handle> {
+    let old_pages = surfaces[i].len.div_ceil(4096);
+    let _ = nexo_sys::memory_unmap(surfaces[i].base, old_pages * 4096);
+    let _ = nexo_sys::handle_close(surfaces[i].mem);
+    let bytes = (new_w * new_h * 4) as u64;
+    let pages = bytes.div_ceil(4096);
+    let mem = match nexo_sys::memory_create(pages) {
+        Ok(h) => h,
+        Err(_) => {
+            surfaces[i].used = false;
+            return None;
+        }
+    };
+    let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| fail(59, "map realloc"));
+    surfaces[i].rect.w = new_w;
+    surfaces[i].rect.h = new_h;
+    surfaces[i].mem = mem;
+    surfaces[i].base = base;
+    surfaces[i].len = bytes;
+    Some(
+        nexo_sys::handle_duplicate(mem, nexo_sys::abi::RIGHTS_MEMORY_DEFAULT)
+            .unwrap_or_else(|_| fail(60, "dup realloc")),
+    )
+}
 
 fn fail(code: i64, what: &str) -> ! {
     log!("wm: falha: {}", what);
@@ -353,6 +390,7 @@ fn serve(
                 rect: Rect::new(rq.x, rq.y, rq.w, rq.h),
                 z: rq.z,
                 alpha: 255,
+                saved: None,
                 mem,
                 base,
                 len: bytes,
@@ -452,35 +490,72 @@ fn serve(
                 return;
             }
             let i = rq.id as usize;
-            // Desmapeia e libera o buffer antigo (o cliente ainda tem o dele até fechar o handle).
-            let old_pages = surfaces[i].len.div_ceil(4096);
-            let _ = nexo_sys::memory_unmap(surfaces[i].base, old_pages * 4096);
-            let _ = nexo_sys::handle_close(surfaces[i].mem);
-            // Aloca o novo buffer.
-            let bytes = (rq.w * rq.h * 4) as u64;
-            let pages = bytes.div_ceil(4096);
-            let mem = match nexo_sys::memory_create(pages) {
-                Ok(h) => h,
-                Err(_) => {
-                    surfaces[i].used = false; // superfície perdeu o buffer; remove
+            match realloc_surface(surfaces, i, rq.w, rq.h) {
+                Some(client_mem) => {
+                    recompose(surfaces, out_base, out_bytes);
+                    let resp = wm::ResizeResponse { mem: client_mem };
+                    let m = resp.encode_msg(out).unwrap_or(0);
+                    if nexo_sys::channel_send(ch, &out[..m], &resp.handles()) != Status::Ok {
+                        fail(61, "send resize");
+                    }
+                }
+                None => {
                     recompose(surfaces, out_base, out_bytes);
                     reply_err(ch, wm::ResizeRequest::METHOD_ID, E_NO_RES, out);
-                    return;
                 }
+            }
+        }
+        Request::Maximize(rq) => {
+            if !mine(surfaces, rq.id) {
+                reply_err(ch, wm::MaximizeRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            let i = rq.id as usize;
+            if surfaces[i].saved.is_none() {
+                surfaces[i].saved = Some(surfaces[i].rect);
+            }
+            surfaces[i].rect.x = 0;
+            surfaces[i].rect.y = 0;
+            match realloc_surface(surfaces, i, OUT_W, OUT_H) {
+                Some(client_mem) => {
+                    recompose(surfaces, out_base, out_bytes);
+                    let resp = wm::MaximizeResponse { mem: client_mem };
+                    let m = resp.encode_msg(out).unwrap_or(0);
+                    if nexo_sys::channel_send(ch, &out[..m], &resp.handles()) != Status::Ok {
+                        fail(63, "send maximize");
+                    }
+                }
+                None => {
+                    recompose(surfaces, out_base, out_bytes);
+                    reply_err(ch, wm::MaximizeRequest::METHOD_ID, E_NO_RES, out);
+                }
+            }
+        }
+        Request::Restore(rq) => {
+            if !mine(surfaces, rq.id) {
+                reply_err(ch, wm::RestoreRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            let i = rq.id as usize;
+            let Some(saved) = surfaces[i].saved.take() else {
+                reply_err(ch, wm::RestoreRequest::METHOD_ID, E_INVALID, out);
+                return;
             };
-            let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| fail(59, "map resize"));
-            surfaces[i].rect.w = rq.w;
-            surfaces[i].rect.h = rq.h;
-            surfaces[i].mem = mem;
-            surfaces[i].base = base;
-            surfaces[i].len = bytes;
-            let client_mem = nexo_sys::handle_duplicate(mem, nexo_sys::abi::RIGHTS_MEMORY_DEFAULT)
-                .unwrap_or_else(|_| fail(60, "dup resize"));
-            recompose(surfaces, out_base, out_bytes);
-            let resp = wm::ResizeResponse { mem: client_mem };
-            let m = resp.encode_msg(out).unwrap_or(0);
-            if nexo_sys::channel_send(ch, &out[..m], &resp.handles()) != Status::Ok {
-                fail(61, "send resize");
+            surfaces[i].rect.x = saved.x;
+            surfaces[i].rect.y = saved.y;
+            match realloc_surface(surfaces, i, saved.w, saved.h) {
+                Some(client_mem) => {
+                    recompose(surfaces, out_base, out_bytes);
+                    let resp = wm::RestoreResponse { mem: client_mem };
+                    let m = resp.encode_msg(out).unwrap_or(0);
+                    if nexo_sys::channel_send(ch, &out[..m], &resp.handles()) != Status::Ok {
+                        fail(64, "send restore");
+                    }
+                }
+                None => {
+                    recompose(surfaces, out_base, out_bytes);
+                    reply_err(ch, wm::RestoreRequest::METHOD_ID, E_NO_RES, out);
+                }
             }
         }
         Request::Output(_) => {
