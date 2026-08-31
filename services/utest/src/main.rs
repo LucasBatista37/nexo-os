@@ -75,6 +75,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         29 => wm_present_client(),
         30 => wm_tile(),
         31 => wm_real_input(),
+        32 => wm_grab(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2399,6 +2400,101 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 32: captura segura de entrada. Com duas janelas, foca B por clique, captura A (`grab`) e
+/// confere que (a) as teclas passam a ir para A mesmo com B em foco e (b) cliques sao engolidos
+/// (B continua na frente). Depois do `ungrab`, o clique volta a focar/trazer a frente.
+fn wm_grab() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0); // foco na criacao: A
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    wm_commit(ch, a);
+    let (b, b_base) = wm_create(ch, 4, 4, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0);
+    wm_commit(ch, b);
+
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(720));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(721);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(722));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(723));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(724));
+    let stride = outp.w;
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(725);
+    }
+
+    // fonte de entrada
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(726));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(727));
+    if nexo_sys::channel_send(ch, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(728);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(729),
+    }
+
+    // 1) clique em B (10,10) muda o foco para B; a tecla seguinte (FIFO) prova o novo foco.
+    wm_click(inj, 10, 10);
+    wm_key(inj, 30, 1);
+    let ev = wm_recv_key(ch, &mut buf, &mut hs);
+    if ev.surface != b || ev.code != 30 {
+        nexo_sys::exit(730);
+    }
+
+    // 2) captura A: teclas vao para A mesmo com B em foco; cliques sao engolidos.
+    let m = nexo_proto::wm::GrabRequest { id: a }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(731));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(732);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_grab_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(733),
+    }
+    wm_click(inj, 2, 2); // engolido: normalmente traria A a frente
+    wm_key(inj, 48, 1);
+    let ev = wm_recv_key(ch, &mut buf, &mut hs);
+    if ev.surface != a || ev.code != 48 {
+        nexo_sys::exit(734); // a captura nao desviou a tecla para A
+    }
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(735); // o clique nao foi engolido (A veio a frente)
+    }
+
+    // 3) solta a captura: o clique volta a focar/trazer a frente.
+    let m = nexo_proto::wm::UngrabRequest { id: a }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(736));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(737);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_ungrab_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(738),
+    }
+    wm_click(inj, 2, 2);
+    wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 739); // A a frente de novo
+    wm_key(inj, 28, 1);
+    let ev = wm_recv_key(ch, &mut buf, &mut hs);
+    if ev.surface != a || ev.code != 28 {
+        nexo_sys::exit(740);
+    }
+    nexo_sys::log("utest: wm grab ok — captura desvia o teclado e engole cliques; ungrab restaura");
     nexo_sys::exit(0)
 }
 

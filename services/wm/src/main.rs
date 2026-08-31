@@ -47,6 +47,7 @@ const E_INVALID: u32 = 1;
 const E_NO_RES: u32 = 2;
 const E_NO_SURFACE: u32 = 3;
 const E_NO_SESSION: u32 = 4;
+const E_GRABBED: u32 = 5;
 
 struct Slot {
     used: bool,
@@ -246,6 +247,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut px: i32 = 0;
     let mut py: i32 = 0;
     let mut focused: Option<usize> = None;
+    let mut grabbed: Option<usize> = None;
     let mut meta_down = false;
 
     let mut buf = [0u8; 512];
@@ -259,6 +261,11 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             && !surfaces[i].used
         {
             focused = None;
+        }
+        if let Some(i) = grabbed
+            && !surfaces[i].used
+        {
+            grabbed = None;
         }
         for slot in 0..MAX_CLIENTS {
             let Some(ch) = sessions[slot] else {
@@ -328,6 +335,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 &mut out,
                 fb.as_ref(),
                 &mut focused,
+                &mut grabbed,
             );
         }
         // Processa eventos de entrada (evdev crus, 8 bytes cada).
@@ -350,6 +358,10 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                             (EV_ABS, ABS_X, v) => px = v as i32,
                             (EV_ABS, ABS_Y, v) => py = v as i32,
                             (EV_KEY, BTN_LEFT, 1) => {
+                                // captura em vigor: cliques são engolidos (ninguém rouba o foco)
+                                if grabbed.is_some() {
+                                    continue;
+                                }
                                 // foco por clique: traz para a frente a superfície sob o ponteiro.
                                 let hit = surfaces
                                     .iter()
@@ -392,8 +404,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                 }
                             }
                             (EV_KEY, c, v) => {
-                                // tecla comum: entrega à janela em foco (se houver).
-                                if let Some(i) = focused
+                                // tecla comum: a captura tem precedência sobre o foco.
+                                if let Some(i) = grabbed.or(focused)
                                     && surfaces[i].used
                                     && let Some(sess) = sessions[surfaces[i].owner]
                                 {
@@ -447,6 +459,7 @@ fn serve(
     out: &mut [u8; 512],
     fb: Option<&FbOut>,
     focused: &mut Option<usize>,
+    grabbed: &mut Option<usize>,
 ) {
     // Uma superfície só pode ser tocada pela sessão que a criou.
     let mine = |surfaces: &[Slot; MAX_SURFACES], id: u32| -> bool {
@@ -675,6 +688,33 @@ fn serve(
                 recompose(surfaces, out_base, out_bytes, fb);
             }
             let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::Grab(rq) => {
+            if !mine(surfaces, rq.id) {
+                reply_err(ch, wm::GrabRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            let i = rq.id as usize;
+            let m = if grabbed.is_some() && *grabbed != Some(i) {
+                wm::encode_error(wm::GrabRequest::METHOD_ID, E_GRABBED, out).unwrap_or(0)
+            } else {
+                *grabbed = Some(i);
+                wm::GrabResponse {}.encode_msg(out).unwrap_or(0)
+            };
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::Ungrab(rq) => {
+            if !mine(surfaces, rq.id) {
+                reply_err(ch, wm::UngrabRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            let m = if *grabbed == Some(rq.id as usize) {
+                *grabbed = None;
+                wm::UngrabResponse {}.encode_msg(out).unwrap_or(0)
+            } else {
+                wm::encode_error(wm::UngrabRequest::METHOD_ID, E_INVALID, out).unwrap_or(0)
+            };
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::Output(_) => {

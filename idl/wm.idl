@@ -3,8 +3,8 @@
 # O wm compoe todas as superficies (de todas as sessoes) na saida (outro MemoryObject) por z.
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
-# inexistente ou de outra sessao, 4 = limite de sessoes.
-protocol wm 1.8
+# inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra superficie.
+protocol wm 1.9
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -141,6 +141,27 @@ method 14 restore {
 # composicao (vizinho mais proximo). Gesto global de layout; qualquer sessao pode pedir.
 method 15 tile {
     request {
+    }
+    response {
+    }
+}
+
+# Captura segura de entrada: enquanto a superficie `id` detem a captura, TODO o teclado vai para
+# ela (ignorando o foco) e cliques sao engolidos (nenhuma janela e trazida a frente/focada) — para
+# entrada sensivel (ex.: senha) sem roubo de foco. So a sessao dona pode capturar/soltar; uma
+# captura por vez; solta sozinha se a superficie e destruida ou a sessao desconecta.
+method 16 grab {
+    request {
+        id: u32,
+    }
+    response {
+    }
+}
+
+# Solta a captura da superficie `id` (erro 1 se ela nao detem a captura).
+method 17 ungrab {
+    request {
+        id: u32,
     }
     response {
     }
