@@ -84,6 +84,18 @@ method 7 tcp_recv {
     }
 }
 
+# Escuta em `port` e bloqueia ate aceitar uma conexao de entrada (erro 3 = tempo esgotado).
+method 9 tcp_listen {
+    request {
+        port: u16,
+    }
+    response {
+        conn: u32,
+        peer_ip: bytes<4>,
+        peer_port: u16,
+    }
+}
+
 # Encerra a conexao (FIN; erro 4 se ja reiniciada).
 method 8 tcp_close {
     request {

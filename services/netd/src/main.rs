@@ -155,6 +155,26 @@ fn emit_seg(sock: &nsk::tcp::TcpSocket, seg: nsk::tcp::TxSeg) {
 fn handle_tcp(frame: &[u8]) {
     let now = nexo_sys::time_now();
     let st = netd();
+    // SYN de entrada para um socket em escuta?
+    if let Some((_, _, _, p)) = nsk::eth_parse(frame)
+        && let Some(ip) = nsk::ipv4_parse(p)
+        && ip.proto == nsk::IPPROTO_TCP
+    {
+        let src = ip.src;
+        for slot in st.tcp.iter_mut() {
+            let Some(sock) = slot else { continue };
+            if sock.state != nsk::tcp::State::Listen {
+                continue;
+            }
+            let Some(seg) = nsk::tcp_parse(frame, src, sock.local_port) else {
+                continue;
+            };
+            if let Some(out) = sock.on_syn(src, &seg, now) {
+                emit_seg(sock, out);
+                return;
+            }
+        }
+    }
     for slot in st.tcp.iter_mut() {
         let Some(sock) = slot else { continue };
         let Some(seg) = nsk::tcp_parse(frame, sock.remote_ip, sock.local_port) else {
@@ -632,6 +652,48 @@ fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
             };
             resp.data_len = c.take_rx(&mut resp.data) as u32;
             resp.encode_msg(out).unwrap_or(0)
+        }
+        Request::TcpListen(rq) => {
+            let Some(i) = (0..TCP_CONNS).find(|&i| {
+                st.tcp[i].is_none()
+                    || st.tcp[i]
+                        .as_ref()
+                        .is_some_and(|c| c.state == nsk::tcp::State::Closed)
+            }) else {
+                return sock::encode_error(sock::TcpListenRequest::METHOD_ID, E_NO_RES, out)
+                    .unwrap_or(0);
+            };
+            let iss = (nexo_sys::time_now() as u32) | 1;
+            st.tcp[i] = Some(nsk::tcp::TcpSocket::listen(rq.port, iss));
+            let start = nexo_sys::time_now();
+            loop {
+                pump();
+                match st.tcp[i].as_ref().map(|c| c.state) {
+                    Some(nsk::tcp::State::Established) => {
+                        let c = st.tcp[i].as_ref().unwrap();
+                        break sock::TcpListenResponse {
+                            conn: i as u32,
+                            peer_ip: c.remote_ip,
+                            peer_ip_len: 4,
+                            peer_port: c.remote_port,
+                        }
+                        .encode_msg(out)
+                        .unwrap_or(0);
+                    }
+                    Some(nsk::tcp::State::Closed) | None => {
+                        st.tcp[i] = None;
+                        break sock::encode_error(sock::TcpListenRequest::METHOD_ID, E_RESET, out)
+                            .unwrap_or(0);
+                    }
+                    _ => {}
+                }
+                if nexo_sys::time_now() - start > 30_000_000_000 {
+                    st.tcp[i] = None;
+                    break sock::encode_error(sock::TcpListenRequest::METHOD_ID, E_TIMEOUT, out)
+                        .unwrap_or(0);
+                }
+                nexo_sys::sleep_ns(2_000_000);
+            }
         }
         Request::TcpClose(rq) => {
             let i = rq.conn as usize;

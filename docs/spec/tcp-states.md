@@ -1,10 +1,11 @@
 # TCP no `netd` — estados implementados (v0)
 
-Máquina de estados do cliente TCP do serviço de rede residente (`services/netd`), exigida pelo
-Plano (§Fase 4: "TCP com suíte de testes e estados documentados"). Só o lado **ativo**
-(conexões de saída) existe nesta versão; escuta/aceitação vem depois.
+Máquina de estados TCP do serviço de rede residente (`services/netd`), exigida pelo
+Plano (§Fase 4: "TCP com suíte de testes e estados documentados"). Lados **ativo** (saída)
+e **passivo** (uma escuta/aceitação por vez; sem fila de backlog).
 
 ```text
+CLOSED ──listen()──▶ LISTEN ──SYN/SYN-ACK──▶ SYN_RCVD ──ACK válido──▶ ESTABLISHED
 CLOSED ──connect()/SYN──▶ SYN_SENT ──SYN-ACK válido/ACK──▶ ESTABLISHED
 SYN_SENT ──RST──▶ CLOSED (erro 4)          SYN_SENT ──10 s──▶ CLOSED (erro 3)
 

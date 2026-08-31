@@ -6,11 +6,15 @@
 
 use crate::{TCP_ACK, TCP_FIN, TCP_PSH, TCP_RST, TCP_SYN, TcpSegment};
 
-/// Estados implementados (subconjunto da RFC 9293; só o lado ativo).
+/// Estados implementados (subconjunto da RFC 9293; lados ativo e passivo).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     /// Sem conexão.
     Closed,
+    /// Aguardando um SYN de entrada (lado passivo).
+    Listen,
+    /// SYN recebido; SYN-ACK enviado, aguardando o ACK final.
+    SynRcvd,
     /// SYN enviado; aguardando SYN-ACK.
     SynSent,
     /// Conexão aberta.
@@ -77,6 +81,54 @@ pub struct TcpSocket {
 }
 
 impl TcpSocket {
+    /// Escuta em `local_port` (lado passivo): devolve o socket em `Listen`.
+    pub fn listen(local_port: u16, iss: u32) -> Self {
+        TcpSocket {
+            state: State::Listen,
+            reset: false,
+            peer_closed: false,
+            local_port,
+            remote_ip: [0; 4],
+            remote_port: 0,
+            snd_nxt: iss.wrapping_add(1),
+            snd_una: iss,
+            rcv_nxt: 0,
+            tx: [0; MSS],
+            tx_len: 0,
+            tx_seq: iss,
+            tx_flags: 0,
+            tx_deadline: 0,
+            tx_retries: 0,
+            tx_inflight: false,
+            rx: [0; RX_CAP],
+            rx_len: 0,
+        }
+    }
+
+    /// Em `Listen`, aceita o SYN de `(src_ip, seg)`: devolve o SYN-ACK a emitir.
+    pub fn on_syn(&mut self, src_ip: [u8; 4], seg: &TcpSegment<'_>, now: u64) -> Option<TxSeg> {
+        if self.state != State::Listen || seg.flags & TCP_SYN == 0 || seg.flags & TCP_ACK != 0 {
+            return None;
+        }
+        self.remote_ip = src_ip;
+        self.remote_port = seg.src_port;
+        self.rcv_nxt = seg.seq.wrapping_add(1);
+        self.state = State::SynRcvd;
+        // SYN-ACK é a pendência retransmissível
+        self.tx_len = 0;
+        self.tx_seq = self.snd_una;
+        self.tx_flags = TCP_SYN | TCP_ACK;
+        self.tx_deadline = now + RTO_NS;
+        self.tx_retries = 0;
+        self.tx_inflight = true;
+        Some(TxSeg {
+            seq: self.tx_seq,
+            ack: self.rcv_nxt,
+            flags: self.tx_flags,
+            payload_len: 0,
+        })
+    }
+
     /// Abre a conexão: devolve o socket em `SynSent` e o SYN a emitir.
     pub fn connect(
         local_port: u16,
@@ -151,6 +203,22 @@ impl TcpSocket {
             }
         }
         match self.state {
+            State::SynRcvd => {
+                if seg.flags & TCP_ACK != 0 && seg.ack == self.snd_nxt {
+                    self.state = State::Established;
+                    // dados podem vir já neste segmento
+                    if !seg.payload.is_empty() && seg.seq == self.rcv_nxt {
+                        let take = seg.payload.len().min(RX_CAP - self.rx_len);
+                        if take == seg.payload.len() {
+                            self.rx[self.rx_len..self.rx_len + take].copy_from_slice(seg.payload);
+                            self.rx_len += take;
+                            self.rcv_nxt = self.rcv_nxt.wrapping_add(take as u32);
+                            return Some(self.ack_seg());
+                        }
+                    }
+                }
+                None
+            }
             State::SynSent => {
                 if seg.flags & (TCP_SYN | TCP_ACK) == TCP_SYN | TCP_ACK && seg.ack == self.snd_nxt {
                     self.rcv_nxt = seg.seq.wrapping_add(1);
@@ -200,7 +268,7 @@ impl TcpSocket {
                 }
                 None
             }
-            State::CloseWait | State::Closed => None,
+            State::CloseWait | State::Closed | State::Listen => None,
         }
     }
 
@@ -435,6 +503,49 @@ mod tests {
                 .is_none()
         );
         assert_eq!(s.state, State::Closed);
+    }
+
+    #[test]
+    fn passive_open_listen_syn_rcvd() {
+        let mut s = TcpSocket::listen(8080, 9000);
+        assert_eq!(s.state, State::Listen);
+        // SYN de entrada
+        let syn = TcpSegment {
+            src_port: 51000,
+            dst_port: 8080,
+            seq: 300,
+            ack: 0,
+            flags: TCP_SYN,
+            window: 8192,
+            payload: b"",
+        };
+        let sa = s.on_syn([10, 0, 2, 2], &syn, 0).unwrap();
+        assert_eq!((sa.flags, sa.seq, sa.ack), (TCP_SYN | TCP_ACK, 9000, 301));
+        assert_eq!(s.state, State::SynRcvd);
+        // sem ACK: SYN-ACK retransmitido
+        let r = s.poll(RTO_NS).unwrap();
+        assert_eq!(r.flags, TCP_SYN | TCP_ACK);
+        // ACK final com dados juntos
+        let ack = s.on_segment(
+            &TcpSegment {
+                src_port: 51000,
+                dst_port: 8080,
+                seq: 301,
+                ack: 9001,
+                flags: TCP_ACK | TCP_PSH,
+                window: 8192,
+                payload: b"oi",
+            },
+            0,
+        );
+        assert_eq!(s.state, State::Established);
+        assert_eq!(ack.unwrap().ack, 303);
+        let mut buf = [0u8; 8];
+        assert_eq!(s.take_rx(&mut buf), 2);
+        assert_eq!(&buf[..2], b"oi");
+        // resposta e fecho ativo funcionam como no lado cliente
+        let tx = s.send(b"resp", 0).unwrap();
+        assert_eq!(tx.seq, 9001);
     }
 
     #[test]

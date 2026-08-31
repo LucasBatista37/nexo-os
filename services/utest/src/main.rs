@@ -1775,5 +1775,55 @@ fn sock_client(tcp_port: u16, udp_port: u16) -> ! {
         "utest: sock tcp ok — conectou, enviou e recebeu por 10.0.2.2:{}",
         tcp_port
     );
+    // 5. escuta: o harness conecta em nos via hostfwd (porta 8080 do convidado)
+    use nexo_proto::sock::{TcpListenRequest, decode_tcp_listen_response};
+    let l = call!(
+        TcpListenRequest { port: 8080 },
+        decode_tcp_listen_response,
+        350
+    );
+    nexo_rt::log!(
+        "utest: sock listen — conexao de entrada de {}.{}.{}.{}:{}",
+        l.peer_ip()[0],
+        l.peer_ip()[1],
+        l.peer_ip()[2],
+        l.peer_ip()[3],
+        l.peer_port
+    );
+    let start = nexo_sys::time_now();
+    loop {
+        let r = call!(
+            TcpRecvRequest { conn: l.conn },
+            decode_tcp_recv_response,
+            354
+        );
+        if !r.data().is_empty() {
+            if r.data() != b"ola do host\n" {
+                nexo_sys::exit(358);
+            }
+            break;
+        }
+        if r.closed != 0 {
+            nexo_sys::exit(359);
+        }
+        if nexo_sys::time_now() - start > 20_000_000_000 {
+            nexo_rt::log!("utest: sock listen: sem dados em 20 s");
+            nexo_sys::exit(360)
+        }
+        nexo_sys::sleep_ns(20_000_000);
+    }
+    let mut t2 = TcpSendRequest {
+        conn: l.conn,
+        data: [0; 1400],
+        data_len: 14,
+    };
+    t2.data[..14].copy_from_slice(b"nexo-listen-ok");
+    call!(t2, decode_tcp_send_response, 362);
+    call!(
+        TcpCloseRequest { conn: l.conn },
+        decode_tcp_close_response,
+        366
+    );
+    nexo_rt::log!("utest: sock listen ok — servimos uma conexao de entrada na porta 8080");
     nexo_sys::exit(0)
 }

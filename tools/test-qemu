@@ -471,6 +471,43 @@ def run_net_scenario(timeout: float) -> bool:
     uth = threading.Thread(target=userve, daemon=True)
     uth.start()
 
+    # porta livre para o hostfwd (conexao de entrada no convidado)
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    fwd_port = probe.getsockname()[1]
+    probe.close()
+
+    def connector():
+        # tenta ate o convidado escutar (o utest so escuta depois das fases anteriores)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                c = socket.create_connection(("127.0.0.1", fwd_port), timeout=3)
+            except OSError:
+                time.sleep(0.5)
+                continue
+            try:
+                c.settimeout(20)
+                c.sendall(b"ola do host\n")
+                data = b""
+                while len(data) < 14:
+                    chunk = c.recv(64)
+                    if not chunk:
+                        break
+                    data += chunk
+                c.close()
+                if data == b"nexo-listen-ok":
+                    return
+            except OSError:
+                try:
+                    c.close()
+                except OSError:
+                    pass
+                time.sleep(0.5)
+
+    cth = threading.Thread(target=connector, daemon=True)
+    cth.start()
+
     image = BUILD / "nexo-net.img"
     run([sys.executable, ROOT / "tools" / "build-image", "--no-build",
          "--cmdline", f"selftest=0 net-test=1 tcp-port={tcp_port} udp-port={udp_port} exit",
@@ -479,7 +516,7 @@ def run_net_scenario(timeout: float) -> bool:
     logfile.parent.mkdir(parents=True, exist_ok=True)
     log("=== cenario 'net' (ARP com o slirp) ===")
     rc = subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
-                          "--disk", BUILD / "nexo-net-data.img", "--net",
+                          "--disk", BUILD / "nexo-net-data.img", "--net", "--net-hostfwd", str(fwd_port),
                           "--timeout", str(timeout), "--log", logfile])
     text = logfile.read_bytes().decode("utf-8", errors="replace")
     ok = True
@@ -500,6 +537,8 @@ def run_net_scenario(timeout: float) -> bool:
                 r"utest: sock dns ok — example\.com = \d+\.\d+\.\d+\.\d+ \(2a consulta do cache\)",
                 r"utest: sock udp ok — eco de 10\.0\.2\.2:\d+",
                 r"utest: sock tcp ok — conectou, enviou e recebeu por 10\.0\.2\.2:\d+",
+                r"utest: sock listen — conexao de entrada de 10\.0\.2\.2:\d+",
+                r"utest: sock listen ok — servimos uma conexao de entrada na porta 8080",
                 r"\[NET\] fase 2 \(netd\) terminou com 0",
                 r"\[NET\] teste de rede terminou com 0",
                 r"NEXO: boot completo"]:

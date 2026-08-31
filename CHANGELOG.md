@@ -114,6 +114,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo-netstack::tcp`: a máquina de estados TCP saiu do `netd` para a biblioteca (`TcpSocket`: connect/on_segment/send/close/poll/take_rx), **com retransmissão** (RTO 500 ms, 5 tentativas → conexão reiniciada) e ACK duplicado para segmentos fora de ordem; suíte de host com 7 testes de estados (handshake, dados, retransmissões até RST, fecho ativo/passivo, RST, contrapressão).
 - `netd` reescrito sobre a biblioteca: só monta quadros e bombeia o temporizador (`tcp_timers` no laço de eventos); `docs/spec/tcp-states.md` atualizado.
 
+### Adicionado (Fase 4, bloco 8 — escuta TCP: conexões de entrada)
+- `nexo-netstack::tcp`: lado passivo — `listen()`/`on_syn()` (LISTEN → SYN_RCVD → ESTABLISHED, SYN-ACK retransmissível, dados no ACK final), com teste de host dedicado.
+- `netd`: `tcp_listen{port}` no `nexo.sock` (bloqueia até aceitar; devolve conexão + par); SYNs de entrada roteados aos sockets em escuta.
+- Cenário `net`, fase 3: `run-qemu --net-hostfwd` encaminha uma porta do host para `10.0.2.15:8080`; o harness **conecta para dentro do Nexo**, o `netd` aceita, recebe `ola do host` e responde `nexo-listen-ok`.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

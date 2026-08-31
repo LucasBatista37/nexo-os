@@ -39,7 +39,7 @@ FAILURE_EXIT = 35  # (0x11 << 1) | 1
 
 
 def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk=None, console_socket=None,
-             qmp_socket=None, input_keyboard=False, net=False) -> list:
+             qmp_socket=None, input_keyboard=False, net=False, net_hostfwd=0) -> list:
     qemu = require("qemu-system-x86_64", "Instale QEMU (macOS: brew install qemu; Debian: apt install qemu-system-x86)")
     ovmf = find_ovmf()
     cmd = [
@@ -76,7 +76,8 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
     if input_keyboard:
         cmd += ["-device", "virtio-keyboard-pci,disable-legacy=on"]
     if net:
-        cmd += ["-netdev", "user,id=nexonet", "-device", "virtio-net-pci,netdev=nexonet,disable-legacy=on"]
+        fwd = f",hostfwd=tcp:127.0.0.1:{net_hostfwd}-10.0.2.15:8080" if net_hostfwd else ""
+        cmd += ["-netdev", f"user,id=nexonet{fwd}", "-device", "virtio-net-pci,netdev=nexonet,disable-legacy=on"]
     if qmp_socket is not None:
         cmd += ["-qmp", f"unix:{qmp_socket},server=on,wait=off"]
     cmd += [
@@ -105,6 +106,8 @@ def main() -> int:
                     help="abre um socket QMP (servidor) neste caminho")
     ap.add_argument("--input-keyboard", action="store_true", help="anexa um teclado virtio-keyboard-pci")
     ap.add_argument("--net", action="store_true", help="anexa virtio-net-pci com rede user-mode (slirp)")
+    ap.add_argument("--net-hostfwd", type=int, default=0, metavar="PORTA",
+                    help="com --net: encaminha 127.0.0.1:PORTA do host para 10.0.2.15:8080 do convidado")
     ap.add_argument("--console-socket", default=None, metavar="PATH",
                     help="anexa uma virtio-console ligada a um socket UNIX (servidor) neste caminho")
     ap.add_argument("--kill-on", default=None, metavar="REGEX",
@@ -125,7 +128,7 @@ def main() -> int:
             with open(disk, "wb") as f:
                 f.truncate(16 * 1024 * 1024)
     cmd = qemu_cmd(image, a.test, a.gdb, a.extra, a.smp, disk, a.console_socket, a.qmp_socket, a.input_keyboard,
-                   a.net)
+                   a.net, a.net_hostfwd)
     log("$ " + " ".join(cmd))
     if not a.test and not a.log:
         return subprocess.call(cmd)
