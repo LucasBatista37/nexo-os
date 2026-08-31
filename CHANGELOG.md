@@ -275,7 +275,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 42 + auto-teste de boot `user_wm_center`: publica "a", liga o DND, publica "b" (sem banner) e o shell lê ["b", "a"] na ordem; `clear` esvazia; sessão comum é negada. 65 testes no boot.
 
 ### Adicionado (Fase 5, bloco 28 — navegação por teclado no toolkit)
-- `nexo-ui`: `Nav` — índice de foco sobre N widgets com `next()`/`prev()` (Tab/Shift+Tab) ciclando nas duas direções; `draw_focus_ring` desenha o anel de foco (cor de acento, 1 px por fora do widget) para a navegação ser visível. Com o Meta+Tab do compositor (entre janelas), forma a base da navegação por teclado. Testes de host (ciclo com wrap; anel desenhado sem cobrir o widget).
+- `nexo-ui`: `Nav` — índice de foco sobre N widgets com `focus_next()`/`focus_prev()` (Tab/Shift+Tab) ciclando nas duas direções; `draw_focus_ring` desenha o anel de foco (cor de acento, 1 px por fora do widget) para a navegação ser visível. Com o Meta+Tab do compositor (entre janelas), forma a base da navegação por teclado. Testes de host (ciclo com wrap; anel desenhado sem cobrir o widget).
 
 ### Adicionado (Fase 2, extra — memória compartilhada entre processos)
 - `MemoryObject` (`kind` 4) e syscalls `memory_create` (28, aloca N páginas zeradas ≤ 256) / `memory_map` (29, mapeia `USER|RW` cacheável na região de dispositivos). Transferir o handle por canal compartilha as **mesmas páginas físicas** entre processos; o objeto possui os frames e os libera quando ninguém mais o referencia (mapeamento sem posse, como MMIO). `sdk/nexo-sys` ganhou os wrappers.

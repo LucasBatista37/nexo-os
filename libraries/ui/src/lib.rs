@@ -176,13 +176,13 @@ impl Nav {
     }
 
     /// Avança o foco (Tab), ciclando; devolve o novo índice.
-    pub fn next(&mut self) -> usize {
+    pub fn focus_next(&mut self) -> usize {
         self.index = (self.index + 1) % self.count;
         self.index
     }
 
     /// Recua o foco (Shift+Tab), ciclando; devolve o novo índice.
-    pub fn prev(&mut self) -> usize {
+    pub fn focus_prev(&mut self) -> usize {
         self.index = (self.index + self.count - 1) % self.count;
         self.index
     }
@@ -265,11 +265,11 @@ mod tests {
     fn nav_cycles_focus_both_ways() {
         let mut n = Nav::new(3);
         assert_eq!(n.index, 0);
-        assert_eq!(n.next(), 1);
-        assert_eq!(n.next(), 2);
-        assert_eq!(n.next(), 0); // cicla
-        assert_eq!(n.prev(), 2); // cicla para tras
-        assert_eq!(n.prev(), 1);
+        assert_eq!(n.focus_next(), 1);
+        assert_eq!(n.focus_next(), 2);
+        assert_eq!(n.focus_next(), 0); // cicla
+        assert_eq!(n.focus_prev(), 2); // cicla para tras
+        assert_eq!(n.focus_prev(), 1);
     }
 
     #[test]
