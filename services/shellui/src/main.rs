@@ -2,7 +2,9 @@
 //! **bootstrap** do `nexo.wm` (privilégio de shell), handle 1 = canal com os apps/orquestrador.
 //! Desenha a **Faixa de Atividades**: uma barra no rodapé do display 0 com uma célula por janela
 //! (via `surface_info`); o clique numa célula chega como evento `pointer` e o shell **ativa** a
-//! janela (`activate`: Contexto + frente + foco). Também faz *broker* de sessões: um app pede
+//! janela (`activate`: Contexto + frente + foco). O clique na **zona direita** da barra abre e
+//! fecha a **Central de Ações**: um painel que lista as notificações do registro do compositor
+//! (inclusive as suprimidas pelo não-perturbe). Também faz *broker* de sessões: um app pede
 //! "sess" pelo canal e recebe a ponta de uma sessão `nexo.wm` nova.
 #![no_std]
 #![no_main]
@@ -27,6 +29,13 @@ const CELL_STEP: i32 = 14;
 const CELL_W: i32 = 12;
 const CELL_Y: i32 = 2;
 const CELL_H: i32 = 6;
+/// Zona direita da barra: abre/fecha a Central de Ações.
+const CENTER_ZONE_X: i32 = 50;
+/// Painel da Central (na tela).
+const PANEL_X: i32 = 16;
+const PANEL_Y: i32 = 8;
+const PANEL_W: i32 = 40;
+const PANEL_H: i32 = 28;
 
 fn fail(code: i64, what: &str) -> ! {
     log!("shellui: falha: {}", what);
@@ -59,6 +68,18 @@ fn rpc(
         }
         return (n, nh);
     }
+}
+
+/// Painel da Central de Ações (aberto/fechado).
+struct Panel {
+    id: u32,
+}
+
+/// O que um clique na barra pediu.
+enum BarAction {
+    None,
+    Activated,
+    ToggleCenter,
 }
 
 struct Bar {
@@ -119,7 +140,8 @@ fn redraw(
     let _ = rpc(&out[..m], &[], buf, hs, pending);
 }
 
-/// Clique na barra (coordenadas locais): ativa a janela da célula atingida.
+/// Clique na barra (coordenadas locais): ativa a janela da célula atingida, ou alterna a Central
+/// de Ações na zona direita.
 fn bar_click(
     bar: &Bar,
     x: i32,
@@ -127,9 +149,12 @@ fn bar_click(
     buf: &mut [u8],
     hs: &mut [u32; 1],
     pending: &mut Option<wm::PointerEvent>,
-) -> bool {
+) -> BarAction {
+    if x >= CENTER_ZONE_X {
+        return BarAction::ToggleCenter;
+    }
     if !(CELL_Y..CELL_Y + CELL_H).contains(&y) {
-        return false;
+        return BarAction::None;
     }
     for k in 0..bar.cell_n {
         let cx = CELL_X0 + k as i32 * CELL_STEP;
@@ -139,10 +164,132 @@ fn bar_click(
                 .encode_msg(&mut out)
                 .unwrap_or_else(|_| fail(66, "enc activate"));
             let (n, _) = rpc(&out[..m], &[], buf, hs, pending);
-            return wm::decode_activate_response(&buf[..n]).is_ok();
+            if wm::decode_activate_response(&buf[..n]).is_ok() {
+                return BarAction::Activated;
+            }
+            return BarAction::None;
         }
     }
-    false
+    BarAction::None
+}
+
+/// Abre a Central de Ações: cria o painel, pinta fundo/borda e um marcador (bullet) por
+/// notificação do registro do compositor, e commita.
+fn open_center(
+    theme: &Theme,
+    buf: &mut [u8],
+    hs: &mut [u32; 1],
+    pending: &mut Option<wm::PointerEvent>,
+) -> Panel {
+    let mut out = [0u8; 128];
+    let req = wm::CreateSurfaceRequest {
+        x: PANEL_X,
+        y: PANEL_Y,
+        w: PANEL_W,
+        h: PANEL_H,
+        z: 6000,
+        display: 0,
+    };
+    let m = req
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| fail(81, "enc painel"));
+    if nexo_sys::channel_send(WM, &out[..m], &[]) != Status::Ok {
+        fail(82, "send painel");
+    }
+    // resposta com handle: recebida fora do rpc (que não devolve handles), pulando eventos
+    let (id, base) = loop {
+        let (n, nh) = match nexo_sys::channel_recv(WM, buf, hs) {
+            Ok(v) => v,
+            Err(_) => fail(83, "recv painel"),
+        };
+        if let Ok(ev) = wm::decode_pointer_event(&buf[..n]) {
+            *pending = Some(ev);
+            continue;
+        }
+        if wm::decode_key_event(&buf[..n]).is_ok() {
+            continue;
+        }
+        let cs = wm::decode_create_surface_response(&buf[..n])
+            .unwrap_or_else(|_| fail(84, "dec painel"));
+        if nh != 1 {
+            fail(85, "sem handle do painel");
+        }
+        break (
+            cs.id,
+            nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| fail(86, "map painel")),
+        );
+    };
+    // lista as notificações (até 3) pelo privilégio de shell
+    let mut bullets = 0usize;
+    for idx in 0..3u32 {
+        let m = wm::NotificationInfoRequest { index: idx }
+            .encode_msg(&mut out)
+            .unwrap_or_else(|_| fail(87, "enc ninfo"));
+        let (n, _) = rpc(&out[..m], &[], buf, hs, pending);
+        let info =
+            wm::decode_notification_info_response(&buf[..n]).unwrap_or_else(|_| fail(88, "ninfo"));
+        if info.used == 1 {
+            bullets += 1;
+        }
+    }
+    {
+        // SAFETY: base .. base+PANEL_W*PANEL_H*4 foi mapeada por memory_map neste processo.
+        let px = unsafe {
+            core::slice::from_raw_parts_mut(base as *mut u8, (PANEL_W * PANEL_H * 4) as usize)
+        };
+        let mut s = Surface::new(
+            px,
+            PANEL_W as u32,
+            PANEL_H as u32,
+            PANEL_W as u32,
+            PixelFormat::Rgbx8888,
+        )
+        .unwrap_or_else(|| fail(89, "superficie do painel"));
+        s.clear(theme.surface);
+        s.stroke_rect(Rect::new(0, 0, PANEL_W, PANEL_H), theme.accent);
+        for k in 0..bullets {
+            s.fill_rect(Rect::new(3, 3 + k as i32 * 8, 4, 4), theme.accent);
+        }
+    }
+    let m = wm::CommitRequest { id }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| fail(90, "enc commit painel"));
+    let _ = rpc(&out[..m], &[], buf, hs, pending);
+    let _ = base; // o painel é repintado só na reabertura; o mapeamento fica até o destroy
+    Panel { id }
+}
+
+/// Processa um clique na barra: ativa janela ou alterna a Central de Ações (avisando pelo canal).
+#[allow(clippy::too_many_arguments)]
+fn handle_bar_click(
+    bar: &Bar,
+    x: i32,
+    y: i32,
+    theme: &Theme,
+    panel: &mut Option<Panel>,
+    buf: &mut [u8],
+    hs: &mut [u32; 1],
+    pending: &mut Option<wm::PointerEvent>,
+) {
+    match bar_click(bar, x, y, buf, hs, pending) {
+        BarAction::Activated => {
+            let _ = nexo_sys::channel_send(PIPE, b"activated", &[]);
+        }
+        BarAction::ToggleCenter => {
+            if let Some(p) = panel.take() {
+                let mut out = [0u8; 64];
+                let m = wm::DestroyRequest { id: p.id }
+                    .encode_msg(&mut out)
+                    .unwrap_or_else(|_| fail(91, "enc destroy painel"));
+                let _ = rpc(&out[..m], &[], buf, hs, pending);
+                let _ = nexo_sys::channel_send(PIPE, b"cclosed", &[]);
+            } else {
+                *panel = Some(open_center(theme, buf, hs, pending));
+                let _ = nexo_sys::channel_send(PIPE, b"copen", &[]);
+            }
+        }
+        BarAction::None => {}
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -182,15 +329,24 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         cell_n: 0,
     };
     redraw(&mut bar, &theme, &mut buf, &mut hs, &mut pending);
+    let mut panel: Option<Panel> = None;
     log!("shellui: Faixa de Atividades pronta (barra id {})", bar.id);
 
     loop {
         // clique pendente capturado durante um RPC?
         if let Some(ev) = pending.take()
             && ev.surface == bar.id
-            && bar_click(&bar, ev.x, ev.y, &mut buf, &mut hs, &mut pending)
         {
-            let _ = nexo_sys::channel_send(PIPE, b"activated", &[]);
+            handle_bar_click(
+                &bar,
+                ev.x,
+                ev.y,
+                &theme,
+                &mut panel,
+                &mut buf,
+                &mut hs,
+                &mut pending,
+            );
         }
         let mut worked = false;
         // pedidos dos apps pelo canal
@@ -248,9 +404,17 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 worked = true;
                 if let Ok(ev) = wm::decode_pointer_event(&buf[..n])
                     && ev.surface == bar.id
-                    && bar_click(&bar, ev.x, ev.y, &mut buf, &mut hs, &mut pending)
                 {
-                    let _ = nexo_sys::channel_send(PIPE, b"activated", &[]);
+                    handle_bar_click(
+                        &bar,
+                        ev.x,
+                        ev.y,
+                        &theme,
+                        &mut panel,
+                        &mut buf,
+                        &mut hs,
+                        &mut pending,
+                    );
                 }
             }
             Err(Status::WouldBlock) => {}

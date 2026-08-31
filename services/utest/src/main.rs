@@ -87,6 +87,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         41 => wm_scale(),
         42 => wm_center(),
         43 => shellui_driver(),
+        44 => shellcenter_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2411,6 +2412,99 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 44: driver da Central de Acoes. Publica dois avisos, clica na zona direita da barra (o
+/// shell abre o painel com um bullet por notificacao — conferido por pixel) e clica de novo (o
+/// painel some).
+fn shellcenter_driver() -> ! {
+    let pipe: nexo_sys::Handle = 0;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    if nexo_sys::channel_send(pipe, b"sess", &[]) != Status::Ok {
+        nexo_sys::exit(1140);
+    }
+    let s = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, 1)) if &buf[..n] == b"sess" => hs[0],
+        _ => nexo_sys::exit(1141),
+    };
+
+    // dois avisos no registro
+    for txt in [b"alpha".as_slice(), b"beta".as_slice()] {
+        let mut rq = nexo_proto::wm::NotifyRequest {
+            title: [0; 64],
+            title_len: txt.len() as u32,
+        };
+        rq.title[..txt.len()].copy_from_slice(txt);
+        let m = rq
+            .encode_msg(&mut out)
+            .unwrap_or_else(|_| nexo_sys::exit(1142));
+        if nexo_sys::channel_send(s, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(1143);
+        }
+        match nexo_sys::channel_recv(s, &mut buf, &mut hs) {
+            Ok((n, _)) if nexo_proto::wm::decode_notify_response(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(1144),
+        }
+    }
+
+    // entrada sintetica e o clique na zona direita da barra
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1145));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1146));
+    if nexo_sys::channel_send(s, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1147);
+    }
+    match nexo_sys::channel_recv(s, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1148),
+    }
+    wm_click(inj, 56, 42);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"copen" => {}
+        _ => nexo_sys::exit(1149),
+    }
+
+    // painel visivel: fundo, bullets das 2 notificacoes, 3a linha vazia
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1150));
+    if nexo_sys::channel_send(s, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1151);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1152));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1153));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1154));
+    let stride = outp.w;
+    if wm_px(ob, stride, 18, 10) != (0x1e, 0x1f, 0x24) {
+        nexo_sys::exit(1155); // fundo do painel
+    }
+    if wm_px(ob, stride, 20, 12) != (0x6f, 0x9f, 0xff) {
+        nexo_sys::exit(1156); // bullet da notificacao mais recente
+    }
+    if wm_px(ob, stride, 20, 20) != (0x6f, 0x9f, 0xff) {
+        nexo_sys::exit(1157); // bullet da segunda
+    }
+    if wm_px(ob, stride, 20, 28) != (0x1e, 0x1f, 0x24) {
+        nexo_sys::exit(1158); // 3a linha vazia (fundo)
+    }
+
+    // fecha o painel
+    wm_click(inj, 56, 42);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"cclosed" => {}
+        _ => nexo_sys::exit(1159),
+    }
+    if wm_px(ob, stride, 18, 10) != (0, 0, 0) {
+        nexo_sys::exit(1160); // sem painel, ali e fundo da cena
+    }
+    nexo_sys::log("utest: central ok — painel abre com um bullet por aviso e fecha no 2o clique");
     nexo_sys::exit(0)
 }
 
