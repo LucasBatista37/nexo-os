@@ -7,7 +7,7 @@
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
 # 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
-protocol wm 1.18
+protocol wm 1.19
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -293,6 +293,15 @@ method 28 drag_start {
     }
     response {
     }
+}
+
+# Evento: clique (BTN_LEFT press) dentro da janela `surface`, em coordenadas LOCAIS da janela.
+# Entregue a sessao dona apos o foco/frente. Durante uma captura (grab), cliques continuam
+# engolidos (nenhum evento sai).
+event 40 pointer {
+    surface: u32,
+    x: i32,
+    y: i32,
 }
 
 # Evento: dados soltos sobre a janela `surface` (entregue a sessao dona dela).

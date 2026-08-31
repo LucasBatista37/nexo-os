@@ -481,6 +481,16 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                         active_ctx,
                                         &attention,
                                     );
+                                    // entrega o clique (coordenadas locais) à janela clicada
+                                    if let Some(sess) = sessions[surfaces[i].owner] {
+                                        let ev = wm::PointerEvent {
+                                            surface: i as u32,
+                                            x: px - surfaces[i].rect.x,
+                                            y: py - surfaces[i].rect.y,
+                                        };
+                                        let m = ev.encode_msg(&mut out).unwrap_or(0);
+                                        let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
+                                    }
                                 }
                             }
                             (EV_KEY, BTN_LEFT, _) => {

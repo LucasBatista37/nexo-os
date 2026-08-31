@@ -95,6 +95,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wm_shell", test_user_wm_shell),
     ("user_wm_scale", test_user_wm_scale),
     ("user_wm_center", test_user_wm_center),
+    ("user_shellui", test_user_shellui),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2627,6 +2628,44 @@ fn test_user_wm_center() -> TestResult {
     drop((wm, client));
     let frames = settled_free_frames(frames0, 8);
     check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Faixa de Atividades de verdade: o `shellui` (sessão privilegiada) desenha a barra, faz broker
+/// de sessões e, ao receber o clique na célula (evento `pointer`), **ativa** a janela.
+fn test_user_shellui() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (wa, wb) = ChannelEnd::create_pair();
+    let (pa, pb) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(wa),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let shell = crate::process::spawn_named(
+        "shellui",
+        0,
+        alloc::vec![channel_handle(wb), channel_handle(pa)],
+    )
+    .map_err(String::from)?;
+    let driver = crate::process::spawn_named("utest", 43, alloc::vec![channel_handle(pb)])
+        .map_err(String::from)?;
+    let dc = crate::process::wait_and_reap(&driver);
+    let sc = crate::process::wait_and_reap(&shell);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, shell, driver));
+    let frames = settled_free_frames(frames0, 8);
+    check!(dc == 0, "driver saiu com {dc}");
+    check!(sc == 0, "shellui saiu com {sc}");
     check!(wc == 0, "wm saiu com {wc}");
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");

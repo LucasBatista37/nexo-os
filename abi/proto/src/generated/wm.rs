@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.wm` v1.18 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
+//! Protocolo tipado `nexo.wm` v1.19 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x1b0edd71;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 18;
+pub const VERSION_MINOR: u16 = 19;
 
 /// `nexo.wm.create_surface` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3738,6 +3738,83 @@ impl A11ySubscribeResponse {
     }
 }
 
+/// `nexo.wm.pointer` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PointerEvent {
+    /// Campo `surface`.
+    pub surface: u32,
+    /// Campo `x`.
+    pub x: i32,
+    /// Campo `y`.
+    pub y: i32,
+}
+
+impl PointerEvent {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 40;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.surface.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.x.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.y.to_le_bytes());
+        o += 4;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let surface = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let x = i32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let y = i32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let _ = o;
+        Ok(PointerEvent { surface, x, y })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_EVENT,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// `nexo.wm.drop` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DropEvent {
@@ -5346,6 +5423,25 @@ pub fn decode_a11y_subscribe_response(msg: &[u8]) -> Result<A11ySubscribeRespons
         return Err(ProtoError::Flags);
     }
     A11ySubscribeResponse::decode_payload(p)
+}
+
+/// Decodifica um evento `pointer` (mensagem sem resposta).
+pub fn decode_pointer_event(msg: &[u8]) -> Result<PointerEvent, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 40 {
+        return Err(ProtoError::Method);
+    }
+    if h.flags != FLAG_EVENT {
+        return Err(ProtoError::Flags);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    PointerEvent::decode_payload(p)
 }
 
 /// Decodifica um evento `drop` (mensagem sem resposta).

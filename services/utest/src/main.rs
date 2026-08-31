@@ -86,6 +86,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         40 => wm_shell(),
         41 => wm_scale(),
         42 => wm_center(),
+        43 => shellui_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2413,6 +2414,102 @@ fn wm_input() -> ! {
     nexo_sys::exit(0)
 }
 
+/// Modo 43: driver da Faixa de Atividades. Handle 0 = canal com o shellui. Pede uma sessao ao
+/// shell (broker), cria uma janela com titulo, pede o sync da barra e confere os pixels da
+/// celula; clica na celula (via entrada sintetica) e confere que o shell ATIVOU a janela (a
+/// tecla seguinte chega a ela).
+fn shellui_driver() -> ! {
+    let pipe: nexo_sys::Handle = 0;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    // sessao nexo.wm via broker do shell
+    if nexo_sys::channel_send(pipe, b"sess", &[]) != Status::Ok {
+        nexo_sys::exit(1110);
+    }
+    let s = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, 1)) if &buf[..n] == b"sess" => hs[0],
+        _ => nexo_sys::exit(1111),
+    };
+
+    // janela do app, com titulo
+    let (app, app_base) = wm_create(s, 0, 0, 8, 8, 0);
+    wm_fill(app_base, 8, 8, 255, 255, 0); // amarela
+    wm_commit(s, app);
+    let mut rq = nexo_proto::wm::SetTitleRequest {
+        id: app,
+        title: [0; 32],
+        title_len: 4,
+    };
+    rq.title[..4].copy_from_slice(b"app1");
+    let m = rq
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1112));
+    if nexo_sys::channel_send(s, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1113);
+    }
+    match nexo_sys::channel_recv(s, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_title_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1114),
+    }
+
+    // sync da barra
+    if nexo_sys::channel_send(pipe, b"sync", &[]) != Status::Ok {
+        nexo_sys::exit(1115);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"ok" => {}
+        _ => nexo_sys::exit(1116),
+    }
+
+    // pixels da barra: fundo (tema escuro, surface) e a celula 0 (acento)
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1117));
+    if nexo_sys::channel_send(s, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1118);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1119));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1120));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1121));
+    let stride = outp.w;
+    if wm_px(ob, stride, 1, 39) != (0x1e, 0x1f, 0x24) {
+        nexo_sys::exit(1122); // fundo da barra
+    }
+    if wm_px(ob, stride, 4, 42) != (0x6f, 0x9f, 0xff) {
+        nexo_sys::exit(1123); // celula da app1
+    }
+
+    // clica na celula 0: o shell recebe o pointer e ativa a app1
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1124));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1125));
+    if nexo_sys::channel_send(s, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1126);
+    }
+    match nexo_sys::channel_recv(s, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1127),
+    }
+    wm_click(inj, 4, 42);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"activated" => {}
+        _ => nexo_sys::exit(1128),
+    }
+    // a app1 esta focada: a tecla chega a ela
+    wm_key(inj, 30, 1);
+    let ev = wm_recv_key(s, &mut buf, &mut hs);
+    if ev.surface != app || ev.code != 30 {
+        nexo_sys::exit(1129);
+    }
+    nexo_sys::log("utest: shellui ok — barra desenhada; clique na celula ativou a janela");
+    nexo_sys::exit(0)
+}
+
 /// Modo 42: mecanismo da Central de Acoes. O registro guarda as notificacoes recentes — inclusive
 /// as suprimidas pelo DND (que corta so a interrupcao); o shell lista (0 = mais recente) e limpa;
 /// sessao comum e negada.
@@ -2872,17 +2969,26 @@ fn wm_a11y() -> ! {
         nexo_proto::wm::decode_a11y_event(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(982))
     };
 
+    // drena o evento `pointer` que o clique entrega a sessao dona da janela
+    let drain_pointer = |ch: nexo_sys::Handle, buf: &mut [u8; 256], hs: &mut [u32; 1]| {
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) if nexo_proto::wm::decode_pointer_event(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(996),
+        }
+    };
     // foco por clique -> evento com o titulo
     wm_click(inj, 2, 2);
     let ev = recv_a11y(reader, &mut buf, &mut hs);
     if ev.kind != 1 || ev.surface != a || ev.text() != b"editor" {
         nexo_sys::exit(983);
     }
+    drain_pointer(s1, &mut buf, &mut hs);
     wm_click(inj, 18, 2);
     let ev = recv_a11y(reader, &mut buf, &mut hs);
     if ev.kind != 1 || ev.surface != b || ev.text() != b"chat" {
         nexo_sys::exit(984);
     }
+    drain_pointer(s1, &mut buf, &mut hs);
 
     // aviso -> evento de notificacao
     let mut rq = nexo_proto::wm::NotifyRequest {
@@ -3318,13 +3424,9 @@ fn wm_clipboard() -> ! {
     }
     wm_click(inj, 18, 2);
     wm_key(inj, 30, 1);
-    let n = match nexo_sys::channel_recv(s2, &mut buf, &mut hs) {
-        Ok((n, _)) => n,
-        _ => nexo_sys::exit(868),
-    };
-    match nexo_proto::wm::decode_key_event(&buf[..n]) {
-        Ok(ev) if ev.surface == b => {}
-        _ => nexo_sys::exit(869),
+    let ev = wm_recv_key(s2, &mut buf, &mut hs);
+    if ev.surface != b {
+        nexo_sys::exit(869);
     }
 
     // agora a sessao 2 le ("hello" atravessou as sessoes via mediacao) e a 1 e negada
@@ -4256,8 +4358,16 @@ fn wm_recv_key(
     buf: &mut [u8],
     hs: &mut [u32; 1],
 ) -> nexo_proto::wm::KeyEvent {
-    let (n, _) = nexo_sys::channel_recv(ch, buf, hs).unwrap_or_else(|_| nexo_sys::exit(562));
-    nexo_proto::wm::decode_key_event(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(563))
+    loop {
+        let (n, _) = nexo_sys::channel_recv(ch, buf, hs).unwrap_or_else(|_| nexo_sys::exit(562));
+        if let Ok(ev) = nexo_proto::wm::decode_key_event(&buf[..n]) {
+            return ev;
+        }
+        // eventos de ponteiro (clique entregue a janela) sao pulados aqui
+        if nexo_proto::wm::decode_pointer_event(&buf[..n]).is_err() {
+            nexo_sys::exit(563)
+        }
+    }
 }
 
 /// Injeta uma tecla evdev (EV_KEY code value) num canal de entrada.
