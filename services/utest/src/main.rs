@@ -73,6 +73,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         27 => wm_maximize(),
         28 => wm_shortcut(),
         29 => wm_present_client(),
+        30 => wm_tile(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2397,6 +2398,61 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 30: mosaico. Duas janelas totalmente sobrepostas; `tile` as organiza numa grade que cobre
+/// a saida (sem realocar buffers — o conteudo e escalado na composicao) e a saida composta passa a
+/// mostrar as duas lado a lado.
+fn wm_tile() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0); // A vermelha
+    wm_commit(ch, a);
+    let (b, b_base) = wm_create(ch, 0, 0, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0); // B verde, exatamente por cima de A
+    wm_commit(ch, b);
+
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(660));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(661);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(662));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(663));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(664));
+    let stride = outp.w;
+    if wm_px(ob, stride, 4, 4) != (0, 255, 0) {
+        nexo_sys::exit(665); // antes do mosaico: B cobre A
+    }
+
+    // Mosaico: A e B lado a lado, cada uma numa celula de 32x48, conteudo escalado.
+    let m = nexo_proto::wm::TileRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(666));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(667);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_tile_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(668),
+    }
+    if wm_px(ob, stride, 16, 24) != (255, 0, 0) {
+        nexo_sys::exit(669); // centro da celula esquerda: A (escalada)
+    }
+    if wm_px(ob, stride, 48, 24) != (0, 255, 0) {
+        nexo_sys::exit(670); // centro da celula direita: B (escalada)
+    }
+    if wm_px(ob, stride, 4, 4) != (255, 0, 0) {
+        nexo_sys::exit(671); // sem sobreposicao: canto esquerdo agora e A
+    }
+    nexo_sys::log("utest: wm tile ok — mosaico poe as janelas lado a lado com conteudo escalado");
     nexo_sys::exit(0)
 }
 

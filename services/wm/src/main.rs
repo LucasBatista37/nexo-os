@@ -55,6 +55,10 @@ struct Slot {
     z: i32,
     /// Opacidade da janela (255 = opaca).
     alpha: u8,
+    /// Dimensões do conteúdo no buffer (podem diferir de `rect.w/h` — ex.: mosaico —, e então a
+    /// composição escala).
+    buf_w: i32,
+    buf_h: i32,
     /// Retângulo salvo antes de maximizar (para `restore`).
     saved: Option<Rect>,
     /// Handle do wm para o `MemoryObject` (mantido para ler os pixels e liberar no fim).
@@ -69,6 +73,8 @@ const EMPTY: Slot = Slot {
     rect: Rect::new(0, 0, 0, 0),
     z: 0,
     alpha: 255,
+    buf_w: 0,
+    buf_h: 0,
     saved: None,
     mem: 0,
     base: 0,
@@ -100,6 +106,8 @@ fn realloc_surface(
     let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| fail(59, "map realloc"));
     surfaces[i].rect.w = new_w;
     surfaces[i].rect.h = new_h;
+    surfaces[i].buf_w = new_w;
+    surfaces[i].buf_h = new_h;
     surfaces[i].mem = mem;
     surfaces[i].base = base;
     surfaces[i].len = bytes;
@@ -140,6 +148,8 @@ fn recompose(surfaces: &[Slot; MAX_SURFACES], out_base: u64, out_bytes: u64, fb:
         z: 0,
         pixels: &[],
         stride: 0,
+        src_w: 0,
+        src_h: 0,
         format: PixelFormat::Rgbx8888,
         alpha: 255,
     }; MAX_SURFACES];
@@ -150,7 +160,9 @@ fn recompose(surfaces: &[Slot; MAX_SURFACES], out_base: u64, out_bytes: u64, fb:
                 rect: s.rect,
                 z: s.z,
                 pixels: as_slice(s.base, s.len),
-                stride: s.rect.w as u32,
+                stride: s.buf_w as u32,
+                src_w: s.buf_w,
+                src_h: s.buf_h,
                 format: PixelFormat::Rgbx8888,
                 alpha: s.alpha,
             };
@@ -466,6 +478,8 @@ fn serve(
                 rect: Rect::new(rq.x, rq.y, rq.w, rq.h),
                 z: rq.z,
                 alpha: 255,
+                buf_w: rq.w,
+                buf_h: rq.h,
                 saved: None,
                 mem,
                 base,
@@ -633,6 +647,29 @@ fn serve(
                     reply_err(ch, wm::RestoreRequest::METHOD_ID, E_NO_RES, out);
                 }
             }
+        }
+        Request::Tile(_) => {
+            // Mosaico: grade cobrindo a saída, na ordem dos slots; só muda os retângulos de
+            // exibição (o conteúdo é escalado na composição). Gesto global de layout.
+            let n = surfaces.iter().filter(|s| s.used).count() as i32;
+            if n > 0 {
+                let mut cols = 1i32;
+                while cols * cols < n {
+                    cols += 1;
+                }
+                let rows = (n + cols - 1) / cols;
+                let (cw, chh) = (OUT_W / cols, OUT_H / rows);
+                let mut k = 0i32;
+                for s in surfaces.iter_mut() {
+                    if s.used {
+                        s.rect = Rect::new((k % cols) * cw, (k / cols) * chh, cw, chh);
+                        k += 1;
+                    }
+                }
+                recompose(surfaces, out_base, out_bytes, fb);
+            }
+            let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::Output(_) => {
             let client_out =

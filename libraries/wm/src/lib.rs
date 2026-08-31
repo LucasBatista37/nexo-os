@@ -20,6 +20,11 @@ pub struct Window<'a> {
     pub pixels: &'a [u8],
     /// Pixels por linha do buffer do cliente.
     pub stride: u32,
+    /// Largura do conteúdo no buffer. Se difere de `rect.w`, o conteúdo é **escalado**
+    /// (vizinho mais próximo) para o retângulo de exibição — base do mosaico/miniaturas.
+    pub src_w: i32,
+    /// Altura do conteúdo no buffer (idem).
+    pub src_h: i32,
     /// Formato dos pixels do cliente.
     pub format: PixelFormat,
     /// Opacidade da janela inteira (255 = opaca, 0 = invisível): composta src-over sobre o que
@@ -29,12 +34,22 @@ pub struct Window<'a> {
 
 impl Window<'_> {
     /// Lê a cor do pixel do conteúdo em `(cx, cy)` relativo ao canto da janela (com a opacidade
-    /// da janela no canal alfa).
+    /// da janela no canal alfa), escalando do retângulo de exibição para o buffer se preciso.
     fn sample(&self, cx: i32, cy: i32) -> Option<Color> {
         if cx < 0 || cy < 0 || cx >= self.rect.w || cy >= self.rect.h {
             return None;
         }
-        let o = ((cy * self.stride as i32 + cx) * 4) as usize;
+        let bx = if self.rect.w == self.src_w {
+            cx
+        } else {
+            cx * self.src_w / self.rect.w
+        };
+        let by = if self.rect.h == self.src_h {
+            cy
+        } else {
+            cy * self.src_h / self.rect.h
+        };
+        let o = ((by * self.stride as i32 + bx) * 4) as usize;
         if o + 4 > self.pixels.len() {
             return None;
         }
@@ -185,6 +200,8 @@ mod tests {
                 z: 0,
                 pixels: &red,
                 stride: 4,
+                src_w: 4,
+                src_h: 4,
                 format: PixelFormat::Rgbx8888,
                 alpha: 255,
             },
@@ -193,6 +210,8 @@ mod tests {
                 z: 1,
                 pixels: &green,
                 stride: 4,
+                src_w: 4,
+                src_h: 4,
                 format: PixelFormat::Rgbx8888,
                 alpha: 255,
             },
@@ -221,6 +240,8 @@ mod tests {
                 z: 0,
                 pixels: &red,
                 stride: 8,
+                src_w: 8,
+                src_h: 8,
                 format: PixelFormat::Rgbx8888,
                 alpha: 255, // fundo opaco
             },
@@ -229,6 +250,8 @@ mod tests {
                 z: 1,
                 pixels: &green,
                 stride: 4,
+                src_w: 4,
+                src_h: 4,
                 format: PixelFormat::Rgbx8888,
                 alpha: 128, // ~50%: verde translúcido sobre o vermelho
             },
@@ -244,6 +267,37 @@ mod tests {
     }
 
     #[test]
+    fn display_rect_scales_buffer_content() {
+        // buffer 2x2 com quadrantes distintos, exibido em 8x8: cada quadrante vira 4x4.
+        let mut out_buf = std::vec![0u8; 8 * 8 * 4];
+        let mut out = Surface::new(&mut out_buf, 8, 8, 8, PixelFormat::Rgbx8888).unwrap();
+        let mut src = std::vec![0u8; 2 * 2 * 4];
+        {
+            let mut s = Surface::new(&mut src, 2, 2, 2, PixelFormat::Rgbx8888).unwrap();
+            s.put(0, 0, Color::rgb(255, 0, 0));
+            s.put(1, 0, Color::rgb(0, 255, 0));
+            s.put(0, 1, Color::rgb(0, 0, 255));
+            s.put(1, 1, Color::rgb(255, 255, 0));
+        }
+        let windows = [Window {
+            rect: Rect::new(0, 0, 8, 8),
+            z: 0,
+            pixels: &src,
+            stride: 2,
+            src_w: 2,
+            src_h: 2,
+            format: PixelFormat::Rgbx8888,
+            alpha: 255,
+        }];
+        composite(&mut out, &windows, Rect::new(0, 0, 8, 8), Color::BLACK);
+        assert_eq!(out.get(1, 1), Color::rgb(255, 0, 0)); // quadrante NO
+        assert_eq!(out.get(6, 1), Color::rgb(0, 255, 0)); // NE
+        assert_eq!(out.get(1, 6), Color::rgb(0, 0, 255)); // SO
+        assert_eq!(out.get(6, 6), Color::rgb(255, 255, 0)); // SE
+        assert_eq!(out.get(3, 3), Color::rgb(255, 0, 0)); // ainda NO (3*2/8 = 0)
+    }
+
+    #[test]
     fn z_order_independent_of_input_order() {
         let mut out_buf = std::vec![0u8; 4 * 4 * 4];
         let mut out = Surface::new(&mut out_buf, 4, 4, 4, PixelFormat::Rgbx8888).unwrap();
@@ -256,6 +310,8 @@ mod tests {
                 z: 5,
                 pixels: &b,
                 stride: 4,
+                src_w: 4,
+                src_h: 4,
                 format: PixelFormat::Rgbx8888,
                 alpha: 255,
             },
@@ -264,6 +320,8 @@ mod tests {
                 z: 1,
                 pixels: &a,
                 stride: 4,
+                src_w: 4,
+                src_h: 4,
                 format: PixelFormat::Rgbx8888,
                 alpha: 255,
             },
@@ -283,6 +341,8 @@ mod tests {
             z: 0,
             pixels: &white,
             stride: 8,
+            src_w: 8,
+            src_h: 8,
             format: PixelFormat::Rgbx8888,
             alpha: 255,
         }];

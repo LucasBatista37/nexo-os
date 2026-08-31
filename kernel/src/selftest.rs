@@ -83,6 +83,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wm_maximize", test_user_wm_maximize),
     ("user_wm_shortcut", test_user_wm_shortcut),
     ("user_wm_present", test_user_wm_present),
+    ("user_wm_tile", test_user_wm_tile),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2212,6 +2213,38 @@ fn test_user_wm_present() -> TestResult {
     let (cc, wc, seen) = result?;
     let frames = settled_free_frames(frames0, 8);
     check!(seen, "o magenta composto nao apareceu no framebuffer");
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Mosaico: `tile` organiza as janelas numa grade que cobre a saída, sem realocar buffers (o
+/// conteúdo é escalado na composição); a saída composta mostra as janelas lado a lado.
+fn test_user_wm_tile() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(a),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let hclient = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 30, hclient).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, client));
+    let frames = settled_free_frames(frames0, 8);
     check!(cc == 0, "cliente saiu com {cc}");
     check!(wc == 0, "wm saiu com {wc}");
     let ends = crate::ipc::live_channel_ends();

@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.wm` v1.7 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
+//! Protocolo tipado `nexo.wm` v1.8 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x1b0edd71;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 7;
+pub const VERSION_MINOR: u16 = 8;
 
 /// `nexo.wm.create_surface` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1236,6 +1236,80 @@ impl RestoreResponse {
     }
 }
 
+/// `nexo.wm.tile` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TileRequest {}
+
+impl TileRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 15;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(TileRequest {})
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.tile` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TileResponse {}
+
+impl TileResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 15;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(TileResponse {})
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// `nexo.wm.set_alpha` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetAlphaRequest {
@@ -1448,6 +1522,8 @@ pub enum Request {
     Maximize(MaximizeRequest),
     /// `restore`.
     Restore(RestoreRequest),
+    /// `tile`.
+    Tile(TileRequest),
     /// `set_alpha`.
     SetAlpha(SetAlphaRequest),
 }
@@ -1518,6 +1594,11 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
                 return Err(ProtoError::Length);
             }
         }
+        Request::Tile(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
         Request::SetAlpha(_) => {
             if !hs.is_empty() {
                 return Err(ProtoError::Length);
@@ -1555,6 +1636,7 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
         10 => Ok(Request::SetInput(SetInputRequest::decode_payload(p)?)),
         13 => Ok(Request::Maximize(MaximizeRequest::decode_payload(p)?)),
         14 => Ok(Request::Restore(RestoreRequest::decode_payload(p)?)),
+        15 => Ok(Request::Tile(TileRequest::decode_payload(p)?)),
         12 => Ok(Request::SetAlpha(SetAlphaRequest::decode_payload(p)?)),
         _ => Err(ProtoError::Method),
     }
@@ -1882,6 +1964,33 @@ pub fn decode_restore_response(msg: &[u8]) -> Result<RestoreResponse, ProtoError
         return Err(ProtoError::Flags);
     }
     RestoreResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `tile` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_tile_response(msg: &[u8]) -> Result<TileResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 15 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    TileResponse::decode_payload(p)
 }
 
 /// Decodifica a resposta de `set_alpha` (erro remoto vira `ProtoError::Remote`).
