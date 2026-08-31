@@ -86,6 +86,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wm_tile", test_user_wm_tile),
     ("user_wm_grab", test_user_wm_grab),
     ("user_wm_displays", test_user_wm_displays),
+    ("user_greeter", test_user_greeter),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2324,6 +2325,44 @@ fn test_user_wm_displays() -> TestResult {
     drop((wm, client));
     let frames = settled_free_frames(frames0, 8);
     check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Login/bloqueio: o `greeter` cria a tela de login, captura a entrada (a senha não pode ser
+/// roubada), rejeita a senha errada mantendo o bloqueio e, na certa, devolve a entrada à sessão.
+fn test_user_greeter() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (wa, wb) = ChannelEnd::create_pair();
+    let (pa, pb) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(wa),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let greeter = crate::process::spawn_named("greeter", 0, alloc::vec![channel_handle(pa)])
+        .map_err(String::from)?;
+    let driver = crate::process::spawn_named(
+        "utest",
+        34,
+        alloc::vec![channel_handle(wb), channel_handle(pb)],
+    )
+    .map_err(String::from)?;
+    let dc = crate::process::wait_and_reap(&driver);
+    let gc = crate::process::wait_and_reap(&greeter);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, greeter, driver));
+    let frames = settled_free_frames(frames0, 8);
+    check!(dc == 0, "driver saiu com {dc}");
+    check!(gc == 0, "greeter saiu com {gc}");
     check!(wc == 0, "wm saiu com {wc}");
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");

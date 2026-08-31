@@ -77,6 +77,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         31 => wm_real_input(),
         32 => wm_grab(),
         33 => wm_displays(),
+        34 => greeter_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2401,6 +2402,85 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 34: driver do teste de login/bloqueio. Handle 0 = sessao nexo.wm, handle 1 = pipe com o
+/// greeter. Abre uma 2a sessao do wm e a entrega ao greeter; injeta uma senha errada (continua
+/// bloqueado) e depois a certa ("nexo"+Enter); apos o desbloqueio confere que a entrada voltou
+/// (clique + tecla chegam a janela do driver).
+fn greeter_driver() -> ! {
+    let wm_ch: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+
+    // Janela do driver (ganha o foco na criacao).
+    let (w, w_base) = wm_create(wm_ch, 0, 0, 8, 8, 0);
+    wm_fill(w_base, 8, 8, 255, 0, 0);
+    wm_commit(wm_ch, w);
+
+    // Abre a 2a sessao e entrega a ponta ao greeter.
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(780));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(781));
+    if nexo_sys::channel_send(wm_ch, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(782);
+    }
+    match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(783),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(784);
+    }
+
+    // Fonte de entrada (o driver injeta as teclas "fisicas" do teste).
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(785));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(786));
+    if nexo_sys::channel_send(wm_ch, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(787);
+    }
+    match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(788),
+    }
+
+    let expect_pipe =
+        |pipe: nexo_sys::Handle, want: &[u8], code: i64, buf: &mut [u8; 128], hs: &mut [u32; 1]| {
+            match nexo_sys::channel_recv(pipe, buf, hs) {
+                Ok((n, _)) if &buf[..n] == want => {}
+                _ => nexo_sys::exit(code),
+            }
+        };
+    expect_pipe(pipe, b"locked", 789, &mut buf, &mut hs);
+
+    // Senha errada: a(30), a(30), Enter -> continua bloqueado.
+    wm_key(inj, 30, 1);
+    wm_key(inj, 30, 1);
+    wm_key(inj, 28, 1);
+    expect_pipe(pipe, b"wrong", 790, &mut buf, &mut hs);
+
+    // Senha certa: n(49) e(18) x(45) o(24) Enter.
+    for code in [49u16, 18, 45, 24, 28] {
+        wm_key(inj, code, 1);
+    }
+    expect_pipe(pipe, b"unlocked", 791, &mut buf, &mut hs);
+
+    // Entrada devolvida: clique + tecla chegam a janela do driver.
+    wm_click(inj, 2, 2);
+    wm_key(inj, 30, 1);
+    let ev = wm_recv_key(wm_ch, &mut buf, &mut hs);
+    if ev.surface != w || ev.code != 30 {
+        nexo_sys::exit(792);
+    }
+    nexo_sys::log(
+        "utest: greeter ok — senha protegida por captura; errada mantem bloqueado; certa devolve a entrada",
+    );
     nexo_sys::exit(0)
 }
 

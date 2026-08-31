@@ -1,0 +1,17 @@
+[package]
+name = "nexo-greeter"
+description = "Tela de login/bloqueio do Nexo OS: superficie em tela cheia com captura segura de entrada (grab); a senha nao pode ser roubada por outra janela. Desbloqueia ao validar e devolve a entrada a sessao"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+nexo-sys.workspace = true
+nexo-rt = { workspace = true, features = ["panic-handler"] }
+nexo-proto.workspace = true
+nexo-gfx.workspace = true
+nexo-ui.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
