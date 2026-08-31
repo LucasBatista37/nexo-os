@@ -156,6 +156,47 @@ impl VStack {
     }
 }
 
+/// Navegação por teclado entre widgets focáveis: um índice de foco que o app avança com Tab
+/// (`next`) e recua com Shift+Tab (`prev`), sempre ciclando. O widget focado desenha um anel
+/// ([`draw_focus_ring`]) para a navegação ser visível.
+#[derive(Clone, Copy, Debug)]
+pub struct Nav {
+    count: usize,
+    /// Índice do widget focado (0-based).
+    pub index: usize,
+}
+
+impl Nav {
+    /// Navegação sobre `count` widgets (foco inicial no 0). `count` deve ser ≥ 1.
+    pub fn new(count: usize) -> Nav {
+        Nav {
+            count: count.max(1),
+            index: 0,
+        }
+    }
+
+    /// Avança o foco (Tab), ciclando; devolve o novo índice.
+    pub fn next(&mut self) -> usize {
+        self.index = (self.index + 1) % self.count;
+        self.index
+    }
+
+    /// Recua o foco (Shift+Tab), ciclando; devolve o novo índice.
+    pub fn prev(&mut self) -> usize {
+        self.index = (self.index + self.count - 1) % self.count;
+        self.index
+    }
+}
+
+/// Desenha o anel de foco (cor de acento) em volta de `rect` — 1 px por fora, para não cobrir a
+/// borda do widget.
+pub fn draw_focus_ring(surf: &mut Surface<'_>, rect: Rect, theme: &Theme) {
+    surf.stroke_rect(
+        Rect::new(rect.x - 1, rect.y - 1, rect.w + 2, rect.h + 2),
+        theme.accent,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -218,6 +259,32 @@ mod tests {
             .flat_map(|x| (b.rect.y..b.rect.y + b.rect.h).map(move |y| (x, y)))
             .any(|(x, y)| s.get(x, y) == theme.button_fg);
         assert!(lit, "rotulo nao desenhou");
+    }
+
+    #[test]
+    fn nav_cycles_focus_both_ways() {
+        let mut n = Nav::new(3);
+        assert_eq!(n.index, 0);
+        assert_eq!(n.next(), 1);
+        assert_eq!(n.next(), 2);
+        assert_eq!(n.next(), 0); // cicla
+        assert_eq!(n.prev(), 2); // cicla para tras
+        assert_eq!(n.prev(), 1);
+    }
+
+    #[test]
+    fn focus_ring_draws_around_widget() {
+        let theme = Theme::light();
+        let mut buf = std::vec![0u8; 20 * 20 * 4];
+        let mut s = surface(&mut buf, 20, 20);
+        s.clear(theme.bg);
+        let r = Rect::new(4, 4, 8, 8);
+        draw_focus_ring(&mut s, r, &theme);
+        // anel na moldura externa (3,3)..(12,12); interior intacto
+        assert_eq!(s.get(3, 3), theme.accent);
+        assert_eq!(s.get(12, 3), theme.accent);
+        assert_eq!(s.get(3, 12), theme.accent);
+        assert_eq!(s.get(6, 6), theme.bg);
     }
 
     #[test]
