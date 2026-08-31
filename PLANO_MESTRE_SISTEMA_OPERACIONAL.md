@@ -508,8 +508,8 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] implementar foco, atalhos e captura segura — *foco por clique (o clique traz a superfície sob o ponteiro para a frente e passa a receber o teclado — `user_wm_input`/`user_wm_keyboard`). Atalhos globais e captura segura (grab exclusivo de entrada) pendentes*;
 - [-] implementar janelas, redimensionamento, maximização e mosaico — *no serviço `wm`: criar/mover/destruir superfícies com posição e z (múltiplas sessões), **restacking dinâmico** (`raise`/`lower` — auto-teste `user_wm_restack`) e **redimensionamento** (`resize` realoca o `MemoryObject` via a syscall `memory_unmap`/`munmap` — auto-teste `user_wm_resize`); maximização, mosaico e políticas de layout automático pendentes*;
 - [ ] implementar múltiplos displays emulado;
-- [ ] criar toolkit UI nativo e tokens de design;
-- [ ] criar gerenciamento de temas claro/escuro e alto contraste;
+- [-] criar toolkit UI nativo e tokens de design — *`libraries/ui` (`nexo-ui`): tokens de design (`Theme`), widgets `Label`/`Button` (com estados e hit-test) e layout `VStack`, desenhados sobre `nexo-gfx`; testes de host e auto-teste `user_wm_ui` (botão renderizado pela pilha app→ui→gfx→compositor). Faltam mais widgets (campos de texto, listas, menus), foco/tab e um sistema de layout completo*;
+- [-] criar gerenciamento de temas claro/escuro e alto contraste — *`nexo-ui::Theme` tem variantes claro, escuro e alto contraste (tokens de cor); os widgets pintam só a partir do tema. Faltam troca de tema em runtime, persistência da preferência e mais tokens (tipografia, espaçamento, raios)*;
 - [ ] criar login, bloqueio e sessão;
 - [ ] prototipar e testar o modelo de Contextos;
 - [ ] implementar Central de Ações;

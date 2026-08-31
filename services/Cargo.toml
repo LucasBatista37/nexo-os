@@ -20,6 +20,7 @@ nexo-netstack = { path = "../libraries/net" }
 nexo-net = { path = "../sdk/nexo-net" }
 nexo-gfx = { path = "../libraries/gfx" }
 nexo-wm = { path = "../libraries/wm" }
+nexo-ui = { path = "../libraries/ui" }
 
 [profile.dev]
 panic = "abort"

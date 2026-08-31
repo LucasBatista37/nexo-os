@@ -69,6 +69,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         23 => wm_input(),
         24 => wm_keyboard(),
         25 => wm_alpha(),
+        26 => wm_ui(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2393,6 +2394,61 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 26: toolkit de UI (`nexo-ui`) desenhado atraves do compositor. O cliente pinta o fundo do
+/// tema e um botao na sua superficie (via nexo-gfx/nexo-ui) e confere na saida composta do wm que
+/// o botao (fundo, borda) apareceu nas cores do tema — prova a pilha app -> ui -> gfx -> wm.
+fn wm_ui() -> ! {
+    use nexo_gfx::{PixelFormat, Rect, Surface};
+    use nexo_ui::{Button, Theme};
+    let ch: nexo_sys::Handle = 0;
+    let w = 32i32;
+    let h = 24i32;
+    let (id, base) = wm_create(ch, 0, 0, w, h, 0);
+    let theme = Theme::dark();
+    {
+        // SAFETY: base .. base + w*h*4 foi mapeada por memory_map (USER|RW) neste processo.
+        let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (w * h * 4) as usize) };
+        let mut surf = Surface::new(px, w as u32, h as u32, w as u32, PixelFormat::Rgbx8888)
+            .unwrap_or_else(|| nexo_sys::exit(590));
+        surf.clear(theme.bg);
+        let btn = Button::new(Rect::new(4, 4, 24, 12), "OK");
+        btn.draw(&mut surf, &theme);
+    }
+    wm_commit(ch, id);
+
+    // Le a saida composta e confere os pixels do botao.
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(591));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(592);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(593));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(594));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(595));
+    let stride = outp.w;
+    let rgb = |c: nexo_gfx::Color| (c.r, c.g, c.b);
+    // fundo do tema fora do botao
+    if wm_px(ob, stride, 1, 1) != rgb(theme.bg) {
+        nexo_sys::exit(596);
+    }
+    // interior do botao, a esquerda do rotulo -> fundo do botao
+    if wm_px(ob, stride, 5, 11) != rgb(theme.button_bg) {
+        nexo_sys::exit(597);
+    }
+    // borda do botao (canto superior esquerdo do rect)
+    if wm_px(ob, stride, 4, 4) != rgb(theme.border) {
+        nexo_sys::exit(598);
+    }
+    nexo_sys::log("utest: wm ui ok — botao do nexo-ui composto pelo wm nas cores do tema");
     nexo_sys::exit(0)
 }
 

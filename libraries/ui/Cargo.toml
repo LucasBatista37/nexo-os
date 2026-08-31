@@ -1,0 +1,12 @@
+[package]
+name = "nexo-ui"
+description = "Toolkit de UI nativo do Nexo OS: tokens de design, temas (claro/escuro/alto contraste) e widgets (rotulo, botao, pilha) desenhados sobre nexo-gfx — sem alocacao, testavel no host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexo-gfx = { path = "../gfx" }
+
+[lints]
+workspace = true

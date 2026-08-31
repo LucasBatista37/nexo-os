@@ -188,14 +188,23 @@ name = "nexo-syscall-abi"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-ui"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+]
+
+[[package]]
 name = "nexo-utest"
 version = "0.0.1"
 dependencies = [
+ "nexo-gfx",
  "nexo-net",
  "nexo-netstack",
  "nexo-proto",
  "nexo-rt",
  "nexo-sys",
+ "nexo-ui",
 ]
 
 [[package]]
