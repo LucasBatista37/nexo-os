@@ -27,6 +27,9 @@ const EV_ABS: u16 = 3;
 const ABS_X: u16 = 0;
 const ABS_Y: u16 = 1;
 const BTN_LEFT: u16 = 0x110;
+/// Tecla modificadora dos atalhos globais (Super/Meta) e Tab (cicla o foco).
+const KEY_TAB: u16 = 15;
+const KEY_LEFTMETA: u16 = 125;
 
 /// Erros remotos do protocolo `nexo.wm`.
 const E_INVALID: u32 = 1;
@@ -182,6 +185,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut px: i32 = 0;
     let mut py: i32 = 0;
     let mut focused: Option<usize> = None;
+    let mut meta_down = false;
 
     let mut buf = [0u8; 512];
     let mut out = [0u8; 512];
@@ -303,6 +307,27 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                 }
                             }
                             (EV_KEY, BTN_LEFT, _) => {} // release do botão: ignora
+                            (EV_KEY, KEY_LEFTMETA, v) => meta_down = v == 1, // modificador: não entrega
+                            (EV_KEY, KEY_TAB, 1) if meta_down => {
+                                // atalho global Meta+Tab: cicla o foco (traz a janela de trás para a frente).
+                                let bottom = surfaces
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, s)| s.used)
+                                    .min_by_key(|(_, s)| s.z)
+                                    .map(|(i, _)| i);
+                                if let Some(i) = bottom {
+                                    let top = surfaces
+                                        .iter()
+                                        .filter(|s| s.used)
+                                        .map(|s| s.z)
+                                        .max()
+                                        .unwrap_or(0);
+                                    surfaces[i].z = top.saturating_add(1);
+                                    focused = Some(i);
+                                    recompose(&surfaces, out_base, out_bytes);
+                                }
+                            }
                             (EV_KEY, c, v) => {
                                 // tecla comum: entrega à janela em foco (se houver).
                                 if let Some(i) = focused

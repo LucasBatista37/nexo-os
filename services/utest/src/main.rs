@@ -71,6 +71,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         25 => wm_alpha(),
         26 => wm_ui(),
         27 => wm_maximize(),
+        28 => wm_shortcut(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2395,6 +2396,61 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 28: atalho global Meta+Tab cicla o foco. Duas superficies sobrepostas; injeta Meta+Tab e
+/// confere na saida composta que a janela de tras vem para a frente (e ciclando, alterna).
+fn wm_shortcut() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0); // A vermelha (fundo)
+    wm_commit(ch, a);
+    let (b, b_base) = wm_create(ch, 4, 4, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0); // B verde (por cima)
+    wm_commit(ch, b);
+
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(640));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(641);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(642));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(643));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(644));
+    let stride = outp.w;
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(645); // B por cima no inicio
+    }
+
+    // Registra a fonte de entrada.
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(646));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(647));
+    if nexo_sys::channel_send(ch, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(648);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(649),
+    }
+
+    // Meta pressionado + Tab: cicla o foco -> A (de tras) vem para a frente -> (6,6) vermelho.
+    wm_key(inj, 125, 1); // KEY_LEFTMETA press
+    wm_key(inj, 15, 1); // KEY_TAB press
+    wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 650);
+    // Tab de novo (Meta ainda pressionado): cicla -> B vem para a frente -> (6,6) verde.
+    wm_key(inj, 15, 1);
+    wm_wait_px(ob, stride, 6, 6, (0, 255, 0), 651);
+
+    nexo_sys::log("utest: wm atalho ok — Meta+Tab cicla o foco entre as janelas");
     nexo_sys::exit(0)
 }
 

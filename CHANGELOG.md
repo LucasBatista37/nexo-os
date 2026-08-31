@@ -209,6 +209,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `nexo.wm` v1.7: métodos `maximize{id}→{mem}` (move para (0,0) e redimensiona para a saída inteira, guardando o retângulo anterior) e `restore{id}→{mem}` (volta ao retângulo salvo). Ambos realocam o `MemoryObject` (novo handle; o conteúdo antigo é perdido) — o serviço fatorou um helper `realloc_surface` reusado por `resize`/`maximize`/`restore`.
 - `utest` modo 27 + auto-teste de boot `user_wm_maximize`: cria uma superfície pequena, maximiza (o cliente remapeia o novo buffer de tela cheia e o pinta) e depois restaura (volta ao tamanho e posição originais), conferindo na saída composta a cada passo; sem vazamento de quadros (a realocação usa `memory_unmap`). 51 testes no boot.
 
+### Adicionado (Fase 5, bloco 13 — atalho global de teclado)
+- `services/wm`: o compositor mantém o estado do modificador (Super/Meta, `KEY_LEFTMETA`) e intercepta o **atalho global Meta+Tab** (`KEY_TAB`) — cicla o foco trazendo a janela de trás (menor z) para a frente — **antes** de entregar teclas à janela em foco (o modificador e o atalho não são entregues).
+- `utest` modo 28 + auto-teste de boot `user_wm_shortcut`: com duas superfícies sobrepostas, injeta Meta+Tab e confere na saída composta que a janela de trás vem para a frente, e que repetir o Tab alterna qual janela fica no topo. 52 testes no boot.
+
 ### Adicionado (Fase 2, extra — memória compartilhada entre processos)
 - `MemoryObject` (`kind` 4) e syscalls `memory_create` (28, aloca N páginas zeradas ≤ 256) / `memory_map` (29, mapeia `USER|RW` cacheável na região de dispositivos). Transferir o handle por canal compartilha as **mesmas páginas físicas** entre processos; o objeto possui os frames e os libera quando ninguém mais o referencia (mapeamento sem posse, como MMIO). `sdk/nexo-sys` ganhou os wrappers.
 - Teste `user_shmem`: um produtor cria memória, escreve um marcador e transfere o handle a um consumidor por canal; o consumidor lê o marcador e responde na mesma memória; sem vazamento de quadros. 42 testes no boot. Base para o compositor (buffers de janela) e payloads grandes de IPC (ipc-compat §2.6).
