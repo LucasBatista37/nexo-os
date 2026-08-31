@@ -85,6 +85,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         39 => wm_a11y(),
         40 => wm_shell(),
         41 => wm_scale(),
+        42 => wm_center(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2409,6 +2410,118 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 42: mecanismo da Central de Acoes. O registro guarda as notificacoes recentes — inclusive
+/// as suprimidas pelo DND (que corta so a interrupcao); o shell lista (0 = mais recente) e limpa;
+/// sessao comum e negada.
+fn wm_center() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    let (_a, a_base) = wm_create(s1, 0, 0, 8, 8, 0); // foco (para o set_dnd)
+    wm_fill(a_base, 8, 8, 0, 0, 255);
+    let notify = |ch: nexo_sys::Handle,
+                  txt: &[u8],
+                  out: &mut [u8; 256],
+                  buf: &mut [u8; 256],
+                  hs: &mut [u32; 1]| {
+        let mut rq = nexo_proto::wm::NotifyRequest {
+            title: [0; 64],
+            title_len: txt.len() as u32,
+        };
+        rq.title[..txt.len()].copy_from_slice(txt);
+        let m = rq.encode_msg(out).unwrap_or_else(|_| nexo_sys::exit(1080));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(1081);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) if nexo_proto::wm::decode_notify_response(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(1082),
+        }
+    };
+    let ninfo = |ch: nexo_sys::Handle,
+                 idx: u32,
+                 out: &mut [u8; 256],
+                 buf: &mut [u8; 256],
+                 hs: &mut [u32; 1]|
+     -> Option<nexo_proto::wm::NotificationInfoResponse> {
+        let m = nexo_proto::wm::NotificationInfoRequest { index: idx }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(1083));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(1084);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_notification_info_response(&buf[..n]).ok(),
+            _ => nexo_sys::exit(1085),
+        }
+    };
+
+    notify(s1, b"a", &mut out, &mut buf, &mut hs);
+    // liga o DND e publica "b": o banner e suprimido, mas a Central registra
+    let m = nexo_proto::wm::SetDndRequest { enabled: 1 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1086));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1087);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_dnd_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1088),
+    }
+    notify(s1, b"b", &mut out, &mut buf, &mut hs);
+
+    let i0 = ninfo(s1, 0, &mut out, &mut buf, &mut hs).unwrap_or_else(|| nexo_sys::exit(1089));
+    if i0.used != 1 || i0.title() != b"b" {
+        nexo_sys::exit(1090);
+    }
+    let i1 = ninfo(s1, 1, &mut out, &mut buf, &mut hs).unwrap_or_else(|| nexo_sys::exit(1091));
+    if i1.used != 1 || i1.title() != b"a" {
+        nexo_sys::exit(1092);
+    }
+    let i2 = ninfo(s1, 2, &mut out, &mut buf, &mut hs).unwrap_or_else(|| nexo_sys::exit(1093));
+    if i2.used != 0 {
+        nexo_sys::exit(1094);
+    }
+
+    // limpa
+    let m = nexo_proto::wm::NotificationsClearRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1095));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1096);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_notifications_clear_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1097),
+    }
+    let i0 = ninfo(s1, 0, &mut out, &mut buf, &mut hs).unwrap_or_else(|| nexo_sys::exit(1098));
+    if i0.used != 0 {
+        nexo_sys::exit(1099);
+    }
+
+    // sessao comum: negada
+    let (s2, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1100));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1101));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1102);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1103),
+    }
+    if ninfo(s2, 0, &mut out, &mut buf, &mut hs).is_some() {
+        nexo_sys::exit(1104);
+    }
+    nexo_sys::log(
+        "utest: wm central ok — registro guarda ate sob DND; shell lista/limpa; comum negada",
+    );
     nexo_sys::exit(0)
 }
 

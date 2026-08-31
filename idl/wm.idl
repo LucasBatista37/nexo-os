@@ -7,7 +7,7 @@
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
 # 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
-protocol wm 1.17
+protocol wm 1.18
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -355,6 +355,26 @@ method 37 prefs {
     }
     response {
         reduce_motion: u8,
+    }
+}
+
+# Central de Acoes (mecanismo): o compositor guarda as 8 notificacoes mais recentes — INCLUSIVE
+# as suprimidas pelo nao-perturbe (o DND corta a interrupcao; a Central preserva o registro). O
+# shell (sessao bootstrap; erro 7) lista por indice (0 = mais recente; used = 0 = vazio) e limpa.
+method 38 notification_info {
+    request {
+        index: u32,
+    }
+    response {
+        used: u8,
+        title: bytes<64>,
+    }
+}
+
+method 39 notifications_clear {
+    request {
+    }
+    response {
     }
 }
 

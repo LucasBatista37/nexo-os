@@ -270,6 +270,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Preferência de acessibilidade **redução de movimento**: `set_reduce_motion{enabled}` (mediado pela posse da entrada, erro 6) e `prefs{}` de leitura livre — apps consultam para desligar animações.
 - `utest` modo 41 + auto-teste de boot `user_wm_scale`: 200% e 150% conferidos por pixel (área ampliada mostra o conteúdo; fora dela, fundo), razão inválida recusada; a preferência muda só pela sessão dona da entrada e é legível por qualquer uma. 64 testes no boot.
 
+### Adicionado (Fase 5, bloco 27 — mecanismo da Central de Ações)
+- `nexo.wm` v1.18: o compositor registra as **8 notificações mais recentes** — inclusive as suprimidas pelo não-perturbe (o DND corta a interrupção; a Central preserva o registro). O shell lista por índice (`notification_info`, 0 = mais recente) e limpa (`notifications_clear`, que também remove o banner); sessões comuns recebem o erro 7.
+- `utest` modo 42 + auto-teste de boot `user_wm_center`: publica "a", liga o DND, publica "b" (sem banner) e o shell lê ["b", "a"] na ordem; `clear` esvazia; sessão comum é negada. 65 testes no boot.
+
 ### Adicionado (Fase 2, extra — memória compartilhada entre processos)
 - `MemoryObject` (`kind` 4) e syscalls `memory_create` (28, aloca N páginas zeradas ≤ 256) / `memory_map` (29, mapeia `USER|RW` cacheável na região de dispositivos). Transferir o handle por canal compartilha as **mesmas páginas físicas** entre processos; o objeto possui os frames e os libera quando ninguém mais o referencia (mapeamento sem posse, como MMIO). `sdk/nexo-sys` ganhou os wrappers.
 - Teste `user_shmem`: um produtor cria memória, escreve um marcador e transfere o handle a um consumidor por canal; o consumidor lê o marcador e responde na mesma memória; sem vazamento de quadros. 42 testes no boot. Base para o compositor (buffers de janela) e payloads grandes de IPC (ipc-compat §2.6).

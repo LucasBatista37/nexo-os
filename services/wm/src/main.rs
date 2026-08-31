@@ -59,6 +59,9 @@ struct Attention {
     dnd: bool,
     /// Preferência de acessibilidade: apps devem desligar animações.
     reduce_motion: bool,
+    /// Registro das notificações recentes (0 = mais recente) — inclusive as suprimidas pelo DND.
+    log: [([u8; 64], u32); 8],
+    log_n: usize,
 }
 
 /// Área de transferência mediada: conteúdo atual + anel de histórico (opt-in).
@@ -324,6 +327,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         banner: None,
         dnd: false,
         reduce_motion: false,
+        log: [([0; 64], 0); 8],
+        log_n: 0,
     };
     let mut clipboard = Clipboard {
         data: [0; 256],
@@ -836,6 +841,45 @@ fn serve(
             let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
+        Request::NotificationInfo(rq) => {
+            if owner != 0 {
+                reply_err(ch, wm::NotificationInfoRequest::METHOD_ID, E_NOT_SHELL, out);
+                return;
+            }
+            let i = rq.index as usize;
+            let mut resp = wm::NotificationInfoResponse {
+                used: 0,
+                title: [0; 64],
+                title_len: 0,
+            };
+            if i < attention.log_n {
+                let (t, tl) = attention.log[i];
+                resp.used = 1;
+                resp.title[..tl as usize].copy_from_slice(&t[..tl as usize]);
+                resp.title_len = tl;
+            }
+            let m = resp.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::NotificationsClear(_) => {
+            if owner != 0 {
+                reply_err(
+                    ch,
+                    wm::NotificationsClearRequest::METHOD_ID,
+                    E_NOT_SHELL,
+                    out,
+                );
+                return;
+            }
+            attention.log_n = 0;
+            if attention.banner.take().is_some() {
+                recompose(surfaces, outs, fb, *active_ctx, attention);
+            }
+            let m = wm::NotificationsClearResponse {}
+                .encode_msg(out)
+                .unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
         Request::SurfaceInfo(rq) => {
             // Privilégio do shell: só a sessão bootstrap (slot 0) enumera janelas.
             if owner != 0 {
@@ -965,11 +1009,15 @@ fn serve(
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::Notify(rq) => {
-            // Qualquer sessão pode publicar; com o não-perturbe ativo o aviso é descartado.
+            // Qualquer sessão pode publicar. O registro da Central guarda SEMPRE (0 = mais
+            // recente); o banner e o evento a11y só saem sem o não-perturbe.
+            let t = rq.title();
+            let mut title = [0u8; 64];
+            title[..t.len()].copy_from_slice(t);
+            attention.log.rotate_right(1);
+            attention.log[0] = (title, t.len() as u32);
+            attention.log_n = (attention.log_n + 1).min(attention.log.len());
             if !attention.dnd {
-                let t = rq.title();
-                let mut title = [0u8; 64];
-                title[..t.len()].copy_from_slice(t);
                 attention.banner = Some((title, t.len() as u32));
                 a11y_emit(a11y, 2, 0, t);
                 recompose(surfaces, outs, fb, *active_ctx, attention);
