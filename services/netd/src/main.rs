@@ -1,11 +1,14 @@
 //! `netd` — serviço de rede residente. Handle 0 = canal do `netdev` (`nexo.net`),
-//! handle 1 = canal do cliente (`nexo.sock`, `idl/sock.idl`).
+//! handle 1 = primeiro cliente (`nexo.sock`, `idl/sock.idl`). Um cliente abre novas sessões com
+//! `open{chan}`, transferindo a sua ponta de um canal recém-criado; o netd passa a atendê-la
+//! como mais um cliente (até [`MAX_CLIENTS`]). Sockets são globais nesta versão (os clientes
+//! coordenam as portas entre si); isolamento por sessão é um item futuro.
 //!
 //! No arranque: MAC → DHCP (DISCOVER→OFFER→REQUEST→ACK) → ARP do gateway. Depois, um laço de
 //! eventos único bombeia quadros do driver (ARP, UDP para filas por porta, TCP para a máquina
-//! de estados de `docs/spec/tcp-states.md`) e atende pedidos do cliente sem bloquear
-//! (`channel_try_recv`). Limitações documentadas: sem retransmissão própria (o par retransmite;
-//! segmentos fora de ordem são descartados sem ACK), TIME_WAIT imediato, um cliente.
+//! de estados de `docs/spec/tcp-states.md`) e atende os clientes sem bloquear
+//! (`channel_try_recv`), dormindo em `channel_wait_any` quando tudo está ocioso. Limitações
+//! documentadas: sockets globais (sem isolamento por sessão), TIME_WAIT imediato.
 #![no_std]
 #![no_main]
 
@@ -18,6 +21,8 @@ use nexo_sys::abi::Status;
 
 const NET: Handle = 0;
 const CLIENT: Handle = 1;
+/// Máximo de clientes simultâneos (o primeiro + os abertos por `open`).
+const MAX_CLIENTS: usize = 8;
 
 const E_INVALID: u32 = 1;
 const E_NO_RES: u32 = 2;
@@ -488,39 +493,78 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         lease.dns[2],
         lease.dns[3]
     );
-    // 4. laço de eventos: com tudo ocioso, dorme em wait_any {cliente, driver};
-    // com TCP pendente, continua bombeando (retransmissões precisam do relógio).
+    // 4. laço de eventos multi-cliente: varre todos os clientes sem bloquear; ocioso, dorme em
+    // wait_any({todos os clientes, driver}); com TCP pendente, continua bombeando o relógio.
     let mut out = [0u8; 4096];
+    let mut clients: [Option<Handle>; MAX_CLIENTS] = [None; MAX_CLIENTS];
+    clients[0] = Some(CLIENT);
+    let mut hbuf = [0u32; 8];
     loop {
         pump();
-        let busy = netd().tcp.iter().any(|s| s.is_some());
-        let (n, _) = match nexo_sys::channel_try_recv(CLIENT, &mut msg, &mut hs) {
-            Ok(v) => v,
-            Err(Status::WouldBlock) => {
-                if busy {
-                    nexo_sys::sleep_ns(2_000_000);
-                } else {
-                    let _ = nexo_sys::channel_wait_any(&[CLIENT, NET]);
+        let mut worked = false;
+        for slot in 0..MAX_CLIENTS {
+            let Some(ch) = clients[slot] else { continue };
+            let (n, nh) = match nexo_sys::channel_try_recv(ch, &mut msg, &mut hbuf) {
+                Ok(v) => v,
+                Err(Status::WouldBlock) => continue,
+                Err(Status::PeerClosed) => {
+                    let _ = nexo_sys::handle_close(ch);
+                    clients[slot] = None;
+                    if slot == 0 && clients.iter().all(|c| c.is_none()) {
+                        log!("netd: ultimo cliente desconectou; encerrando");
+                        nexo_sys::exit(0)
+                    }
+                    continue;
                 }
+                Err(_) => fail(107, "recv do cliente"),
+            };
+            worked = true;
+            let request = match sock::decode_request_with_handles(&msg[..n], &hbuf[..nh]) {
+                Ok(r) => r,
+                Err(_) => {
+                    let m = sock::encode_error(0, E_INVALID, &mut out).unwrap_or(0);
+                    let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+                    continue;
+                }
+            };
+            // `open` registra o novo canal como cliente (o handle ja chegou na nossa tabela).
+            if let Request::Open(rq) = &request {
+                let new = rq.chan;
+                let placed = (0..MAX_CLIENTS).find(|&i| clients[i].is_none());
+                let m = match placed {
+                    Some(i) => {
+                        clients[i] = Some(new);
+                        sock::OpenResponse {}.encode_msg(&mut out).unwrap_or(0)
+                    }
+                    None => {
+                        let _ = nexo_sys::handle_close(new);
+                        sock::encode_error(sock::OpenRequest::METHOD_ID, E_NO_RES, &mut out)
+                            .unwrap_or(0)
+                    }
+                };
+                let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
                 continue;
             }
-            Err(Status::PeerClosed) => {
-                log!("netd: cliente desconectou; encerrando");
-                nexo_sys::exit(0)
+            let m = serve(request, &mut out);
+            if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+                fail(108, "resposta ao cliente");
             }
-            Err(_) => fail(107, "recv do cliente"),
-        };
-        let request = match sock::decode_request(&msg[..n]) {
-            Ok(r) => r,
-            Err(_) => {
-                let m = sock::encode_error(0, E_INVALID, &mut out).unwrap_or(0);
-                let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
-                continue;
+        }
+        if worked {
+            continue;
+        }
+        let busy = netd().tcp.iter().any(|s| s.is_some());
+        if busy {
+            nexo_sys::sleep_ns(2_000_000);
+        } else {
+            // dorme ate um cliente OU o driver terem trafego
+            let mut waits = [NET; MAX_CLIENTS + 1];
+            let mut wn = 1;
+            for c in clients.iter().flatten() {
+                waits[wn] = *c;
+                wn += 1;
             }
-        };
-        let m = serve(request, &mut out);
-        if nexo_sys::channel_send(CLIENT, &out[..m], &[]) != Status::Ok {
-            fail(108, "resposta ao cliente");
+            let _ = nexo_sys::channel_wait_any(&waits[..wn]);
         }
     }
 }
@@ -548,6 +592,10 @@ fn wait_dhcp(kind: u8, xid: u32) -> nsk::DhcpLease {
 fn serve(request: Request, out: &mut [u8; 4096]) -> usize {
     let st = netd();
     match request {
+        // `open` é tratado no laço de eventos (registra o novo cliente); nunca chega aqui.
+        Request::Open(_) => {
+            sock::encode_error(sock::OpenRequest::METHOD_ID, E_INVALID, out).unwrap_or(0)
+        }
         Request::Info(_) => {
             let l = st.lease;
             sock::InfoResponse {

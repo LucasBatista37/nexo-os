@@ -104,3 +104,13 @@ method 8 tcp_close {
     response {
     }
 }
+
+# Abre uma sessao adicional: o handle `chan` (uma ponta de canal criada pelo cliente) passa a
+# ser atendido pelo netd como mais um cliente; a resposta vai no canal em que o pedido chegou.
+method 11 open {
+    request {
+        chan: handle,
+    }
+    response {
+    }
+}

@@ -17,6 +17,8 @@ pub struct InfoRequest {}
 impl InfoRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -73,6 +75,8 @@ pub struct InfoResponse {
 impl InfoResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `ip`.
     pub fn ip(&self) -> &[u8] {
         &self.ip[..(self.ip_len as usize).min(4)]
@@ -282,6 +286,8 @@ pub struct ResolveRequest {
 impl ResolveRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 2;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `name`.
     pub fn name(&self) -> &[u8] {
         &self.name[..(self.name_len as usize).min(253)]
@@ -358,6 +364,8 @@ pub struct ResolveResponse {
 impl ResolveResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 2;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `addr`.
     pub fn addr(&self) -> &[u8] {
         &self.addr[..(self.addr_len as usize).min(4)]
@@ -454,6 +462,8 @@ pub struct UdpSendRequest {
 impl UdpSendRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 3;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `dst_ip`.
     pub fn dst_ip(&self) -> &[u8] {
         &self.dst_ip[..(self.dst_ip_len as usize).min(4)]
@@ -581,6 +591,8 @@ pub struct UdpSendResponse {}
 impl UdpSendResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 3;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -619,6 +631,8 @@ pub struct UdpRecvRequest {
 impl UdpRecvRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 4;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -678,6 +692,8 @@ pub struct UdpRecvResponse {
 impl UdpRecvResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 4;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `from_ip`.
     pub fn from_ip(&self) -> &[u8] {
         &self.from_ip[..(self.from_ip_len as usize).min(4)]
@@ -801,6 +817,8 @@ pub struct TcpConnectRequest {
 impl TcpConnectRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 5;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `dst_ip`.
     pub fn dst_ip(&self) -> &[u8] {
         &self.dst_ip[..(self.dst_ip_len as usize).min(4)]
@@ -887,6 +905,8 @@ pub struct TcpConnectResponse {
 impl TcpConnectResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 5;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -942,6 +962,8 @@ pub struct TcpSendRequest {
 impl TcpSendRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 6;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `data`.
     pub fn data(&self) -> &[u8] {
         &self.data[..(self.data_len as usize).min(1400)]
@@ -1028,6 +1050,8 @@ pub struct TcpSendResponse {
 impl TcpSendResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 6;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -1079,6 +1103,8 @@ pub struct TcpRecvRequest {
 impl TcpRecvRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 7;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -1134,6 +1160,8 @@ pub struct TcpRecvResponse {
 impl TcpRecvResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 7;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `data`.
     pub fn data(&self) -> &[u8] {
         &self.data[..(self.data_len as usize).min(1400)]
@@ -1220,6 +1248,8 @@ pub struct TcpListenRequest {
 impl TcpListenRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 9;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -1277,6 +1307,8 @@ pub struct TcpListenResponse {
 impl TcpListenResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 9;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `peer_ip`.
     pub fn peer_ip(&self) -> &[u8] {
         &self.peer_ip[..(self.peer_ip_len as usize).min(4)]
@@ -1374,6 +1406,8 @@ pub struct TcpCloseRequest {
 impl TcpCloseRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 8;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -1422,6 +1456,8 @@ pub struct TcpCloseResponse {}
 impl TcpCloseResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 8;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -1430,6 +1466,88 @@ impl TcpCloseResponse {
     /// ausentes assumem o padrao — ipc-compat §3).
     pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
         Ok(TcpCloseResponse {})
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.sock.open` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenRequest {
+    /// Handle `chan` (viaja no vetor de handles, nunca no payload).
+    pub chan: u32,
+}
+
+impl OpenRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 11;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 1;
+    /// Handles na ordem de declaracao (para passar ao `channel_send`).
+    pub fn handles(&self) -> [u32; 1] {
+        [self.chan]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        let chan: u32 = 0; // injetado por decode_*_with_handles
+        Ok(OpenRequest { chan })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.sock.open` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenResponse {}
+
+impl OpenResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 11;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(OpenResponse {})
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
     pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
@@ -1473,6 +1591,67 @@ pub enum Request {
     TcpListen(TcpListenRequest),
     /// `tcp_close`.
     TcpClose(TcpCloseRequest),
+    /// `open`.
+    Open(OpenRequest),
+}
+
+/// Decodifica um pedido injetando os handles recebidos (ordem de declaracao por metodo).
+pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, ProtoError> {
+    let mut r = decode_request(msg)?;
+    match &mut r {
+        Request::Info(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::Resolve(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::UdpSend(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::UdpRecv(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::TcpConnect(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::TcpSend(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::TcpRecv(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::TcpListen(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::TcpClose(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::Open(rq) => {
+            if hs.len() != 1 {
+                return Err(ProtoError::Length);
+            }
+            rq.chan = hs[0];
+        }
+    }
+    Ok(r)
 }
 
 /// Decodifica um pedido completo (cabecalho + payload).
@@ -1498,6 +1677,7 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
         7 => Ok(Request::TcpRecv(TcpRecvRequest::decode_payload(p)?)),
         9 => Ok(Request::TcpListen(TcpListenRequest::decode_payload(p)?)),
         8 => Ok(Request::TcpClose(TcpCloseRequest::decode_payload(p)?)),
+        11 => Ok(Request::Open(OpenRequest::decode_payload(p)?)),
         _ => Err(ProtoError::Method),
     }
 }
@@ -1743,6 +1923,33 @@ pub fn decode_tcp_close_response(msg: &[u8]) -> Result<TcpCloseResponse, ProtoEr
         return Err(ProtoError::Flags);
     }
     TcpCloseResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `open` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_open_response(msg: &[u8]) -> Result<OpenResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 11 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    OpenResponse::decode_payload(p)
 }
 
 /// Codifica uma resposta de erro para o metodo `method_id`.

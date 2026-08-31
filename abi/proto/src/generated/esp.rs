@@ -22,6 +22,8 @@ pub struct ListRequest {
 impl ListRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `path`.
     pub fn path(&self) -> &[u8] {
         &self.path[..(self.path_len as usize).min(256)]
@@ -98,6 +100,8 @@ pub struct ListResponse {
 impl ListResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `entries`.
     pub fn entries(&self) -> &[u8] {
         &self.entries[..(self.entries_len as usize).min(3900)]
@@ -186,6 +190,8 @@ pub struct StatRequest {
 impl StatRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 2;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `path`.
     pub fn path(&self) -> &[u8] {
         &self.path[..(self.path_len as usize).min(256)]
@@ -260,6 +266,8 @@ pub struct StatResponse {
 impl StatResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 2;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -327,6 +335,8 @@ pub struct ReadRequest {
 impl ReadRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 3;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `path`.
     pub fn path(&self) -> &[u8] {
         &self.path[..(self.path_len as usize).min(256)]
@@ -426,6 +436,8 @@ pub struct ReadResponse {
 impl ReadResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 3;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `data`.
     pub fn data(&self) -> &[u8] {
         &self.data[..(self.data_len as usize).min(3500)]

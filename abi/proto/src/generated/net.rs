@@ -17,6 +17,8 @@ pub struct MacRequest {}
 impl MacRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -57,6 +59,8 @@ pub struct MacResponse {
 impl MacResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `addr`.
     pub fn addr(&self) -> &[u8] {
         &self.addr[..(self.addr_len as usize).min(6)]
@@ -131,6 +135,8 @@ pub struct SendRequest {
 impl SendRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 2;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `frame`.
     pub fn frame(&self) -> &[u8] {
         &self.frame[..(self.frame_len as usize).min(1514)]
@@ -200,6 +206,8 @@ pub struct SendResponse {}
 impl SendResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 2;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -235,6 +243,8 @@ pub struct RecvRequest {}
 impl RecvRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 3;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -275,6 +285,8 @@ pub struct RecvResponse {
 impl RecvResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 3;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `frame`.
     pub fn frame(&self) -> &[u8] {
         &self.frame[..(self.frame_len as usize).min(1514)]
@@ -344,6 +356,8 @@ pub struct SubscribeRequest {}
 impl SubscribeRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 4;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -379,6 +393,8 @@ pub struct SubscribeResponse {}
 impl SubscribeResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 4;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -419,6 +435,8 @@ pub struct FrameEvent {
 impl FrameEvent {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 5;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `frame`.
     pub fn frame(&self) -> &[u8] {
         &self.frame[..(self.frame_len as usize).min(1514)]

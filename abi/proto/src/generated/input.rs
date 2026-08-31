@@ -17,6 +17,8 @@ pub struct PollRequest {}
 impl PollRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -57,6 +59,8 @@ pub struct PollResponse {
 impl PollResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `events`.
     pub fn events(&self) -> &[u8] {
         &self.events[..(self.events_len as usize).min(3500)]

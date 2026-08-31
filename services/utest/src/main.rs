@@ -1892,6 +1892,36 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
             rlen
         );
     }
+    // 7. multi-cliente: abre uma segunda sessao no netd (transfere uma ponta de canal via `open`)
+    //    e usa `info` por ela — prova que o handle viajou e o netd atende dois clientes.
+    {
+        use nexo_proto::sock::{OpenRequest, decode_info_response, decode_open_response};
+        let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(388));
+        let m = OpenRequest { chan: theirs }
+            .encode_msg(&mut msg)
+            .unwrap_or(0);
+        // o handle `theirs` sai da nossa tabela e entra na do netd
+        if nexo_sys::channel_send(0, &msg[..m], &[theirs]) != Status::Ok {
+            nexo_sys::exit(389);
+        }
+        match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+            Ok((n, _)) if decode_open_response(&msg[..n]).is_ok() => {}
+            _ => nexo_sys::exit(390),
+        }
+        // pela nova sessao: info deve devolver o mesmo lease
+        let m = InfoRequest {}.encode_msg(&mut msg).unwrap_or(0);
+        if nexo_sys::channel_send(mine, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(391);
+        }
+        match nexo_sys::channel_recv(mine, &mut msg, &mut hs) {
+            Ok((n, _)) => match decode_info_response(&msg[..n]) {
+                Ok(r) if r.ip() == [10, 0, 2, 15] => {}
+                _ => nexo_sys::exit(392),
+            },
+            _ => nexo_sys::exit(393),
+        }
+        nexo_rt::log!("utest: sock multi-cliente ok — 2a sessao aberta por `open` e atendida");
+    }
     nexo_sys::exit(0)
 }
 

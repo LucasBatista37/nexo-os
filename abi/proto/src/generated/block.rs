@@ -22,6 +22,8 @@ pub struct ReadRequest {
 impl ReadRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -85,6 +87,8 @@ pub struct ReadResponse {
 impl ReadResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 1;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `data`.
     pub fn data(&self) -> &[u8] {
         &self.data[..(self.data_len as usize).min(3584)]
@@ -163,6 +167,8 @@ pub struct WriteRequest {
 impl WriteRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 2;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `data`.
     pub fn data(&self) -> &[u8] {
         &self.data[..(self.data_len as usize).min(3584)]
@@ -257,6 +263,8 @@ pub struct WriteResponse {}
 impl WriteResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 2;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -292,6 +300,8 @@ pub struct CapacityRequest {}
 impl CapacityRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 3;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -330,6 +340,8 @@ pub struct CapacityResponse {
 impl CapacityResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 3;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
         let mut o = 0usize;
@@ -378,6 +390,8 @@ pub struct IdentityRequest {}
 impl IdentityRequest {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 4;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
         Ok(0)
@@ -420,6 +434,8 @@ pub struct IdentityResponse {
 impl IdentityResponse {
     /// Numero do metodo.
     pub const METHOD_ID: u32 = 4;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
     /// Fatia valida de `serial`.
     pub fn serial(&self) -> &[u8] {
         &self.serial[..(self.serial_len as usize).min(20)]

@@ -5,7 +5,8 @@ Formato da IDL (linhas; `#` comenta):
   protocol <nome> <maior>.<menor>
   method <id> <nome> { request { campo: tipo [= padrao], ... } response { ... } }
   event <id> <nome> { campo: tipo, ... }   (mensagem sem resposta; flags = evento)
-Tipos: u8 u16 u32 u64 i32 i64 bytes<N>. Campos com padrao devem ser os ultimos
+Tipos: u8 u16 u32 u64 i32 i64 bytes<N> handle (viaja no vetor de handles da mensagem,
+nunca no payload — ipc-compat §1; ordem de declaracao = posicao no vetor). Campos com padrao devem ser os ultimos
 (leitores novos assumem o padrao quando o payload antigo e curto — ipc-compat §3).
 
 Saida: abi/proto/src/gen/<nome>.rs (+ mod.rs). Rode `make idl` apos editar a IDL.
@@ -65,7 +66,7 @@ def parse(text: str, path):
                 methods.append(cur)
                 cur = None
             continue
-        m = re.fullmatch(r"(\w+): (u8|u16|u32|u64|i32|i64|bytes<(\d+)>)(?: = (-?\d+))?,?", line)
+        m = re.fullmatch(r"(\w+): (u8|u16|u32|u64|i32|i64|handle|bytes<(\d+)>)(?: = (-?\d+))?,?", line)
         if m and cur and section:
             ty = m.group(2)
             key = section
@@ -83,7 +84,7 @@ def parse(text: str, path):
             seen_default = False
             for f in m[sec]:
                 if f["default"] is not None:
-                    if f["type"].startswith("bytes"):
+                    if f["type"].startswith("bytes") or f["type"] == "handle":
                         sys.exit(f"{path}: padrao so em escalares ({m['name']}.{f['name']})")
                     seen_default = True
                 elif seen_default:
@@ -98,10 +99,16 @@ def camel(s: str) -> str:
 def gen_struct(out, proto_name, m, sec):
     name = f"{camel(m['name'])}{'Request' if sec == 'request' else 'Response'}"
     fields = m[sec]
+    # Handles nao ocupam payload (viajam no vetor de handles da mensagem).
+    payload_fields = [f for f in fields if f["type"] != "handle"]
     out.append(f"/// `{proto_name}.{m['name']}` — {'pedido' if sec == 'request' else 'resposta'}.")
     out.append("#[derive(Clone, Debug, PartialEq, Eq)]")
     out.append(f"pub struct {name} {{")
     for f in fields:
+        if f["type"] == "handle":
+            out.append(f"    /// Handle `{f['name']}` (viaja no vetor de handles, nunca no payload).")
+            out.append(f"    pub {f['name']}: u32,")
+            continue
         if f["max"] is not None:
             out.append(f"    /// Bytes de `{f['name']}` (ate {f['max']}).")
             out.append(f"    pub {f['name']}: [u8; {f['max']}],")
@@ -116,6 +123,15 @@ def gen_struct(out, proto_name, m, sec):
     out.append(f"impl {name} {{")
     out.append(f"    /// Numero do metodo.")
     out.append(f"    pub const METHOD_ID: u32 = {m['id']};")
+    n_handles = sum(1 for f in fields if f["type"] == "handle")
+    out.append("    /// Handles que esta mensagem carrega no vetor de handles da mensagem.")
+    out.append(f"    pub const HANDLE_COUNT: usize = {n_handles};")
+    if n_handles:
+        out.append("    /// Handles na ordem de declaracao (para passar ao `channel_send`).")
+        out.append(f"    pub fn handles(&self) -> [u32; {n_handles}] {{")
+        hl = ", ".join("self.%s" % f["name"] for f in fields if f["type"] == "handle")
+        out.append(f"        [{hl}]")
+        out.append("    }")
     if any(f["max"] is not None for f in fields):
         for f in fields:
             if f["max"] is not None:
@@ -125,14 +141,16 @@ def gen_struct(out, proto_name, m, sec):
                 out.append("    }")
     # encode_payload
     out.append("    /// Codifica o payload; devolve o tamanho.")
-    if not fields:
+    if not payload_fields:
         out.append("    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {")
         out.append("        Ok(0)")
         out.append("    }")
     else:
         out.append("    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {")
         out.append("        let mut o = 0usize;")
-    for f in fields if fields else []:
+    for f in fields if payload_fields else []:
+        if f["type"] == "handle":
+            continue
         if f["max"] is not None:
             out.append(f"        let n = self.{f['name']}_len as usize;")
             out.append(f"        if n > {f['max']} {{ return Err(ProtoError::TooBig); }}")
@@ -145,7 +163,7 @@ def gen_struct(out, proto_name, m, sec):
             out.append(f"        if o + {size} > out.len() {{ return Err(ProtoError::Short); }}")
             out.append(f"        out[o..o + {size}].copy_from_slice(&self.{f['name']}.to_le_bytes());")
             out.append(f"        o += {size};")
-    if fields:
+    if payload_fields:
         out.append("        Ok(o)")
         out.append("    }")
     # decode_payload
@@ -155,11 +173,16 @@ def gen_struct(out, proto_name, m, sec):
         out.append("    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {")
         out.append(f"        Ok({name} {{}})")
         out.append("    }")
+    elif not payload_fields:
+        out.append("    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {")
     else:
         out.append("    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {")
         out.append("        let mut o = 0usize;")
     for f in fields:
         n = f["name"]
+        if f["type"] == "handle":
+            out.append(f"        let {n}: u32 = 0; // injetado por decode_*_with_handles")
+            continue
         if f["max"] is not None:
             out.append(f"        let mut {n} = [0u8; {f['max']}];")
             out.append(f"        let {n}_len: u32;")
@@ -185,7 +208,7 @@ def gen_struct(out, proto_name, m, sec):
                 out.append(f"        if o + {size} > b.len() {{ return Err(ProtoError::Short); }}")
                 out.append(f"        let {n} = {ty}::from_le_bytes(b[o..o + {size}].try_into().unwrap());")
                 out.append(f"        o += {size};")
-    if fields:
+    if payload_fields:
         out.append("        let _ = o;")
     if fields:
         parts = []
@@ -269,6 +292,32 @@ def generate(path: pathlib.Path) -> str:
         out.append(f"    {camel(m['name'])}({names[m['id']][0]}),")
     out.append("}")
     out.append("")
+    any_handles = any(f["type"] == "handle" for m in methods for f in m["request"])
+    if any_handles:
+        out.append("/// Decodifica um pedido injetando os handles recebidos (ordem de declaracao por metodo).")
+        out.append("pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, ProtoError> {")
+        out.append("    let mut r = decode_request(msg)?;")
+        out.append("    match &mut r {")
+        for m in methods:
+            hnames = [f["name"] for f in m["request"] if f["type"] == "handle"]
+            if not hnames:
+                out.append(f"        Request::{camel(m['name'])}(_) => {{")
+                out.append("            if !hs.is_empty() {")
+                out.append("                return Err(ProtoError::Length);")
+                out.append("            }")
+                out.append("        }")
+            else:
+                out.append(f"        Request::{camel(m['name'])}(rq) => {{")
+                out.append(f"            if hs.len() != {len(hnames)} {{")
+                out.append("                return Err(ProtoError::Length);")
+                out.append("            }")
+                for i, hn in enumerate(hnames):
+                    out.append(f"            rq.{hn} = hs[{i}];")
+                out.append("        }")
+        out.append("    }")
+        out.append("    Ok(r)")
+        out.append("}")
+        out.append("")
     out.append("/// Decodifica um pedido completo (cabecalho + payload).")
     out.append("pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {")
     out.append("    let h = Header::decode(msg)?;")

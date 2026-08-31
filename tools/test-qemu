@@ -575,6 +575,7 @@ def run_net_scenario(timeout: float) -> bool:
                 r"utest: sock tcp ok — conectou, enviou e recebeu por 10\.0\.2\.2:\d+",
                 r"utest: sock listen — conexao de entrada de 10\.0\.2\.2:\d+",
                 r"utest: sock listen ok — servimos uma conexao de entrada na porta 8080",
+                r"utest: sock multi-cliente ok — 2a sessao aberta por `open` e atendida",
                 r"utest: http ok — GET /nexo\.txt devolveu 200 e o corpo esperado \(\d+ bytes\)",
                 r"\[NET\] fase 2 \(netd\) terminou com 0",
                 r"\[NET\] teste de rede terminou com 0",

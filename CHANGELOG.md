@@ -135,6 +135,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Adicionado (Fase 4, bloco 12 — janela deslizante de transmissão TCP)
 - `nexo-netstack::tcp`: transmissão com até 4 segmentos em voo (dados, SYN e FIN compartilham a janela), ACKs cumulativos e parciais liberando slots, retransmissão do mais antigo vencido (go-back-1); API por slots (`TxSeg.slot` + `slot_payload`). Suíte de host ampliada para 19 testes (pipelining com ACK parcial, FIN em voo junto com dados, retransmissão do mais antigo).
 
+### Adicionado (Fase 4, bloco 13 — netd multi-cliente e handles na IDL)
+- IDL: tipo de campo `handle` (viaja no vetor de handles da mensagem, nunca no payload — ipc-compat §1); o gerador emite `HANDLE_COUNT`, `handles()` e `decode_request_with_handles(msg, hs)` (injeta os handles recebidos na ordem de declaração). Teste de host em `nexo-proto`.
+- `nexo.sock` v1.0: método `open{chan}` — um cliente cria um canal e transfere a ponta ao `netd`, que passa a atendê-la como mais um cliente.
+- `netd` multi-cliente: laço de eventos varre até 8 clientes com `channel_try_recv`, ocioso dorme em `channel_wait_any({todos os clientes, driver})`, encerra quando o último desconecta. `utest` (modo 15) abre uma 2ª sessão por `open` e usa `info` por ela.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

@@ -24,6 +24,8 @@ Toda mensagem de um protocolo tipado começa com 24 bytes:
 
 Decodificadores rejeitam (sem efeitos) magic, `protocol_id`, `version_major` ou `method_id` desconhecidos, `payload_len` inconsistente com o tamanho recebido e flags reservadas ≠ 0.
 
+Campos de tipo `handle` na IDL **não entram no payload**: viajam no vetor de handles da mensagem (§1). O gerador expõe `HANDLE_COUNT`, `handles()` (na ordem de declaração, para o `channel_send`) e `decode_request_with_handles(msg, hs)`, que injeta os handles recebidos; `decode_request` sem eles devolve os campos-handle zerados.
+
 ## 3. Evolução
 
 1. Campos de payload só são **acrescentados ao final**; nunca removidos, reordenados ou reinterpretados. Campos novos têm valor padrão explícito; leitores antigos ignoram bytes extras e leitores novos assumem o padrão quando o payload é curto.
@@ -55,7 +57,7 @@ A IDL existe: `idl/*.idl` → `tools/idlgen` (`make idl`) → `abi/proto` (`nexo
 | cliente → `consoledev` | **tipado**: `nexo.console` v1.0 (`idl/console.idl`; `read{}`→`{data}` sem bloquear, `write{data}`→`{written}`) | porta 0 da VirtIO-console, sem `MULTIPORT`; um cliente por driver |
 | cliente → `inputdev` | **tipado**: `nexo.input` v1.0 (`idl/input.idl`; `poll{}`→`{events}` sem bloquear; evento = 8 B evdev `[type u16][code u16][value u32]`) | um cliente por driver |
 | cliente → `netdev` | **tipado**: `nexo.net` v1.1 (`idl/net.idl`; `mac`, `send`, `recv` sem bloquear e `subscribe{}` — depois dele cada quadro recebido chega como **evento** `frame`) | quadros Ethernet crus; um cliente por driver; o driver dorme em `wait_any({canal, canal de IRQ}}` |
-| cliente → `netd` | **tipado**: `nexo.sock` v1.0 (`idl/sock.idl`; `info`, `resolve` com cache, `udp_send`/`udp_recv` por porta, `tcp_connect`/`tcp_send`/`tcp_recv`/`tcp_close`/`tcp_listen`); erros 1 inválido, 2 sem recursos, 3 tempo esgotado, 4 conexão reiniciada, 5 nome não resolvido, 6 não conectado | serviço residente sobre o `netdev`; TCP conforme `docs/spec/tcp-states.md`; um cliente por instância |
+| cliente → `netd` | **tipado**: `nexo.sock` v1.0 (`idl/sock.idl`; `info`, `resolve` com cache, `udp_send`/`udp_recv` por porta, `tcp_connect`/`tcp_send`/`tcp_recv`/`tcp_close`/`tcp_listen`, `open{chan:handle}` para abrir novas sessões); erros 1 inválido, 2 sem recursos, 3 tempo esgotado, 4 conexão reiniciada, 5 nome não resolvido, 6 não conectado | serviço residente sobre o `netdev`; TCP conforme `docs/spec/tcp-states.md`; um cliente por instância |
 | `devmgr` → cliente | `fs`+handle (canal do servidor de arquivos), `rng`+handle (canal do `rngdev`), `esp`+handle (canal do `espfs`), `done` | canal do handle 1 do `devmgr`; drivers recebem `[concessão, canal]` como handles iniciais |
 | cliente → `fs` | **tipado**: `nexo.fs` v1.0 (`idl/fs.idl`; métodos 1–10: stat/create/mkdir/unlink/read/write/list/sync/info/truncate); erros remotos 1–11 = `nexofs::FsError::code()`, 255 malformado | um cliente por servidor (handle 1); ADR-0016 |
 
