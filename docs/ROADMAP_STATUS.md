@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `5582aff`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `2db2286`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 150 · 🟡 48 · ⬜ 337 · ⛔ 0 → **33% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 150 · 🟡 49 · ⬜ 336 · ⛔ 0 → **33% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -13,7 +13,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 | Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 10 | 7 | 1 | 75% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
 | Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 17 | 3 | 1 | 88% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 14 | 3 | 47% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
-| Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 2 | 5 | 18 | 18% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
+| Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 2 | 6 | 17 | 20% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
 | Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 0 | 0 | 25 | 0% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
 | Fase 7 — Áudio, mídia, USB e hardware real (anos 5–7) | ⬜ não iniciado | 0 | 0 | 20 | 0% | 12–24 meses | USB/HID/armazenamento, NVMe/AHCI, áudio, Ethernet real, Wi-Fi, GPU/display, energia/suspensão, laboratório de hardware |
 | Fase 8 — Segurança, instalação, atualização e recuperação (anos 5–8) | ⬜ não iniciado | 0 | 0 | 22 | 0% | 9–15 meses | criptografia de disco, TPM, trust root, A/B, rollback, recovery, instalador, Secure Boot, backup, crash dumps, fuzzing contínuo, revisão externa |
@@ -167,7 +167,7 @@ Gate: ⬜ não iniciado.
 | ✅ | criar captura de rede autorizada para diagnóstico | `tools/netcap`/`make netcap` (pcap via `run-qemu --net-dump` + resumo por protocolo/fluxo; sempre local e explícita) |
 | ⬜ | publicar release `0.4-network` |  |
 
-### Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) — 18% (2 ✅, 5 🟡, 18 ⬜)
+### Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) — 20% (2 ✅, 6 🟡, 17 ⬜)
 
 Gate: ⬜ não iniciado. 
 
@@ -178,11 +178,11 @@ Gate: ⬜ não iniciado.
 | 🟡 | implementar cores, composição alfa, clipping e transformações | cores RGBA, composição alfa src-over e clipping retangular em `nexo-gfx` (testes de host); transformações (escala/rotação) pendentes |
 | 🟡 | implementar rasterização de texto e fallback de fontes | `nexo-gfx::text` desenha strings com a fonte bitmap 8×8 (escala, cor, fundo, quebra de linha) e cai no glifo de fallback para caracteres fora da faixa; testes de host e no auto-teste `gfx`; fontes vetoriais/hinting e Unicode amplo pendentes |
 | ✅ | definir protocolo de superfícies e buffers | modelo de superfície/janela (retângulo + buffer + z + dano) em `nexo-wm`; IDL `nexo.wm` (`create_surface`/`commit`/`move`/`destroy`/`output`, handles de `MemoryObject` viajando no vetor de handles) e transporte por memória compartilhada implementados no serviço `wm` |
-| ✅ | implementar compositor em espaço de usuário | serviço `wm` em ring 3 (`services/wm`): cada cliente escreve pixels num `MemoryObject` compartilhado; o serviço compõe a cena por z-order com `nexo-wm` numa saída também compartilhada; composição fim a fim entre processos provada pelo auto-teste de boot `user_wm` (duas superfícies sobrepostas, ordem-Z conferida na saída, sem vazamento de quadros) |
+| ✅ | implementar compositor em espaço de usuário | serviço `wm` em ring 3 (`services/wm`): cada cliente escreve pixels num `MemoryObject` compartilhado; o serviço compõe a cena por z-order com `nexo-wm` numa saída também compartilhada. **Multi-cliente**: várias sessões coexistem (a 2ª aberta por `open`, transferindo a ponta de um canal novo), as superfícies pertencem à sessão que as criou e são liberadas ao desconectar. Auto-testes de boot `user_wm` (duas superfícies de um cliente, ordem-Z na saída) e `user_wm_multi` (duas sessões independentes compõem; uma sessão não mexe na superfície da outra), ambos sem vazamento de quadros |
 | 🟡 | implementar double/triple buffering e damage tracking | rastreamento de danos (`nexo-wm::Damage`: acumula e coalesce; composição só repinta o dano) pronto e testado; double/triple buffering pende do serviço e do framebuffer real |
 | ⬜ | integrar mouse e teclado pelo serviço de entrada |  |
 | ⬜ | implementar foco, atalhos e captura segura |  |
-| ⬜ | implementar janelas, redimensionamento, maximização e mosaico |  |
+| 🟡 | implementar janelas, redimensionamento, maximização e mosaico | janelas básicas no serviço `wm`: criar/mover/destruir superfícies com posição e z, de múltiplas sessões (auto-testes `user_wm`/`user_wm_multi`); redimensionamento, maximização, mosaico e restacking dinâmico pendentes |
 | ⬜ | implementar múltiplos displays emulado |  |
 | ⬜ | criar toolkit UI nativo e tokens de design |  |
 | ⬜ | criar gerenciamento de temas claro/escuro e alto contraste |  |

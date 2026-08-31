@@ -1,8 +1,10 @@
 # nexo.wm — compositor de janelas (services/wm).
 # Fluxo: create_surface -> (o cliente escreve pixels no MemoryObject devolvido) -> commit.
-# O wm compoe todas as superficies na saida (outro MemoryObject) por ordem de z.
-# Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie inexistente.
-protocol wm 1.0
+# O wm compoe todas as superficies (de todas as sessoes) na saida (outro MemoryObject) por z.
+# Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
+# de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
+# inexistente ou de outra sessao, 4 = limite de sessoes.
+protocol wm 1.1
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -57,5 +59,15 @@ method 5 output {
         w: i32,
         h: i32,
         mem: handle,
+    }
+}
+
+# Abre mais uma sessao de cliente: transfere a ponta de um canal novo (`chan`); o wm passa a
+# atende-la como mais um cliente. As superficies pertencem a sessao que as criou.
+method 6 open {
+    request {
+        chan: handle,
+    }
+    response {
     }
 }

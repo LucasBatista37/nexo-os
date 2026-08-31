@@ -63,6 +63,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         17 => shmem_producer(),
         18 => shmem_consumer(),
         19 => wm_client(),
+        20 => wm_multi_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2189,6 +2190,86 @@ fn wm_client() -> ! {
         nexo_sys::exit(453);
     }
     nexo_sys::log("utest: wm cliente ok — composicao Z de duas superficies conferida na saida");
+    nexo_sys::exit(0)
+}
+
+/// Modo 20: multi-cliente do compositor. A sessao 1 (handle 0) cria a superficie vermelha; abre
+/// uma 2a sessao com `open` (transferindo a ponta de um canal novo) e cria a verde nela. Confere
+/// a composicao Z das superficies de sessoes independentes e o isolamento (uma sessao nao mexe na
+/// superficie da outra).
+fn wm_multi_client() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    // Sessao 1: A vermelha em (0,0) 8x8, z=0
+    let (a, a_base) = wm_create(s1, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    wm_commit(s1, a);
+
+    // Abre a sessao 2: cria um canal e transfere uma ponta ao wm via `open`.
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(460));
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(461));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(462);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(463),
+    }
+    let s2 = mine;
+
+    // Sessao 2: B verde em (4,4) 8x8, z=1 (sobrepoe A no canto)
+    let (b, b_base) = wm_create(s2, 4, 4, 8, 8, 1);
+    wm_fill(b_base, 8, 8, 0, 255, 0);
+    wm_commit(s2, b);
+
+    // Isolamento: a sessao 1 nao pode dar commit na superficie da sessao 2 (id `b`).
+    let m = nexo_proto::wm::CommitRequest { id: b }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(464));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(465);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        // esperado: erro remoto (superficie de outra sessao) -> decode falha
+        Ok((n, _)) if nexo_proto::wm::decode_commit_response(&buf[..n]).is_err() => {}
+        _ => nexo_sys::exit(466),
+    }
+
+    // Le a saida composta (na sessao 1) e confere a ordem-Z das duas sessoes.
+    let m = nexo_proto::wm::OutputRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(467));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(468);
+    }
+    let (n, nh) = match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok(v) => v,
+        _ => nexo_sys::exit(469),
+    };
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(470));
+    if nh != 1 {
+        nexo_sys::exit(471);
+    }
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(472));
+    let stride = outp.w;
+    if wm_px(ob, stride, 2, 2) != (255, 0, 0) {
+        nexo_sys::exit(473);
+    }
+    if wm_px(ob, stride, 6, 6) != (0, 255, 0) {
+        nexo_sys::exit(474);
+    }
+    if wm_px(ob, stride, 10, 10) != (0, 255, 0) {
+        nexo_sys::exit(475);
+    }
+    if wm_px(ob, stride, 30, 30) != (0, 0, 0) {
+        nexo_sys::exit(476);
+    }
+    nexo_sys::log("utest: wm multi-cliente ok — duas sessoes compoem e o isolamento vale");
     nexo_sys::exit(0)
 }
 
