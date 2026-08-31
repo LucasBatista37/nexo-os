@@ -94,6 +94,12 @@ pub fn enable_console() {
     cpu::without_interrupts(|| SINK.lock().console = true);
 }
 
+/// Suspende o espelho no console gráfico (a serial continua): usado quando outro dono desenha no
+/// framebuffer (ex.: teste de apresentação do compositor). Reative com [`enable_console`].
+pub fn disable_console() {
+    cpu::without_interrupts(|| SINK.lock().console = false);
+}
+
 /// Escreve uma linha de log.
 pub fn write(level: Level, target: &str, args: fmt::Arguments) {
     if level > self::level() {

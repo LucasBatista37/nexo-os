@@ -72,6 +72,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         26 => wm_ui(),
         27 => wm_maximize(),
         28 => wm_shortcut(),
+        29 => wm_present_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2396,6 +2397,19 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 29: cliente da apresentacao no framebuffer real. Cria uma superficie 16x16 magenta em
+/// (0,0) e commita — o wm (que recebeu a concessao do dispositivo de video) compoe e copia a cena
+/// para a tela. Segura a cena por ~2 s para o kernel conferir os pixels no framebuffer fisico.
+fn wm_present_client() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let (id, base) = wm_create(ch, 0, 0, 16, 16, 0);
+    wm_fill(base, 16, 16, 255, 0, 255); // magenta (mesmos bytes em RGBX e BGRX)
+    wm_commit(ch, id);
+    nexo_sys::sleep_ns(2_000_000_000);
+    nexo_sys::log("utest: present cliente ok — cena segurada para a leitura do framebuffer");
     nexo_sys::exit(0)
 }
 

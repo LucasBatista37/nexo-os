@@ -82,6 +82,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wm_ui", test_user_wm_ui),
     ("user_wm_maximize", test_user_wm_maximize),
     ("user_wm_shortcut", test_user_wm_shortcut),
+    ("user_wm_present", test_user_wm_present),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2126,6 +2127,91 @@ fn test_user_wm_shortcut() -> TestResult {
     let wc = crate::process::wait_and_reap(&wm);
     drop((wm, client));
     let frames = settled_free_frames(frames0, 8);
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Apresentação no framebuffer **real**: o `wm`, de posse da concessão do dispositivo de vídeo
+/// (o framebuffer é um BAR), consulta o layout (`fb_info`), mapeia a tela (`mmio_map`) e copia a
+/// saída composta para ela; o kernel lê os pixels do framebuffer físico e confere. O console
+/// gráfico fica suspenso durante o teste (a serial segue). Pulado se não há framebuffer ou se ele
+/// não está num BAR de um dispositivo de vídeo.
+fn test_user_wm_present() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    let fb = crate::boot::info().framebuffer;
+    if !fb.is_present() || fb.bytes_per_pixel != 4 {
+        kinfo!("selftest: sem framebuffer utilizavel; apresentacao pulada");
+        return Ok(());
+    }
+    let fb_end = fb.base + (fb.stride as u64) * (fb.height as u64) * 4;
+    let vga = crate::pci::devices()
+        .iter()
+        .find(|d| {
+            d.class == 0x03
+                && d.bars.iter().any(|b| {
+                    b.size != 0
+                        && b.flags & 1 == 0
+                        && fb.base >= b.base
+                        && fb_end <= b.base + b.size
+                })
+        })
+        .map(|d| d.bdf);
+    let Some(bdf) = vga else {
+        kinfo!("selftest: framebuffer fora de BAR de video; apresentacao pulada");
+        return Ok(());
+    };
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![
+        channel_handle(a),
+        Handle {
+            object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+            rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+        },
+    ];
+    let hclient = alloc::vec![channel_handle(b)];
+    // O compositor passa a ser o dono do framebuffer durante o teste (log só na serial).
+    crate::klog::disable_console();
+    let run = || -> Result<(i64, i64, bool), String> {
+        let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+        let client = crate::process::spawn_named("utest", 29, hclient).map_err(String::from)?;
+        // Espera o magenta (255,0,255 — mesmos bytes em RGBX e BGRX) no pixel (8,8) da tela.
+        let px_addr = fb.base + (8 * fb.stride as u64 + 8) * 4;
+        let p = virt::phys_to_virt(nexo_mm::PhysAddr::new(px_addr)).as_ptr::<u8>();
+        let mut seen = false;
+        for _ in 0..400 {
+            // SAFETY: px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre.
+            let (b0, b1, b2) = unsafe {
+                (
+                    p.read_volatile(),
+                    p.add(1).read_volatile(),
+                    p.add(2).read_volatile(),
+                )
+            };
+            if (b0, b1, b2) == (255, 0, 255) {
+                seen = true;
+                break;
+            }
+            sched::sleep_ms(10);
+        }
+        let cc = crate::process::wait_and_reap(&client);
+        let wc = crate::process::wait_and_reap(&wm);
+        drop((wm, client));
+        Ok((cc, wc, seen))
+    };
+    let result = run();
+    crate::klog::enable_console();
+    let (cc, wc, seen) = result?;
+    let frames = settled_free_frames(frames0, 8);
+    check!(seen, "o magenta composto nao apareceu no framebuffer");
     check!(cc == 0, "cliente saiu com {cc}");
     check!(wc == 0, "wm saiu com {wc}");
     let ends = crate::ipc::live_channel_ends();

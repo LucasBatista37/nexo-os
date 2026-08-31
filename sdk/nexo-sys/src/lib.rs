@@ -389,6 +389,15 @@ pub fn memory_unmap(base: u64, len: u64) -> Status {
     st
 }
 
+/// Layout do framebuffer de boot (só informação; o mapeamento exige a concessão do dispositivo
+/// de vídeo via [`mmio_map`]). `NotSupported` se não há framebuffer.
+pub fn fb_info() -> Result<abi::FbInfo, Status> {
+    let mut info = abi::FbInfo::default();
+    // SAFETY: ponteiro para uma struct local válida do tamanho que o kernel escreve.
+    let (st, _) = unsafe { raw(abi::SYS_FB_INFO, &mut info as *mut abi::FbInfo as u64, 0, 0) };
+    if st.is_ok() { Ok(info) } else { Err(st) }
+}
+
 /// Cria um canal que recebe 1 byte por disparo do vetor (coalescido); combine com
 /// [`channel_wait_any`] para esperar canal *ou* interrupção.
 pub fn irq_channel(dev: Handle, vector: u32) -> Result<Handle, Status> {

@@ -236,6 +236,26 @@ fn sys_memory_unmap(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
     }
 }
 
+/// Escreve o layout do framebuffer de boot (40 bytes, `FbInfo`) no ponteiro `a1`. Só informação:
+/// o mapeamento continua gated pela concessão do dispositivo de vídeo (`mmio_map` no BAR).
+fn sys_fb_info(f: &TrapFrame) -> (Status, u64) {
+    let fb = &crate::boot::info().framebuffer;
+    if !fb.is_present() {
+        return (Status::NotSupported, 0);
+    }
+    // SAFETY: FramebufferInfo é repr(C) com 40 bytes sem padding (8+8+4×6); lemos seus bytes.
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            fb as *const nexo_boot_abi::FramebufferInfo as *const u8,
+            core::mem::size_of::<nexo_boot_abi::FramebufferInfo>(),
+        )
+    };
+    match copy_to_user(f.rdi, bytes) {
+        Ok(()) => (Status::Ok, 0),
+        Err(e) => (e, 0),
+    }
+}
+
 fn sys_irq_channel(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let g = match device_grant(p, f.rdi as u32, RIGHT_SIGNAL) {
         Ok(g) => g,
@@ -749,6 +769,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_MEMORY_CREATE => sys_memory_create(&p, f),
         SYS_MEMORY_MAP => sys_memory_map(&p, f),
         SYS_MEMORY_UNMAP => sys_memory_unmap(&p, f),
+        SYS_FB_INFO => sys_fb_info(f),
         SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
         SYS_PCI_ENUM | SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE | SYS_MMIO_MAP | SYS_DMA_ALLOC
         | SYS_IRQ_ALLOC | SYS_IRQ_WAIT | SYS_DEVICE_OPEN => sys_device(&p, f),

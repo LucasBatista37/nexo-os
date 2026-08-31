@@ -86,8 +86,13 @@ pub const SYS_IRQ_CHANNEL: u64 = 27;
 /// TLB **sem** liberar os quadros físicos (que pertencem ao objeto). Base/tamanho múltiplos de
 /// página. Necessário para realocar buffers (ex.: redimensionar superfícies do compositor).
 pub const SYS_MEMORY_UNMAP: u64 = 30;
+/// Escreve um [`FbInfo`] (layout do framebuffer de boot) no ponteiro `a1`. Só **informação**
+/// (resolução/stride/formato — nada sensível); o **mapeamento** do framebuffer continua gated
+/// pela concessão do dispositivo de vídeo ([`SYS_MMIO_MAP`], o framebuffer é um BAR). `NotSupported`
+/// se não há framebuffer.
+pub const SYS_FB_INFO: u64 = 31;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 30;
+pub const SYS_MAX: u64 = 31;
 /// Máximo de páginas por objeto de memória (1 MiB).
 pub const MEMORY_MAX_PAGES: u64 = 256;
 /// Tipo de objeto: memória compartilhável.
@@ -121,6 +126,29 @@ pub struct PciBar {
     /// Bit 0: espaço de E/S; bit 1: 64 bits; bit 2: prefetchable.
     pub flags: u32,
     /// Reservado.
+    pub reserved: u32,
+}
+
+/// Layout do framebuffer de boot, devolvido por [`SYS_FB_INFO`] (mesmo layout de 40 bytes do
+/// `FramebufferInfo` da ABI de boot). `format`: 0 = desconhecido, 1 = RGBX8888, 2 = BGRX8888.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FbInfo {
+    /// Endereço físico do início do framebuffer.
+    pub base: u64,
+    /// Tamanho em bytes.
+    pub size: u64,
+    /// Largura em pixels.
+    pub width: u32,
+    /// Altura em pixels.
+    pub height: u32,
+    /// Pixels por linha (pode ser maior que `width`).
+    pub stride: u32,
+    /// Formato de pixel (ver acima).
+    pub format: u32,
+    /// Bytes por pixel.
+    pub bytes_per_pixel: u32,
+    /// Reservado; zero.
     pub reserved: u32,
 }
 
@@ -346,6 +374,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_MEMORY_CREATE => "memory_create",
         SYS_MEMORY_MAP => "memory_map",
         SYS_MEMORY_UNMAP => "memory_unmap",
+        SYS_FB_INFO => "fb_info",
         _ => "?",
     }
 }
