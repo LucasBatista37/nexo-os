@@ -105,6 +105,7 @@ SCENARIOS = {
             r"encerrado pelo kernel: falta de pagina em modo usuario",
             r"encerrado pelo kernel: protecao geral em modo usuario",
             r"timer: thread ktimer ativa",
+            r"\[TEST\] gfx \.\.\. ok",
             r"\[TEST\] symbols \.\.\. ok",
             r"\[RESULT\] PASS \d+/\d+",
             r"NEXO: boot completo",

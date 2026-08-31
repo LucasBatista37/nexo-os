@@ -71,6 +71,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_devmgr", test_user_devmgr),
     ("user_vfs", test_user_vfs),
     ("user_wait_any", test_user_wait_any),
+    ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
 
@@ -1763,6 +1764,39 @@ pub fn fs_churn() -> ! {
     let code = crate::process::wait_and_reap(&client);
     let _ = (driver, fs);
     panic!("fs-churn: o cliente terminou com {code} (deveria escrever ate o corte)");
+}
+
+/// Renderizador 2D (nexo-gfx) sobre uma superficie de rascunho no heap: fill, composicao alfa
+/// e clipping, com leitura de volta — prova a biblioteca no ambiente no_std/alloc do kernel.
+fn test_gfx() -> TestResult {
+    use nexo_boot_abi::PixelFormat;
+    use nexo_gfx::{Color, Rect, Surface};
+    let mut buf = alloc::vec![0u8; 16 * 16 * 4];
+    let mut s = Surface::new(&mut buf, 16, 16, 16, PixelFormat::Bgrx8888)
+        .ok_or_else(|| String::from("superficie invalida"))?;
+    s.clear(Color::rgb(0, 0, 0));
+    s.fill_rect(Rect::new(2, 2, 8, 8), Color::rgb(200, 100, 50));
+    check!(
+        s.get(1, 1) == Color::rgb(0, 0, 0),
+        "fundo alterado fora do rect"
+    );
+    check!(
+        s.get(3, 3) == Color::rgb(200, 100, 50),
+        "rect nao preenchido"
+    );
+    // composicao alfa: 50% branco sobre a cor solida
+    s.blend(3, 3, Color::rgba(255, 255, 255, 128));
+    let c = s.get(3, 3);
+    check!((c.r as i32 - 227).abs() <= 2, "alfa incorreto: r={}", c.r);
+    // clipping constringe o desenho
+    s.set_clip(Rect::new(5, 5, 3, 3));
+    s.fill_rect(Rect::new(0, 0, 16, 16), Color::WHITE);
+    check!(
+        s.get(0, 0) == Color::rgb(0, 0, 0),
+        "clip nao respeitado (fora)"
+    );
+    check!(s.get(6, 6) == Color::WHITE, "clip nao respeitado (dentro)");
+    Ok(())
 }
 
 fn test_symbols() -> TestResult {

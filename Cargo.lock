@@ -30,6 +30,13 @@ name = "nexo-font"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-gfx"
+version = "0.0.1"
+dependencies = [
+ "nexo-boot-abi",
+]
+
+[[package]]
 name = "nexo-heap"
 version = "0.0.1"
 

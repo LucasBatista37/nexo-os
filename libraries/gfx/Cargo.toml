@@ -1,0 +1,12 @@
+[package]
+name = "nexo-gfx"
+description = "Renderizador 2D por software do Nexo OS: superficies, cores, retangulos, blit, composicao alfa (src-over) e clipping — sem alocacao, testavel no host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexo-boot-abi = { path = "../../abi/boot" }
+
+[lints]
+workspace = true

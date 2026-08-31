@@ -20,6 +20,7 @@ members = [
     "libraries/virtio",
     "libraries/fat",
     "libraries/net",
+    "libraries/gfx",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
     "sdk/nexo-net",

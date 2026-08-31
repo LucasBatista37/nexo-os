@@ -156,6 +156,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `sdk/nexo-net`: camada de compatibilidade **BSD sockets** sobre a API nativa `nexo.sock` (ADR-0014 §3: POSIX como personalidade em espaço de usuário, descritores → handles). API `socket`/`connect`/`send`/`recv`/`sendto`/`recvfrom`/`close`/`getaddrinfo`, `sockaddr_in`, `AF_INET`/`SOCK_STREAM`/`SOCK_DGRAM`, erros estilo `errno` (mapeados dos códigos remotos do `netd`). `no_std`, `forbid(unsafe_code)`, tabela de 16 descritores por processo.
 - `utest` (modo 15) faz um TCP connect/send/recv/close pela API POSIX contra o servidor do host — mesma conversa que o caminho nativo, agora pela personalidade.
 
+### Adicionado (Fase 5, bloco 1 — renderizador 2D por software)
+- `libraries/gfx` (`nexo-gfx`): renderizador 2D `no_std`/`forbid(unsafe_code)` sobre uma `Surface` (buffer do chamador com largura/altura/stride/formato `Rgbx8888`/`Bgrx8888`) — `Color` RGBA, `Rect` com interseção, `put`/`get`, **composição alfa src-over** (`blend`), `fill_rect`/`stroke_rect`/`clear`, `blit` entre superfícies (converte formatos) e **retângulo de clipping**. 7 grupos de testes de host (ordem de bytes por formato, alfa, clipping, stride, blit).
+- Auto-teste `gfx` no boot: renderiza numa superfície de rascunho no heap e confere pixels — o renderizador roda no ambiente `no_std`/alloc do kernel. 41 testes no boot.
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

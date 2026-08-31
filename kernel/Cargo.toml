@@ -14,6 +14,7 @@ exclude = ["lib/mm", "lib/heap", "lib/sync", "lib/symbols", "lib/acpi", "lib/elf
 
 [dependencies]
 nexo-boot-abi = { path = "../abi/boot" }
+nexo-gfx = { path = "../libraries/gfx" }
 nexo-mm = { path = "lib/mm" }
 nexo-heap = { path = "lib/heap" }
 nexo-sync = { path = "lib/sync" }

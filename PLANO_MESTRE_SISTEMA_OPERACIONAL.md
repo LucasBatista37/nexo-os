@@ -497,9 +497,9 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 **Resultado:** desktop gráfico funcional em QEMU, com estilo próprio e acessibilidade básica.
 
-- [ ] obter framebuffer UEFI e modos de vídeo;
-- [ ] criar renderer 2D por software;
-- [ ] implementar cores, composição alfa, clipping e transformações;
+- [-] obter framebuffer UEFI e modos de vídeo — *loader captura o framebuffer via GOP (`FramebufferInfo` no BootInfo v2), kernel desenha o console sobre ele; enumeração e troca de modos de vídeo pendentes*;
+- [-] criar renderer 2D por software — *`libraries/gfx` (`nexo-gfx`): superfícies, retângulos, blit e clipping; auto-teste `gfx` no boot; primitivas geométricas ricas pendentes*;
+- [-] implementar cores, composição alfa, clipping e transformações — *cores RGBA, composição alfa src-over e clipping retangular em `nexo-gfx` (testes de host); transformações (escala/rotação) pendentes*;
 - [ ] implementar rasterização de texto e fallback de fontes;
 - [ ] definir protocolo de superfícies e buffers;
 - [ ] implementar compositor em espaço de usuário;
