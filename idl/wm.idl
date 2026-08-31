@@ -1,10 +1,11 @@
-# nexo.wm — compositor de janelas (services/wm).
+# nexo.wm — compositor de janelas (services/wm). Ha 2 displays emulados (0 = primario,
+# apresentado no framebuffer real quando ha concessao de video); `display` ausente = 0.
 # Fluxo: create_surface -> (o cliente escreve pixels no MemoryObject devolvido) -> commit.
 # O wm compoe todas as superficies (de todas as sessoes) na saida (outro MemoryObject) por z.
 # Varias sessoes/clientes coexistem: cada um abre uma sessao com `open`, transferindo a ponta
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra superficie.
-protocol wm 1.9
+protocol wm 1.10
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -15,6 +16,7 @@ method 1 create_surface {
         w: i32,
         h: i32,
         z: i32,
+        display: u8,
     }
     response {
         id: u32,
@@ -54,11 +56,22 @@ method 4 destroy {
 # Handle do MemoryObject da saida composta (para o teste/servidor de video inspecionar).
 method 5 output {
     request {
+        display: u8,
     }
     response {
         w: i32,
         h: i32,
         mem: handle,
+    }
+}
+
+# Move a superficie `id` para outro display; recompoe os dois. Erro 1 se o display nao existe.
+method 18 move_to_display {
+    request {
+        id: u32,
+        display: u8,
+    }
+    response {
     }
 }
 

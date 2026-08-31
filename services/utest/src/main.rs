@@ -76,6 +76,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         30 => wm_tile(),
         31 => wm_real_input(),
         32 => wm_grab(),
+        33 => wm_displays(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2171,7 +2172,7 @@ fn wm_client() -> ! {
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(440));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -2253,7 +2254,7 @@ fn wm_multi_client() -> ! {
     }
 
     // Le a saida composta (na sessao 1) e confere a ordem-Z das duas sessoes.
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(467));
     if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
@@ -2302,7 +2303,7 @@ fn wm_restack() -> ! {
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(480));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -2360,7 +2361,7 @@ fn wm_input() -> ! {
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(530));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -2403,6 +2404,107 @@ fn wm_input() -> ! {
     nexo_sys::exit(0)
 }
 
+/// Modo 33: multiplos displays (emulados). Cria A no display 0 e B no display 1 (mesmas
+/// coordenadas); confere que cada saida so mostra a sua janela; move A para o display 1 e confere
+/// que o display 0 fica vazio e o 1 compoe as duas por z.
+fn wm_displays() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+
+    let mk = |ch: nexo_sys::Handle,
+              display: u8,
+              z: i32,
+              out: &mut [u8; 128],
+              buf: &mut [u8; 128],
+              hs: &mut [u32; 1]|
+     -> (u32, u64) {
+        let req = nexo_proto::wm::CreateSurfaceRequest {
+            x: 0,
+            y: 0,
+            w: 8,
+            h: 8,
+            z,
+            display,
+        };
+        let m = req.encode_msg(out).unwrap_or_else(|_| nexo_sys::exit(750));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(751);
+        }
+        let (n, nh) = nexo_sys::channel_recv(ch, buf, hs).unwrap_or_else(|_| nexo_sys::exit(752));
+        let cs = nexo_proto::wm::decode_create_surface_response(&buf[..n])
+            .unwrap_or_else(|_| nexo_sys::exit(753));
+        if nh != 1 {
+            nexo_sys::exit(754);
+        }
+        let base = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(755));
+        (cs.id, base)
+    };
+    let (a, a_base) = mk(ch, 0, 0, &mut out, &mut buf, &mut hs);
+    wm_fill(a_base, 8, 8, 255, 0, 0); // A vermelha no display 0
+    wm_commit(ch, a);
+    let (b, b_base) = mk(ch, 1, 1, &mut out, &mut buf, &mut hs);
+    wm_fill(b_base, 8, 8, 0, 255, 0); // B verde no display 1
+    wm_commit(ch, b);
+
+    // mapeia as duas saidas
+    let outp = |ch: nexo_sys::Handle,
+                d: u8,
+                out: &mut [u8; 128],
+                buf: &mut [u8; 128],
+                hs: &mut [u32; 1]|
+     -> (u64, i32) {
+        let m = nexo_proto::wm::OutputRequest { display: d }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(756));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(757);
+        }
+        let (n, nh) = nexo_sys::channel_recv(ch, buf, hs).unwrap_or_else(|_| nexo_sys::exit(758));
+        let r = nexo_proto::wm::decode_output_response(&buf[..n])
+            .unwrap_or_else(|_| nexo_sys::exit(759));
+        if nh != 1 {
+            nexo_sys::exit(760);
+        }
+        let base = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(761));
+        (base, r.w)
+    };
+    let (d0, stride) = outp(ch, 0, &mut out, &mut buf, &mut hs);
+    let (d1, _) = outp(ch, 1, &mut out, &mut buf, &mut hs);
+
+    // cada display mostra so a sua janela
+    if wm_px(d0, stride, 4, 4) != (255, 0, 0) {
+        nexo_sys::exit(762);
+    }
+    if wm_px(d1, stride, 4, 4) != (0, 255, 0) {
+        nexo_sys::exit(763);
+    }
+
+    // move A para o display 1: display 0 fica vazio; no 1, B (z=1) cobre A na sobreposicao
+    let m = nexo_proto::wm::MoveToDisplayRequest { id: a, display: 1 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(764));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(765);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_move_to_display_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(766),
+    }
+    if wm_px(d0, stride, 4, 4) != (0, 0, 0) {
+        nexo_sys::exit(767); // display 0 vazio (fundo)
+    }
+    if wm_px(d1, stride, 4, 4) != (0, 255, 0) {
+        nexo_sys::exit(768); // B por cima de A no display 1
+    }
+    let _ = b;
+    nexo_sys::log(
+        "utest: wm displays ok — cada display compoe as suas janelas; mover troca de tela",
+    );
+    nexo_sys::exit(0)
+}
+
 /// Modo 32: captura segura de entrada. Com duas janelas, foca B por clique, captura A (`grab`) e
 /// confere que (a) as teclas passam a ir para A mesmo com B em foco e (b) cliques sao engolidos
 /// (B continua na frente). Depois do `ungrab`, o clique volta a focar/trazer a frente.
@@ -2418,7 +2520,7 @@ fn wm_grab() -> ! {
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(720));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -2586,7 +2688,7 @@ fn wm_tile() -> ! {
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(660));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -2653,7 +2755,7 @@ fn wm_shortcut() -> ! {
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(640));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -2710,6 +2812,7 @@ fn wm_maximize() -> ! {
         w: 8,
         h: 8,
         z: 0,
+        display: 0,
     };
     let m = req
         .encode_msg(&mut out)
@@ -2732,7 +2835,7 @@ fn wm_maximize() -> ! {
     wm_commit(ch, a);
 
     // Mapeia a saida.
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(606));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -2840,7 +2943,7 @@ fn wm_ui() -> ! {
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(591));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -2884,7 +2987,7 @@ fn wm_alpha() -> ! {
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(570));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -3038,6 +3141,7 @@ fn wm_resize() -> ! {
         w: 8,
         h: 8,
         z: 0,
+        display: 0,
     };
     let m = req
         .encode_msg(&mut out)
@@ -3059,7 +3163,7 @@ fn wm_resize() -> ! {
     wm_commit(ch, a);
 
     // Mapeia a saida (paginas estaveis).
-    let m = nexo_proto::wm::OutputRequest {}
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(506));
     if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
@@ -3145,7 +3249,14 @@ fn wm_create(ch: nexo_sys::Handle, x: i32, y: i32, w: i32, h: i32, z: i32) -> (u
     let mut out = [0u8; 128];
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
-    let req = nexo_proto::wm::CreateSurfaceRequest { x, y, w, h, z };
+    let req = nexo_proto::wm::CreateSurfaceRequest {
+        x,
+        y,
+        w,
+        h,
+        z,
+        display: 0,
+    };
     let m = req
         .encode_msg(&mut out)
         .unwrap_or_else(|_| nexo_sys::exit(430));
