@@ -22,10 +22,11 @@ bombeia o temporizador.
 
 Regras da v0 (deliberadas e documentadas):
 
-- **Retransmissão simples**: uma pendência (dados ou SYN/FIN) por vez, reenviada a cada 500 ms
-  até 5 vezes; esgotando, a conexão é considerada reiniciada (erro 4). Dados recebidos fora de
-  ordem provocam ACK duplicado; sem espaço na janela, não são confirmados (o par retransmite).
-  Janela anunciada = espaço livre no buffer de 4 KiB por conexão.
+- **Janela deslizante de transmissão**: até 4 segmentos em voo (dados, SYN ou FIN), liberados
+  por ACKs cumulativos (parciais liberam os cobertos); o mais antigo vencido é reenviado a cada
+  500 ms até 5 vezes (go-back-1); esgotando, a conexão é considerada reiniciada (erro 4).
+  Dados recebidos fora de ordem provocam ACK duplicado; sem espaço na janela de recepção, não
+  são confirmados (o par retransmite). Janela anunciada = espaço livre no buffer de 4 KiB.
 - **TIME_WAIT imediato**: após o fecho ordenado o slot volta a `CLOSED` na hora (portas locais
   41000+i giram por slot; colisão de encarnações é improvável no cenário de teste e será
   tratada com ISNs melhores junto com a retransmissão).

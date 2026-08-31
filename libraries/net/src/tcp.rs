@@ -1,8 +1,9 @@
-//! Máquina de estados TCP do lado cliente (`docs/spec/tcp-states.md`), **testável no host**:
-//! não sabe de quadros nem de tempo — recebe segmentos decodificados ([`crate::TcpSegment`])
-//! e o relógio em nanossegundos, e devolve segmentos a emitir ([`TxSeg`]). Com
-//! **retransmissão**: um segmento pendente por vez (dados ou FIN), reenviado a cada
-//! [`RTO_NS`] até [`MAX_RETRIES`]; depois a conexão é considerada reiniciada.
+//! Máquina de estados TCP (`docs/spec/tcp-states.md`), **testável no host**: não sabe de
+//! quadros nem de tempo — recebe segmentos decodificados ([`crate::TcpSegment`]) e o relógio
+//! em nanossegundos, e devolve segmentos a emitir ([`TxSeg`]). Lados ativo e passivo, com
+//! **retransmissão e janela deslizante**: até [`TX_SLOTS`] segmentos em voo (dados, SYN ou
+//! FIN), confirmados por ACKs cumulativos; o mais antigo vencido é reenviado a cada
+//! [`RTO_NS`] até [`MAX_RETRIES`]; esgotando, a conexão é considerada reiniciada.
 
 use crate::{TCP_ACK, TCP_FIN, TCP_PSH, TCP_RST, TCP_SYN, TcpSegment};
 
@@ -29,16 +30,19 @@ pub enum State {
     LastAck,
 }
 
-/// Tempo até reenviar o segmento pendente.
+/// Tempo até reenviar o segmento pendente mais antigo.
 pub const RTO_NS: u64 = 500_000_000;
-/// Reenvios antes de desistir (conexão vira `Closed` com `reset`).
+/// Reenvios de um mesmo segmento antes de desistir (conexão vira `Closed` com `reset`).
 pub const MAX_RETRIES: u32 = 5;
+/// Segmentos em voo simultâneos (janela de transmissão).
+pub const TX_SLOTS: usize = 4;
 /// Capacidade do buffer de recepção.
 pub const RX_CAP: usize = 4096;
 /// Maior payload por segmento.
 pub const MSS: usize = 1400;
 
-/// Segmento a emitir (o chamador monta o quadro com [`crate::tcp_write`]).
+/// Segmento a emitir (o chamador monta o quadro com [`crate::tcp_write`]; o payload vem de
+/// [`TcpSocket::slot_payload`] com o `slot` indicado).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TxSeg {
     /// Número de sequência.
@@ -47,11 +51,32 @@ pub struct TxSeg {
     pub ack: u32,
     /// Flags.
     pub flags: u8,
-    /// Bytes de payload (fatia de [`TcpSocket::tx_payload`]).
+    /// Bytes de payload.
     pub payload_len: usize,
+    /// Slot de transmissão dono do payload (`usize::MAX` = sem payload, ex.: ACK puro).
+    pub slot: usize,
 }
 
-/// Uma conexão TCP de saída.
+#[derive(Clone, Copy)]
+struct TxPend {
+    used: bool,
+    seq: u32,
+    len: u16,
+    flags: u8,
+    deadline: u64,
+    retries: u32,
+}
+
+const PEND_FREE: TxPend = TxPend {
+    used: false,
+    seq: 0,
+    len: 0,
+    flags: 0,
+    deadline: 0,
+    retries: 0,
+};
+
+/// Uma conexão TCP (ativa ou passiva).
 pub struct TcpSocket {
     /// Estado corrente.
     pub state: State,
@@ -68,23 +93,16 @@ pub struct TcpSocket {
     snd_nxt: u32,
     snd_una: u32,
     rcv_nxt: u32,
-    // pendência de transmissão (dados ou FIN)
-    tx: [u8; MSS],
-    tx_len: usize,
-    tx_seq: u32,
-    tx_flags: u8,
-    tx_deadline: u64,
-    tx_retries: u32,
-    tx_inflight: bool,
+    tx: [[u8; MSS]; TX_SLOTS],
+    pend: [TxPend; TX_SLOTS],
     rx: [u8; RX_CAP],
     rx_len: usize,
 }
 
 impl TcpSocket {
-    /// Escuta em `local_port` (lado passivo): devolve o socket em `Listen`.
-    pub fn listen(local_port: u16, iss: u32) -> Self {
+    fn blank(local_port: u16, iss: u32) -> Self {
         TcpSocket {
-            state: State::Listen,
+            state: State::Closed,
             reset: false,
             peer_closed: false,
             local_port,
@@ -93,16 +111,50 @@ impl TcpSocket {
             snd_nxt: iss.wrapping_add(1),
             snd_una: iss,
             rcv_nxt: 0,
-            tx: [0; MSS],
-            tx_len: 0,
-            tx_seq: iss,
-            tx_flags: 0,
-            tx_deadline: 0,
-            tx_retries: 0,
-            tx_inflight: false,
+            tx: [[0; MSS]; TX_SLOTS],
+            pend: [PEND_FREE; TX_SLOTS],
             rx: [0; RX_CAP],
             rx_len: 0,
         }
+    }
+
+    /// Abre a conexão (lado ativo): devolve o socket em `SynSent` e o SYN a emitir.
+    pub fn connect(
+        local_port: u16,
+        remote_ip: [u8; 4],
+        remote_port: u16,
+        iss: u32,
+        now: u64,
+    ) -> (Self, TxSeg) {
+        let mut s = Self::blank(local_port, iss);
+        s.state = State::SynSent;
+        s.remote_ip = remote_ip;
+        s.remote_port = remote_port;
+        s.pend[0] = TxPend {
+            used: true,
+            seq: iss,
+            len: 0,
+            flags: TCP_SYN,
+            deadline: now + RTO_NS,
+            retries: 0,
+        };
+        (
+            s,
+            TxSeg {
+                seq: iss,
+                ack: 0,
+                flags: TCP_SYN,
+                payload_len: 0,
+                slot: 0,
+            },
+        )
+    }
+
+    /// Escuta em `local_port` (lado passivo): devolve o socket em `Listen`.
+    pub fn listen(local_port: u16, iss: u32) -> Self {
+        let mut s = Self::blank(local_port, iss);
+        s.state = State::Listen;
+        s
     }
 
     /// Em `Listen`, aceita o SYN de `(src_ip, seg)`: devolve o SYN-ACK a emitir.
@@ -115,58 +167,21 @@ impl TcpSocket {
         self.rcv_nxt = seg.seq.wrapping_add(1);
         self.state = State::SynRcvd;
         // SYN-ACK é a pendência retransmissível
-        self.tx_len = 0;
-        self.tx_seq = self.snd_una;
-        self.tx_flags = TCP_SYN | TCP_ACK;
-        self.tx_deadline = now + RTO_NS;
-        self.tx_retries = 0;
-        self.tx_inflight = true;
-        Some(TxSeg {
-            seq: self.tx_seq,
-            ack: self.rcv_nxt,
-            flags: self.tx_flags,
-            payload_len: 0,
-        })
-    }
-
-    /// Abre a conexão: devolve o socket em `SynSent` e o SYN a emitir.
-    pub fn connect(
-        local_port: u16,
-        remote_ip: [u8; 4],
-        remote_port: u16,
-        iss: u32,
-        now: u64,
-    ) -> (Self, TxSeg) {
-        let mut s = TcpSocket {
-            state: State::SynSent,
-            reset: false,
-            peer_closed: false,
-            local_port,
-            remote_ip,
-            remote_port,
-            snd_nxt: iss.wrapping_add(1),
-            snd_una: iss,
-            rcv_nxt: 0,
-            tx: [0; MSS],
-            tx_len: 0,
-            tx_seq: iss,
-            tx_flags: TCP_SYN,
-            tx_deadline: now + RTO_NS,
-            tx_retries: 0,
-            tx_inflight: true,
-            rx: [0; RX_CAP],
-            rx_len: 0,
+        self.pend[0] = TxPend {
+            used: true,
+            seq: self.snd_una,
+            len: 0,
+            flags: TCP_SYN | TCP_ACK,
+            deadline: now + RTO_NS,
+            retries: 0,
         };
-        s.tx_inflight = true;
-        (
-            s,
-            TxSeg {
-                seq: iss,
-                ack: 0,
-                flags: TCP_SYN,
-                payload_len: 0,
-            },
-        )
+        Some(TxSeg {
+            seq: self.snd_una,
+            ack: self.rcv_nxt,
+            flags: TCP_SYN | TCP_ACK,
+            payload_len: 0,
+            slot: 0,
+        })
     }
 
     /// Janela a anunciar.
@@ -174,9 +189,21 @@ impl TcpSocket {
         (RX_CAP - self.rx_len) as u16
     }
 
-    /// Payload do segmento pendente (para reemissão/emissão).
-    pub fn tx_payload(&self) -> &[u8] {
-        &self.tx[..self.tx_len]
+    /// Payload do slot de transmissão (para emissão/reemissão).
+    pub fn slot_payload(&self, slot: usize, len: usize) -> &[u8] {
+        if slot >= TX_SLOTS {
+            return &[];
+        }
+        &self.tx[slot][..len.min(MSS)]
+    }
+
+    /// Há segmentos em voo aguardando ACK?
+    pub fn inflight(&self) -> bool {
+        self.pend.iter().any(|p| p.used)
+    }
+
+    fn free_slot(&self) -> Option<usize> {
+        self.pend.iter().position(|p| !p.used)
     }
 
     /// Processa um segmento recebido desta conexão; devolve o segmento de resposta, se houver.
@@ -184,22 +211,29 @@ impl TcpSocket {
         if seg.flags & TCP_RST != 0 {
             self.state = State::Closed;
             self.reset = true;
-            self.tx_inflight = false;
+            self.pend = [PEND_FREE; TX_SLOTS];
             return None;
         }
-        // Confirmações liberam a pendência.
-        if seg.flags & TCP_ACK != 0 && self.tx_inflight {
-            let end = self.tx_seq.wrapping_add(self.tx_len as u32).wrapping_add(
-                if self.tx_flags & (TCP_SYN | TCP_FIN) != 0 {
-                    1
-                } else {
-                    0
-                },
-            );
-            if ack_covers(seg.ack, end, self.snd_una) {
-                self.tx_inflight = false;
+        // ACKs cumulativos: liberam todos os slots totalmente confirmados.
+        if seg.flags & TCP_ACK != 0 {
+            let adv = seg.ack.wrapping_sub(self.snd_una);
+            if adv <= self.snd_nxt.wrapping_sub(self.snd_una) {
+                for p in self.pend.iter_mut() {
+                    if !p.used {
+                        continue;
+                    }
+                    let end = p.seq.wrapping_add(p.len as u32).wrapping_add(
+                        if p.flags & (TCP_SYN | TCP_FIN) != 0 {
+                            1
+                        } else {
+                            0
+                        },
+                    );
+                    if end.wrapping_sub(self.snd_una) <= adv {
+                        p.used = false;
+                    }
+                }
                 self.snd_una = seg.ack;
-                self.tx_retries = 0;
             }
         }
         match self.state {
@@ -237,7 +271,7 @@ impl TcpSocket {
                         self.rcv_nxt = self.rcv_nxt.wrapping_add(take as u32);
                         advanced = true;
                     }
-                    // sem espaço ou fora de ordem: não confirma; o par retransmite
+                    // sem espaço: não confirma; o par retransmite
                 } else if !seg.payload.is_empty() && seg.seq != self.rcv_nxt {
                     // duplicado/fora de ordem: reenvia o ACK corrente
                     return Some(self.ack_seg());
@@ -253,7 +287,7 @@ impl TcpSocket {
                         _ => State::Closed, // FIN do par após o nosso: fecho completo (TIME_WAIT imediato)
                     };
                 }
-                if self.state == State::FinWait1 && !self.tx_inflight {
+                if self.state == State::FinWait1 && !self.inflight() {
                     self.state = if self.peer_closed {
                         State::Closed
                     } else {
@@ -263,7 +297,7 @@ impl TcpSocket {
                 if advanced { Some(self.ack_seg()) } else { None }
             }
             State::LastAck => {
-                if !self.tx_inflight {
+                if !self.inflight() {
                     self.state = State::Closed;
                 }
                 None
@@ -272,43 +306,53 @@ impl TcpSocket {
         }
     }
 
-    /// Envia dados (um segmento pendente por vez). `Err(true)` = ocupado, `Err(false)` = não conectado.
+    /// Envia dados (até [`TX_SLOTS`] segmentos em voo). `Err(true)` = janela cheia,
+    /// `Err(false)` = não conectado.
     pub fn send(&mut self, data: &[u8], now: u64) -> Result<TxSeg, bool> {
         if self.state != State::Established && self.state != State::CloseWait {
             return Err(false);
         }
-        if self.tx_inflight || data.is_empty() || data.len() > MSS {
+        if data.is_empty() || data.len() > MSS {
             return Err(true);
         }
-        self.tx[..data.len()].copy_from_slice(data);
-        self.tx_len = data.len();
-        self.tx_seq = self.snd_nxt;
-        self.tx_flags = TCP_ACK | TCP_PSH;
-        self.tx_deadline = now + RTO_NS;
-        self.tx_retries = 0;
-        self.tx_inflight = true;
+        let Some(slot) = self.free_slot() else {
+            return Err(true);
+        };
+        self.tx[slot][..data.len()].copy_from_slice(data);
+        let seq = self.snd_nxt;
+        self.pend[slot] = TxPend {
+            used: true,
+            seq,
+            len: data.len() as u16,
+            flags: TCP_ACK | TCP_PSH,
+            deadline: now + RTO_NS,
+            retries: 0,
+        };
         self.snd_nxt = self.snd_nxt.wrapping_add(data.len() as u32);
         Ok(TxSeg {
-            seq: self.tx_seq,
+            seq,
             ack: self.rcv_nxt,
-            flags: self.tx_flags,
-            payload_len: self.tx_len,
+            flags: TCP_ACK | TCP_PSH,
+            payload_len: data.len(),
+            slot,
         })
     }
 
-    /// Inicia o fecho; devolve o FIN a emitir (ou `None` se não aplicável agora).
+    /// Inicia o fecho; devolve o FIN a emitir (`None` = janela cheia ou estado não aplicável;
+    /// com a janela cheia, espere ACKs e chame de novo).
     pub fn close(&mut self, now: u64) -> Option<TxSeg> {
         match self.state {
             State::Established | State::CloseWait => {
-                if self.tx_inflight {
-                    return None; // espere a pendência ser confirmada e chame de novo
-                }
-                self.tx_len = 0;
-                self.tx_seq = self.snd_nxt;
-                self.tx_flags = TCP_FIN | TCP_ACK;
-                self.tx_deadline = now + RTO_NS;
-                self.tx_retries = 0;
-                self.tx_inflight = true;
+                let slot = self.free_slot()?;
+                let seq = self.snd_nxt;
+                self.pend[slot] = TxPend {
+                    used: true,
+                    seq,
+                    len: 0,
+                    flags: TCP_FIN | TCP_ACK,
+                    deadline: now + RTO_NS,
+                    retries: 0,
+                };
                 self.snd_nxt = self.snd_nxt.wrapping_add(1);
                 self.state = if self.state == State::Established {
                     State::FinWait1
@@ -316,34 +360,53 @@ impl TcpSocket {
                     State::LastAck
                 };
                 Some(TxSeg {
-                    seq: self.tx_seq,
+                    seq,
                     ack: self.rcv_nxt,
-                    flags: self.tx_flags,
+                    flags: TCP_FIN | TCP_ACK,
                     payload_len: 0,
+                    slot,
                 })
             }
             _ => None,
         }
     }
 
-    /// Temporizador: devolve a retransmissão devida, se houver (aplica [`MAX_RETRIES`]).
+    /// Temporizador: devolve a retransmissão do slot mais antigo vencido (aplica [`MAX_RETRIES`]).
     pub fn poll(&mut self, now: u64) -> Option<TxSeg> {
-        if !self.tx_inflight || self.state == State::Closed || now < self.tx_deadline {
+        if self.state == State::Closed {
             return None;
         }
-        if self.tx_retries >= MAX_RETRIES {
+        let mut oldest: Option<usize> = None;
+        for (i, p) in self.pend.iter().enumerate() {
+            if !p.used || now < p.deadline {
+                continue;
+            }
+            oldest = match oldest {
+                None => Some(i),
+                Some(o)
+                    if p.seq.wrapping_sub(self.snd_una)
+                        < self.pend[o].seq.wrapping_sub(self.snd_una) =>
+                {
+                    Some(i)
+                }
+                keep => keep,
+            };
+        }
+        let i = oldest?;
+        if self.pend[i].retries >= MAX_RETRIES {
             self.state = State::Closed;
             self.reset = true;
-            self.tx_inflight = false;
+            self.pend = [PEND_FREE; TX_SLOTS];
             return None;
         }
-        self.tx_retries += 1;
-        self.tx_deadline = now + RTO_NS;
+        self.pend[i].retries += 1;
+        self.pend[i].deadline = now + RTO_NS;
         Some(TxSeg {
-            seq: self.tx_seq,
+            seq: self.pend[i].seq,
             ack: self.rcv_nxt,
-            flags: self.tx_flags,
-            payload_len: self.tx_len,
+            flags: self.pend[i].flags,
+            payload_len: self.pend[i].len as usize,
+            slot: i,
         })
     }
 
@@ -362,13 +425,9 @@ impl TcpSocket {
             ack: self.rcv_nxt,
             flags: TCP_ACK,
             payload_len: 0,
+            slot: usize::MAX,
         }
     }
-}
-
-/// `ack` confirma `end` partindo de `una` (aritmética modular).
-fn ack_covers(ack: u32, end: u32, una: u32) -> bool {
-    ack.wrapping_sub(una) >= end.wrapping_sub(una) && ack.wrapping_sub(una) <= 0x7fff_ffff
 }
 
 #[cfg(test)]
@@ -400,24 +459,22 @@ mod tests {
         assert_eq!(s.state, State::Established);
         assert_eq!(ack.flags, TCP_ACK);
         assert_eq!(ack.ack, 5001);
+        assert!(!s.inflight());
         s
     }
 
     #[test]
     fn handshake_and_data_both_ways() {
         let mut s = established(0);
-        // envia dados
         let tx = s.send(b"ola", 0).unwrap();
         assert_eq!((tx.seq, tx.payload_len), (1001, 3));
-        assert_eq!(s.tx_payload(), b"ola");
-        // segundo envio antes do ACK: ocupado
-        assert_eq!(s.send(b"x", 0), Err(true));
+        assert_eq!(s.slot_payload(tx.slot, tx.payload_len), b"ola");
         // ACK libera
         assert!(s.on_segment(&seg(5001, 1004, TCP_ACK, b""), 0).is_none());
-        assert!(s.send(b"x", 0).is_ok());
+        assert!(!s.inflight());
         // dados do par em ordem
         let ack = s
-            .on_segment(&seg(5001, 1005, TCP_ACK | TCP_PSH, b"resp"), 0)
+            .on_segment(&seg(5001, 1004, TCP_ACK | TCP_PSH, b"resp"), 0)
             .unwrap();
         assert_eq!(ack.ack, 5005);
         let mut buf = [0u8; 16];
@@ -425,23 +482,43 @@ mod tests {
         assert_eq!(&buf[..4], b"resp");
         // fora de ordem: reenvia o ACK corrente, sem avancar
         let dup = s
-            .on_segment(&seg(9999, 1005, TCP_ACK | TCP_PSH, b"zzz"), 0)
+            .on_segment(&seg(9999, 1004, TCP_ACK | TCP_PSH, b"zzz"), 0)
             .unwrap();
         assert_eq!(dup.ack, 5005);
         assert_eq!(s.take_rx(&mut buf), 0);
     }
 
     #[test]
-    fn retransmission_until_reset() {
+    fn sliding_window_pipelines_and_partial_acks() {
         let mut s = established(0);
-        let tx = s.send(b"dado", 0).unwrap();
-        // sem ACK: retransmite o mesmo seq a cada RTO
+        // enche a janela: 4 segmentos em voo
+        let t1 = s.send(b"aa", 0).unwrap();
+        let t2 = s.send(b"bbb", 0).unwrap();
+        let t3 = s.send(b"cccc", 0).unwrap();
+        let t4 = s.send(b"d", 0).unwrap();
+        assert_eq!((t1.seq, t2.seq, t3.seq, t4.seq), (1001, 1003, 1006, 1010));
+        assert_eq!(s.send(b"x", 0), Err(true)); // janela cheia
+        // ACK parcial cobre t1 e t2
+        assert!(s.on_segment(&seg(5001, 1006, TCP_ACK, b""), 0).is_none());
+        assert!(s.send(b"e", 0).is_ok()); // abriu espaco
+        // ACK cumulativo cobre o resto
+        assert!(s.on_segment(&seg(5001, 1012, TCP_ACK, b""), 0).is_none());
+        assert!(!s.inflight());
+    }
+
+    #[test]
+    fn retransmission_oldest_until_reset() {
+        let mut s = established(0);
+        let t1 = s.send(b"dado", 0).unwrap();
+        let _t2 = s.send(b"mais", 0).unwrap();
+        // sem ACK: o MAIS ANTIGO retransmite a cada RTO
         for i in 1..=MAX_RETRIES as u64 {
             let r = s.poll(i * RTO_NS).unwrap();
             assert_eq!(
                 (r.seq, r.payload_len, r.flags),
-                (tx.seq, 4, TCP_ACK | TCP_PSH)
+                (t1.seq, 4, TCP_ACK | TCP_PSH)
             );
+            assert_eq!(s.slot_payload(r.slot, r.payload_len), b"dado");
         }
         // esgotou: conexao reiniciada
         assert!(s.poll((MAX_RETRIES as u64 + 1) * RTO_NS).is_none());
@@ -480,9 +557,23 @@ mod tests {
     }
 
     #[test]
+    fn data_then_fin_in_flight_together() {
+        let mut s = established(0);
+        let d = s.send(b"tchau", 0).unwrap();
+        let fin = s.close(0).unwrap(); // FIN na janela junto com os dados
+        assert_eq!(fin.seq, d.seq.wrapping_add(5));
+        assert_eq!(s.state, State::FinWait1);
+        // ACK cumulativo cobre dados + FIN de uma vez
+        assert!(
+            s.on_segment(&seg(5001, fin.seq.wrapping_add(1), TCP_ACK, b""), 0)
+                .is_none()
+        );
+        assert_eq!(s.state, State::FinWait2);
+    }
+
+    #[test]
     fn passive_close_close_wait_last_ack() {
         let mut s = established(0);
-        // FIN do par com dados
         let ack = s
             .on_segment(&seg(5001, 1001, TCP_FIN | TCP_ACK | TCP_PSH, b"fim"), 0)
             .unwrap();
@@ -509,7 +600,6 @@ mod tests {
     fn passive_open_listen_syn_rcvd() {
         let mut s = TcpSocket::listen(8080, 9000);
         assert_eq!(s.state, State::Listen);
-        // SYN de entrada
         let syn = TcpSegment {
             src_port: 51000,
             dst_port: 8080,
@@ -543,7 +633,6 @@ mod tests {
         let mut buf = [0u8; 8];
         assert_eq!(s.take_rx(&mut buf), 2);
         assert_eq!(&buf[..2], b"oi");
-        // resposta e fecho ativo funcionam como no lado cliente
         let tx = s.send(b"resp", 0).unwrap();
         assert_eq!(tx.seq, 9001);
     }
@@ -561,18 +650,16 @@ mod tests {
     #[test]
     fn rx_backpressure_never_acks_what_it_dropped() {
         let mut s = established(0);
-        // enche o buffer
         let big = [7u8; MSS];
-        let mut seq = 5001u32;
+        let mut seqn = 5001u32;
         let mut acked = 0;
         while acked + MSS <= RX_CAP {
-            let a = s.on_segment(&seg(seq, 1001, TCP_ACK, &big), 0).unwrap();
-            seq = seq.wrapping_add(MSS as u32);
+            let a = s.on_segment(&seg(seqn, 1001, TCP_ACK, &big), 0).unwrap();
+            seqn = seqn.wrapping_add(MSS as u32);
             acked += MSS;
-            assert_eq!(a.ack, seq);
+            assert_eq!(a.ack, seqn);
         }
-        // proximo segmento nao cabe: sem ACK, rcv_nxt parado
-        assert!(s.on_segment(&seg(seq, 1001, TCP_ACK, &big), 0).is_none());
+        assert!(s.on_segment(&seg(seqn, 1001, TCP_ACK, &big), 0).is_none());
         let mut sink = [0u8; RX_CAP];
         assert_eq!(s.take_rx(&mut sink), acked);
     }

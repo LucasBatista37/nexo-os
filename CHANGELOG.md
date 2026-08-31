@@ -132,6 +132,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - IDL ganhou **eventos** (`event <id> <nome> { … }` → mensagens `FLAG_EVENT` sem resposta, com decodificador próprio); `nexo.net` **v1.1**: método `subscribe` + evento `frame` — o `netdev` passa a empurrar cada quadro recebido, dormindo em `wait_any({canal, canal de IRQ})`.
 - `netd` idle agora dorme em `wait_any({cliente, driver})` (zero CPU ocioso) e recebe quadros por eventos; RPCs ao driver desviam eventos intercalados para uma fila local; DNS do `resolve` migrou para a fila UDP do próprio socket (novo `dns_parse_payload` na `nexo-netstack`).
 
+### Adicionado (Fase 4, bloco 12 — janela deslizante de transmissão TCP)
+- `nexo-netstack::tcp`: transmissão com até 4 segmentos em voo (dados, SYN e FIN compartilham a janela), ACKs cumulativos e parciais liberando slots, retransmissão do mais antigo vencido (go-back-1); API por slots (`TxSeg.slot` + `slot_payload`). Suíte de host ampliada para 19 testes (pipelining com ACK parcial, FIN em voo junto com dados, retransmissão do mais antigo).
+
 ### Adicionado (Fase 1)
 - `nexo-acpi`: parser de RSDP/XSDT/RSDT/MADT/HPET sem alocação (testes de host).
 - LAPIC (xAPIC) com timer calibrado pelo PIT; I/O APIC com overrides ISA (teste roteia o PIT pelo GSI 2); PIC remapeado e mascarado; vetores de IPI (resched, halt, TLB flush) e espúria.

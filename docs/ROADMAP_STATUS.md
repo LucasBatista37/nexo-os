@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `fa92d10`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-30 (commit `b6c3c94`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 147 · 🟡 39 · ⬜ 349 · ⛔ 0 → **31% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -152,7 +152,7 @@ Gate: ⬜ não iniciado.
 | 🟡 | implementar IPv4 | cabeçalho + checksum com validação (`nexo-netstack`), usado no ping do cenário `net`; sem roteamento/fragmentação/pilha residente |
 | 🟡 | implementar ICMP | echo request/reply completos no cenário `net` (ping real ao slirp); demais tipos pendentes |
 | 🟡 | implementar UDP | montagem/leitura em `nexo-netstack` e sockets por porta no `netd` (`udp_send`/`udp_recv` com eco real no cenário `net`); entrega a múltiplos clientes pendente |
-| 🟡 | implementar TCP com suíte de testes e estados documentados | máquina de estados em `nexo-netstack::tcp` (ativo e passivo, retransmissão RTO 500 ms ×5) com suíte de host de 8 casos; estados em `docs/spec/tcp-states.md`; saída e entrada reais no cenário `net` via `netd`; janela deslizante e backlog de escuta pendentes |
+| 🟡 | implementar TCP com suíte de testes e estados documentados | máquina de estados em `nexo-netstack::tcp` (ativo e passivo) com janela deslizante de 4 segmentos, ACKs cumulativos e retransmissão go-back-1; suíte de host de 10 casos de estados; `docs/spec/tcp-states.md`; exercitada de verdade no cenário `net`; backlog de escuta e controle de congestionamento pendentes |
 | 🟡 | implementar DHCP | cliente completo (DISCOVER→OFFER→REQUEST→ACK com opções) obtém lease real do slirp no cenário `net`; renovação/temporizadores e serviço residente pendentes |
 | 🟡 | implementar DNS com cache e validação de entradas | consulta A + parser validado em `nexo-netstack`; `netd` resolve com cache (2ª consulta atendida do cache no cenário `net`); expiração por TTL e serviço para vários clientes pendentes |
 | 🟡 | criar API de sockets nativa | `nexo.sock` v1.0 no `netd` (info/resolve com cache/UDP por porta/TCP conectar-enviar-receber-fechar-escutar), com saída, entrada e HTTP reais no cenário `net`; múltiplos clientes e eventos assíncronos pendentes |

@@ -197,7 +197,7 @@ fn emit_seg(sock: &nsk::tcp::TcpSocket, seg: nsk::tcp::TxSeg) {
     let (mac, gw, ip) = (st.mac, st.gw_mac, st.lease.ip);
     let mut payload = [0u8; nsk::tcp::MSS];
     let pl = seg.payload_len.min(nsk::tcp::MSS);
-    payload[..pl].copy_from_slice(&sock.tx_payload()[..pl]);
+    payload[..pl].copy_from_slice(sock.slot_payload(seg.slot, pl));
     let mut frame = [0u8; 1514];
     let n = nsk::tcp_write(
         &mut frame,
