@@ -310,6 +310,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut focused: Option<usize> = None;
     let mut grabbed: Option<usize> = None;
     let mut active_ctx: u8 = 0;
+    // Arrasto em andamento (payload aguardando o drop).
+    let mut drag: Option<([u8; 256], u32)> = None;
     let mut attention = Attention {
         banner: None,
         dnd: false,
@@ -410,6 +412,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 &mut active_ctx,
                 &mut clipboard,
                 &mut attention,
+                &mut drag,
             );
         }
         // Processa eventos de entrada (evdev crus, 8 bytes cada).
@@ -463,7 +466,37 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                     );
                                 }
                             }
-                            (EV_KEY, BTN_LEFT, _) => {} // release do botão: ignora
+                            (EV_KEY, BTN_LEFT, _) => {
+                                // release: se há um arrasto, o drop entrega os dados SÓ à janela
+                                // sob o ponteiro (grant); no vazio ou sob captura, descarta.
+                                if let Some((data, dlen)) = drag.take()
+                                    && grabbed.is_none()
+                                {
+                                    let hit = surfaces
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(_, s)| {
+                                            s.used
+                                                && s.context == active_ctx
+                                                && s.rect.contains(px, py)
+                                        })
+                                        .max_by_key(|(_, s)| s.z)
+                                        .map(|(i, _)| i);
+                                    if let Some(i) = hit
+                                        && let Some(sess) = sessions[surfaces[i].owner]
+                                    {
+                                        let mut ev = wm::DropEvent {
+                                            surface: i as u32,
+                                            data: [0; 256],
+                                            data_len: dlen,
+                                        };
+                                        ev.data[..dlen as usize]
+                                            .copy_from_slice(&data[..dlen as usize]);
+                                        let m = ev.encode_msg(&mut out).unwrap_or(0);
+                                        let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
+                                    }
+                                }
+                            }
                             (EV_KEY, KEY_LEFTMETA, v) => meta_down = v == 1, // modificador: não entrega
                             (EV_KEY, KEY_TAB, 1) if meta_down => {
                                 // atalho global Meta+Tab: cicla o foco (traz a janela de trás para a frente).
@@ -549,6 +582,7 @@ fn serve(
     active_ctx: &mut u8,
     clipboard: &mut Clipboard,
     attention: &mut Attention,
+    drag: &mut Option<([u8; 256], u32)>,
 ) {
     // Uma superfície só pode ser tocada pela sessão que a criou.
     let mine = |surfaces: &[Slot; MAX_SURFACES], id: u32| -> bool {
@@ -784,6 +818,18 @@ fn serve(
                 recompose(surfaces, outs, fb, *active_ctx, attention);
             }
             let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::DragStart(rq) => {
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(ch, wm::DragStartRequest::METHOD_ID, E_NO_INPUT_OWNER, out);
+                return;
+            }
+            let d = rq.data();
+            let mut data = [0u8; 256];
+            data[..d.len()].copy_from_slice(d);
+            *drag = Some((data, d.len() as u32));
+            let m = wm::DragStartResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::Notify(rq) => {

@@ -81,6 +81,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         35 => wm_context(),
         36 => wm_clipboard(),
         37 => wm_notify(),
+        38 => wm_dnd(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2408,6 +2409,136 @@ fn wm_input() -> ! {
     nexo_sys::exit(0)
 }
 
+/// Modo 38: drag-and-drop por grant. A sessao dona da entrada inicia o arrasto; soltar sobre a
+/// janela da outra sessao entrega os dados SO a ela (evento drop); soltar no vazio descarta; quem
+/// nao detem a entrada nao inicia arrasto.
+fn wm_dnd() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let mut out = [0u8; 384];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    let (_a, a_base) = wm_create(s1, 0, 0, 8, 8, 0); // foco: A (s1)
+    wm_fill(a_base, 8, 8, 255, 0, 0);
+    let (s2, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(940));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(941));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(942);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(943),
+    }
+    let req = nexo_proto::wm::CreateSurfaceRequest {
+        x: 16,
+        y: 0,
+        w: 8,
+        h: 8,
+        z: 1,
+        display: 0,
+    };
+    let m = req
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(944));
+    if nexo_sys::channel_send(s2, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(945);
+    }
+    let (n, nh) =
+        nexo_sys::channel_recv(s2, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(946));
+    let bs = nexo_proto::wm::decode_create_surface_response(&buf[..n])
+        .unwrap_or_else(|_| nexo_sys::exit(947));
+    if nh != 1 {
+        nexo_sys::exit(948);
+    }
+    let b = bs.id;
+
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(949));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(950));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(951);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(952),
+    }
+
+    let drag = |ch: nexo_sys::Handle,
+                txt: &[u8],
+                out: &mut [u8; 384],
+                buf: &mut [u8; 384],
+                hs: &mut [u32; 1]|
+     -> bool {
+        let mut rq = nexo_proto::wm::DragStartRequest {
+            data: [0; 256],
+            data_len: txt.len() as u32,
+        };
+        rq.data[..txt.len()].copy_from_slice(txt);
+        let m = rq.encode_msg(out).unwrap_or_else(|_| nexo_sys::exit(953));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(954);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_drag_start_response(&buf[..n]).is_ok(),
+            _ => nexo_sys::exit(955),
+        }
+    };
+
+    // s2 (sem a entrada) nao inicia arrasto
+    if drag(s2, b"spy", &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(956);
+    }
+    // s1 arrasta "doc" e solta sobre B (release em (18,2))
+    if !drag(s1, b"doc", &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(957);
+    }
+    wm_click_at(inj, 18, 2, 0); // ABS + release
+    let n = match nexo_sys::channel_recv(s2, &mut buf, &mut hs) {
+        Ok((n, _)) => n,
+        _ => nexo_sys::exit(958),
+    };
+    match nexo_proto::wm::decode_drop_event(&buf[..n]) {
+        Ok(ev) if ev.surface == b && ev.data() == b"doc" => {}
+        _ => nexo_sys::exit(959),
+    }
+
+    // soltar no vazio descarta: nada chega a s2 (conferido apos sincronizar pela tecla em s1)
+    if !drag(s1, b"nada", &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(960);
+    }
+    wm_click_at(inj, 40, 40, 0);
+    wm_key(inj, 30, 1);
+    let ev = wm_recv_key(s1, &mut buf, &mut hs);
+    if ev.code != 30 {
+        nexo_sys::exit(961);
+    }
+    match nexo_sys::channel_try_recv(s2, &mut buf, &mut hs) {
+        Err(Status::WouldBlock) => {}
+        _ => nexo_sys::exit(962),
+    }
+    nexo_sys::log("utest: wm dnd ok — o drop entrega os dados so a janela alvo; no vazio descarta");
+    nexo_sys::exit(0)
+}
+
+/// Injeta ABS X/Y + BTN_LEFT com `value` (1 = press, 0 = release) num canal de entrada.
+fn wm_click_at(inj: nexo_sys::Handle, x: i32, y: i32, value: u32) {
+    let mut ev = [0u8; 24];
+    let put = |ev: &mut [u8], off: usize, ty: u16, code: u16, v: u32| {
+        ev[off..off + 2].copy_from_slice(&ty.to_le_bytes());
+        ev[off + 2..off + 4].copy_from_slice(&code.to_le_bytes());
+        ev[off + 4..off + 8].copy_from_slice(&v.to_le_bytes());
+    };
+    put(&mut ev, 0, 3, 0, x as u32);
+    put(&mut ev, 8, 3, 1, y as u32);
+    put(&mut ev, 16, 1, 0x110, value);
+    if nexo_sys::channel_send(inj, &ev, &[]) != Status::Ok {
+        nexo_sys::exit(963);
+    }
+}
+
 /// Modo 37: notificacoes + nao-perturbe. Um aviso (inclusive de sessao em segundo plano) desenha
 /// o banner de sobreposicao; dismiss o remove; com DND ativo o aviso e descartado; o set_dnd e
 /// mediado pela posse da entrada.
@@ -3605,7 +3736,7 @@ fn wm_keyboard() -> ! {
 /// Recebe um evento `key` do compositor na sessao `ch`.
 fn wm_recv_key(
     ch: nexo_sys::Handle,
-    buf: &mut [u8; 128],
+    buf: &mut [u8],
     hs: &mut [u32; 1],
 ) -> nexo_proto::wm::KeyEvent {
     let (n, _) = nexo_sys::channel_recv(ch, buf, hs).unwrap_or_else(|_| nexo_sys::exit(562));

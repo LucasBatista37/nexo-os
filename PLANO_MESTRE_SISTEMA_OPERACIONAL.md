@@ -516,7 +516,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] implementar Faixa de Atividades;
 - [-] criar notificações e controles de atenção — *`notify` (qualquer sessão, inclusive em segundo plano) desenha um banner de sobreposição no compositor (topo direito, acima de tudo); `dismiss_notification` o remove; **não-perturbe** (`set_dnd`) descarta avisos e só o dono da entrada o controla (mediação, erro 6) — auto-teste `user_wm_notify`. Pendem fila/central de avisos, ações nos avisos e notificações por Contexto*;
 - [x] implementar clipboard com mediação e histórico opt-in — *área de transferência **mediada pelo compositor**: só a sessão dona da **entrada** (janela focada, ou capturada) lê/escreve — apps em segundo plano não farejam nem injetam (erro remoto 6); o conteúdo atravessa sessões pela mediação; **histórico opt-in** (anel de 4, desligado por padrão, `clipboard_enable_history`) — auto-teste `user_wm_clipboard`. Limite de 256 B nesta versão; formatos ricos/tamanhos maiores (via `MemoryObject`) e UI de histórico ficam para o shell*;
-- [ ] implementar drag-and-drop por grants;
+- [x] implementar drag-and-drop por grants — *a sessão dona da **entrada** inicia o arrasto (`drag_start`, erro 6 para as demais); ao soltar (BTN_LEFT release), **só a sessão dona da janela sob o ponteiro** recebe os dados (evento `drop`) — ninguém mais pode lê-los; soltar no vazio ou sob captura descarta o payload — auto-teste `user_wm_dnd`. Payloads grandes (via handle de `MemoryObject` no evento) e o feedback visual do arrasto ficam para o shell*;
 - [ ] implementar leitor de tela em arquitetura, ainda que simples;
 - [ ] implementar navegação completa por teclado;
 - [ ] implementar escala fracionária e redução de movimento;

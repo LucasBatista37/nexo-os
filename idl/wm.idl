@@ -6,7 +6,7 @@
 # de um canal novo. Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = superficie
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada).
-protocol wm 1.13
+protocol wm 1.14
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -280,6 +280,24 @@ method 12 set_alpha {
     }
     response {
     }
+}
+
+# Drag-and-drop por GRANT: a sessao dona da entrada inicia o arrasto com os dados (erro 6 para
+# as demais); quando o usuario SOLTA (BTN_LEFT release) sobre uma janela do contexto ativo, so a
+# sessao dona dessa janela recebe os dados (evento `drop`) — ninguem mais pode le-los. Soltar no
+# vazio (ou durante uma captura) descarta o payload.
+method 28 drag_start {
+    request {
+        data: bytes<256>,
+    }
+    response {
+    }
+}
+
+# Evento: dados soltos sobre a janela `surface` (entregue a sessao dona dela).
+event 29 drop {
+    surface: u32,
+    data: bytes<256>,
 }
 
 # Evento: uma tecla (EV_KEY que nao seja BTN_LEFT) entregue a janela em foco. `surface` = id da
