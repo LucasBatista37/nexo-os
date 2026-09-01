@@ -239,7 +239,7 @@ SHELL_SCRIPT = [
 ]
 
 
-def run_shell_scenario(timeout: float) -> bool:
+def run_shell_scenario_once(timeout: float):
     """Sobe o QEMU com virtio-console em socket UNIX, conversa com o shell e sai."""
     import socket
 
@@ -326,6 +326,17 @@ def run_shell_scenario(timeout: float) -> bool:
             log(f"FALHA: marcador proibido presente: /{pat}/")
             ok = False
     log(f"=== cenario 'shell': {'PASS' if ok else 'FAIL'} (log: {logfile}) ===")
+    return ok, rc
+
+
+def run_shell_scenario(timeout: float) -> bool:
+    """Cenario shell com nova tentativa quando o QEMU morre por sinal do HOST (infra)."""
+    ok, rc = False, 0
+    for attempt in range(3):
+        ok, rc = run_shell_scenario_once(timeout)
+        if ok or rc not in HOST_SIGNAL_RCS:
+            return ok
+        log(f"QEMU morreu por sinal do host (rc={rc}) no shell; nova tentativa ({attempt + 2}/3)")
     return ok
 
 
@@ -408,7 +419,7 @@ def qmp_send_click(sock_path, x: int, y: int) -> bool:
     return True
 
 
-def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
+def run_input_phase_once(timeout: float, variant: int, expect: list):
     """Uma execucao do teste de entrada: boot com input-test=<variant>, teclas por QMP."""
     image = BUILD / "nexo-input.img"
     run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline",
@@ -478,6 +489,17 @@ def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
         if re.search(pat, text):
             log(f"FALHA: marcador proibido presente: /{pat}/")
             ok = False
+    return ok, rc
+
+
+def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
+    """Fase de entrada com nova tentativa quando o QEMU morre por sinal do HOST (infra)."""
+    ok, rc = False, 0
+    for attempt in range(3):
+        ok, rc = run_input_phase_once(timeout, variant, expect)
+        if ok or rc not in HOST_SIGNAL_RCS:
+            return ok
+        log(f"QEMU morreu por sinal do host (rc={rc}) na fase {variant}; nova tentativa ({attempt + 2}/3)")
     return ok
 
 
