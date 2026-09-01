@@ -1645,16 +1645,47 @@ pub fn shell_mode() {
 /// `input-test=1` na linha de comando: inputdev + utest(13) esperando teclas do host (QMP).
 pub fn input_test_mode(variant: u64) {
     use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
-    let bdf = crate::pci::devices()
-        .iter()
-        .find(|d| d.is_virtio() && d.device == 0x1052)
-        .map(|d| d.bdf)
-        .expect("input-test exige virtio-keyboard-pci");
-    let (a, b) = ChannelEnd::create_pair();
-    let g = Handle {
+    let grant = |bdf: u16| Handle {
         object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
         rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
     };
+    let inputs: Vec<u16> = crate::pci::devices()
+        .iter()
+        .filter(|d| d.is_virtio() && d.device == 0x1052)
+        .map(|d| d.bdf)
+        .collect();
+    let bdf = *inputs.first().expect("input-test exige um virtio-input");
+    if variant == 4 {
+        // Entrada MESCLADA: dois virtio-input (teclado + tablet), um inputdev para cada,
+        // ambos empurrando no MESMO canal (duplicado pelo assinante) para o wm.
+        let bdf2 = *inputs.get(1).expect("input-test=4 exige dois virtio-input");
+        let (a1, b1) = ChannelEnd::create_pair();
+        let (a2, b2) = ChannelEnd::create_pair();
+        let _d1 =
+            crate::process::spawn_named("inputdev", 0, alloc::vec![grant(bdf), channel_handle(a1)])
+                .expect("inputdev 1");
+        let _d2 = crate::process::spawn_named(
+            "inputdev",
+            0,
+            alloc::vec![grant(bdf2), channel_handle(a2)],
+        )
+        .expect("inputdev 2");
+        let (wa, wb) = ChannelEnd::create_pair();
+        let _wm =
+            crate::process::spawn_named("wm", 0, alloc::vec![channel_handle(wa)]).expect("wm");
+        let client = crate::process::spawn_named(
+            "utest",
+            55,
+            alloc::vec![channel_handle(wb), channel_handle(b1), channel_handle(b2)],
+        )
+        .expect("utest");
+        kinfo!("[INPUT] aguardando teclas injetadas pelo host");
+        let code = crate::process::wait_and_reap(&client);
+        kinfo!("[INPUT] teste de entrada terminou com {code}");
+        return;
+    }
+    let (a, b) = ChannelEnd::create_pair();
+    let g = grant(bdf);
     let _drv = crate::process::spawn_named("inputdev", 0, alloc::vec![g, channel_handle(a)])
         .expect("inputdev");
     let client = if variant == 3 {

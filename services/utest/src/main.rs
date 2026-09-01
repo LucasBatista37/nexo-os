@@ -98,6 +98,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         52 => term_driver(),
         53 => visor_driver(),
         54 => wm_real_pointer(),
+        55 => wm_merged_input(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5135,6 +5136,88 @@ fn wm_real_pointer() -> ! {
         if nexo_sys::time_now() - start > 30_000_000_000 {
             nexo_rt::log!("utest: ponteiro real: sem clique valido em 30 s");
             nexo_sys::exit(728)
+        }
+    }
+}
+
+/// Modo 55: entrada MESCLADA. Teclado e tablet reais alimentam o MESMO canal de entrada do
+/// compositor: a ponta de escrita e duplicada (RIGHT_DUPLICATE) e cada driver recebe uma copia
+/// no subscribe — lotes evdev sao atomicos por send, entao a mescla e limpa. O teste espera uma
+/// tecla (da fase QMP) E um clique local valido na mesma execucao.
+fn wm_merged_input() -> ! {
+    let wm_ch: nexo_sys::Handle = 0;
+    let drv_a: nexo_sys::Handle = 1;
+    let drv_b: nexo_sys::Handle = 2;
+    let (a, a_base) = wm_create(wm_ch, 10, 10, 20, 20, 0);
+    wm_fill(a_base, 20, 20, 255, 255, 0);
+    wm_commit(wm_ch, a);
+
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+    let (push_wm, push) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(740));
+    let push2 = nexo_sys::handle_duplicate(push, nexo_sys::abi::RIGHTS_CHANNEL_DEFAULT)
+        .unwrap_or_else(|_| nexo_sys::exit(741));
+    for (drv, chan) in [(drv_a, push), (drv_b, push2)] {
+        let m = nexo_proto::input::SubscribeRequest {
+            chan,
+            abs_w: 64,
+            abs_h: 48,
+        }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(742));
+        if nexo_sys::channel_send(drv, &out[..m], &[chan]) != Status::Ok {
+            nexo_sys::exit(743);
+        }
+        match nexo_sys::channel_recv(drv, &mut buf, &mut hs) {
+            Ok((n, _)) if nexo_proto::input::decode_subscribe_response(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(744),
+        }
+    }
+    let m = nexo_proto::wm::SetInputRequest { chan: push_wm }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(745));
+    if nexo_sys::channel_send(wm_ch, &out[..m], &[push_wm]) != Status::Ok {
+        nexo_sys::exit(746);
+    }
+    match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(747),
+    }
+    nexo_sys::log("utest: entrada mesclada: dois drivers no mesmo canal, janela pronta");
+
+    let mut got_key = false;
+    let mut got_click = false;
+    let start = nexo_sys::time_now();
+    loop {
+        let n = match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+            Ok((n, _)) => n,
+            _ => nexo_sys::exit(748),
+        };
+        if let Ok(ev) = nexo_proto::wm::decode_key_event(&buf[..n])
+            && ev.value == 1
+        {
+            nexo_rt::log!("utest: mesclada: tecla code={}", ev.code);
+            got_key = true;
+        } else if let Ok(ev) = nexo_proto::wm::decode_pointer_event(&buf[..n])
+            && ev.surface == a
+            && (ev.x - 10).abs() <= 1
+            && (ev.y - 10).abs() <= 1
+        {
+            nexo_rt::log!("utest: mesclada: clique local ({}, {})", ev.x, ev.y);
+            got_click = true;
+        }
+        if got_key && got_click {
+            nexo_sys::log("utest: entrada mesclada ok — tecla e clique pelo mesmo canal");
+            nexo_sys::exit(0)
+        }
+        if nexo_sys::time_now() - start > 30_000_000_000 {
+            nexo_rt::log!(
+                "utest: mesclada: em 30 s tecla={} clique={}",
+                got_key,
+                got_click
+            );
+            nexo_sys::exit(749)
         }
     }
 }

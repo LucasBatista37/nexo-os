@@ -421,14 +421,16 @@ def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
     if logfile.exists():
         logfile.unlink()
     runner_log = open(BUILD / "logs" / f"input-{variant}-runner.log", "wb")
-    input_flag = "--input-tablet" if variant == 3 else "--input-keyboard"
+    input_flags = {3: ["--input-tablet"], 4: ["--input-keyboard", "--input-tablet"]}
+    input_flag = input_flags.get(variant, ["--input-keyboard"])
     proc = subprocess.Popen([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
-                             "--disk", BUILD / "nexo-input-data.img", input_flag,
+                             "--disk", BUILD / "nexo-input-data.img", *input_flag,
                              "--qmp-socket", qmp_path, "--timeout", str(timeout), "--log", logfile],
                             stdout=runner_log, stderr=subprocess.STDOUT)
     ok = True
     # espera o kernel sinalizar que o driver esta pronto antes de injetar
-    ready_marker = b"ponteiro real: cadeia" if variant == 3 else b"[INPUT] aguardando teclas"
+    ready_markers = {3: b"ponteiro real: cadeia", 4: b"entrada mesclada: dois drivers"}
+    ready_marker = ready_markers.get(variant, b"[INPUT] aguardando teclas")
     deadline = time.time() + 90
     while time.time() < deadline:
         if logfile.exists() and ready_marker in logfile.read_bytes():
@@ -445,6 +447,19 @@ def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
             if logfile.exists() and b"wm ponteiro real ok" in logfile.read_bytes():
                 break
         if not clicked:
+            log("FALHA: socket QMP nao respondeu")
+            ok = False
+    elif variant == 4:
+        # tecla E clique pela mesma sessao QMP; repetidos ate o guest confirmar a mescla
+        done = False
+        for _ in range(3):
+            k = qmp_send_keys(qmp_path, ["a"])
+            c = qmp_send_click(qmp_path, 20 * 32768 // 64, 20 * 32768 // 48)
+            done = (k and c) or done
+            time.sleep(1.0)
+            if logfile.exists() and b"entrada mesclada ok" in logfile.read_bytes():
+                break
+        if not done:
             log("FALHA: socket QMP nao respondeu")
             ok = False
     elif not qmp_send_keys(qmp_path, ["a", "b", "ret"]):
@@ -493,6 +508,13 @@ def run_input_scenario(timeout: float) -> bool:
         r"inputdev: eixos absolutos: x max Some\(32767\), y max Some\(32767\)",
         r"utest: ponteiro real: cadeia inputdev -> wm -> janela pronta",
         r"utest: wm ponteiro real ok — clique local \(\d+, \d+\) na janela 0",
+        r"\[INPUT\] teste de entrada terminou com 0",
+        r"NEXO: boot completo"]) and ok
+    ok = run_input_phase(timeout, 4, [
+        r"utest: entrada mesclada: dois drivers no mesmo canal, janela pronta",
+        r"utest: mesclada: tecla code=\d+",
+        r"utest: mesclada: clique local \(\d+, \d+\)",
+        r"utest: entrada mesclada ok — tecla e clique pelo mesmo canal",
         r"\[INPUT\] teste de entrada terminou com 0",
         r"NEXO: boot completo"]) and ok
     log(f"=== cenario 'input': {'PASS' if ok else 'FAIL'} (logs: {BUILD / 'logs'}/input-*.log) ===")
