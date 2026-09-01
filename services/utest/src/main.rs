@@ -92,6 +92,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         46 => install_client(),
         47 => spawn_mem_client(param as usize),
         48 => launcher_client(param as usize),
+        49 => launch_gui_client(param as usize),
         _ => nexo_sys::exit(203),
     }
 }
@@ -663,6 +664,135 @@ impl FsClient {
     }
 }
 
+/// Modo 49: lanca um app GRAFICO instalado. Handles: 0 = canal nexo.fs, 1 = MemoryObject com o
+/// ELF real da calculadora (`param` = tamanho), 2 = sessao bootstrap nexo.wm (o driver e o shell).
+/// Instala a calc com perms=janelas e a lanca: o lancador abre uma sessao do compositor SO porque
+/// a permissao foi declarada e a entrega pelo canal do app; a janela "calc" aparece (conferida por
+/// surface_info). O mesmo binario sem a permissao nasce sem sessao e sai com o proprio erro.
+fn launch_gui_client(elf_len: usize) -> ! {
+    let mem: nexo_sys::Handle = 1;
+    let wm_ch: nexo_sys::Handle = 2;
+    let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| nexo_sys::exit(1280));
+    // SAFETY: base .. base+elf_len esta dentro do MemoryObject mapeado.
+    let elf = unsafe { core::slice::from_raw_parts(base as *const u8, elf_len) };
+    let mut c = FsClient {
+        ch: 0,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let mut fs = InstFs { c: &mut c };
+    static mut PKG2: [u8; 49152] = [0; 49152];
+    static mut ELF2: [u8; 40960] = [0; 40960];
+    // SAFETY: utest tem uma unica thread; buffers estaticos evitam estourar a pilha.
+    let (pkg, elf_buf) = unsafe {
+        (
+            &mut *core::ptr::addr_of_mut!(PKG2),
+            &mut *core::ptr::addr_of_mut!(ELF2),
+        )
+    };
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    // COM a permissao "janelas": instala e lanca com uma sessao do compositor
+    let n = build_app_pkg(
+        b"name=calc-app\nversion=1.0\nentry=app.elf\nperms=janelas\n",
+        elf,
+        pkg,
+    );
+    nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1281));
+    let v = nexo_inst::current_version(&mut fs, "calc-app").unwrap_or_else(|| nexo_sys::exit(1282));
+    let mut pb = [0u8; nexo_inst::MAX_PATH];
+    let mpath = nexo_inst::versioned_path("calc-app", v, "manifest.txt", &mut pb)
+        .unwrap_or_else(|_| nexo_sys::exit(1283));
+    let mut mbuf = [0u8; 256];
+    let mn = nexo_inst::AppFs::read_file(&mut fs, mpath, &mut mbuf)
+        .unwrap_or_else(|_| nexo_sys::exit(1284));
+    let manifest = nexo_pkg::Manifest::parse(&mbuf[..mn]).unwrap_or_else(|_| nexo_sys::exit(1285));
+    if !manifest.declares("janelas") {
+        nexo_sys::exit(1286);
+    }
+    let mut pb = [0u8; nexo_inst::MAX_PATH];
+    let epath = nexo_inst::versioned_path("calc-app", v, manifest.entry, &mut pb)
+        .unwrap_or_else(|_| nexo_sys::exit(1287));
+    let en = nexo_inst::AppFs::read_file(&mut fs, epath, elf_buf)
+        .unwrap_or_else(|_| nexo_sys::exit(1288));
+    // capacidade "janelas": abre uma sessao nova do compositor para o app
+    let (sess_app, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1289));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1290));
+    if nexo_sys::channel_send(wm_ch, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1291);
+    }
+    match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1292),
+    }
+    let (pipe, pipe_child) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1293));
+    let child = nexo_sys::process_spawn_mem(&elf_buf[..en], 0, &[pipe_child])
+        .unwrap_or_else(|_| nexo_sys::exit(1294));
+    if nexo_sys::channel_send(pipe, b"sess", &[sess_app]) != Status::Ok {
+        nexo_sys::exit(1295);
+    }
+    // a janela "calc" aparece (o driver e a sessao shell: surface_info)
+    let start = nexo_sys::time_now();
+    'outer: loop {
+        for idx in 0..8u32 {
+            let m = nexo_proto::wm::SurfaceInfoRequest { index: idx }
+                .encode_msg(&mut out)
+                .unwrap_or_else(|_| nexo_sys::exit(1296));
+            if nexo_sys::channel_send(wm_ch, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit(1297);
+            }
+            let (n, _) = nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs)
+                .unwrap_or_else(|_| nexo_sys::exit(1298));
+            let info = nexo_proto::wm::decode_surface_info_response(&buf[..n])
+                .unwrap_or_else(|_| nexo_sys::exit(1299));
+            if info.used == 1 && info.title() == b"calc" {
+                break 'outer;
+            }
+        }
+        if nexo_sys::time_now() - start > 10_000_000_000 {
+            nexo_sys::exit(1300);
+        }
+        nexo_sys::sleep_ns(10_000_000);
+    }
+    // encerra o app pelo cordao de vida
+    if nexo_sys::handle_close(pipe) != Status::Ok {
+        nexo_sys::exit(1301);
+    }
+    if nexo_sys::process_wait(child) != Ok(0) {
+        nexo_sys::exit(1302);
+    }
+
+    // SEM a permissao: nenhuma sessao e concedida; o app sai com o proprio erro (21)
+    let n = build_app_pkg(b"name=calc-sem\nversion=1.0\nentry=app.elf\n", elf, pkg);
+    nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1303));
+    let v = nexo_inst::current_version(&mut fs, "calc-sem").unwrap_or_else(|| nexo_sys::exit(1304));
+    let mut pb = [0u8; nexo_inst::MAX_PATH];
+    let mpath = nexo_inst::versioned_path("calc-sem", v, "manifest.txt", &mut pb)
+        .unwrap_or_else(|_| nexo_sys::exit(1305));
+    let mn = nexo_inst::AppFs::read_file(&mut fs, mpath, &mut mbuf)
+        .unwrap_or_else(|_| nexo_sys::exit(1306));
+    let manifest = nexo_pkg::Manifest::parse(&mbuf[..mn]).unwrap_or_else(|_| nexo_sys::exit(1307));
+    if manifest.declares("janelas") {
+        nexo_sys::exit(1308);
+    }
+    let (pipe, pipe_child) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1309));
+    let child = nexo_sys::process_spawn_mem(&elf_buf[..en], 0, &[pipe_child])
+        .unwrap_or_else(|_| nexo_sys::exit(1310));
+    // sem a permissao, o lancador NAO envia sessao: fecha o canal e o app encerra sem janela
+    if nexo_sys::handle_close(pipe) != Status::Ok {
+        nexo_sys::exit(1311);
+    }
+    if nexo_sys::process_wait(child) != Ok(21) {
+        nexo_sys::exit(1312);
+    }
+    nexo_sys::log("utest: launch_gui ok — app grafico instalado ganha janela SO com a permissao");
+    nexo_sys::exit(0)
+}
+
 /// Empacota `elf` num NEXOPKG1 com o manifesto dado; devolve o tamanho em `out`.
 fn build_app_pkg(manifest: &[u8], elf: &[u8], out: &mut [u8]) -> usize {
     let name = b"app.elf";
@@ -745,7 +875,7 @@ fn launcher_client(elf_len: usize) -> ! {
     };
     let mut fs = InstFs { c: &mut c };
     static mut PKG: [u8; 40960] = [0; 40960];
-    static mut ELF_BUF: [u8; 32768] = [0; 32768];
+    static mut ELF_BUF: [u8; 40960] = [0; 40960];
     // SAFETY: utest tem uma unica thread; os buffers estaticos evitam estourar a pilha.
     let (pkg, elf_buf) = unsafe {
         (

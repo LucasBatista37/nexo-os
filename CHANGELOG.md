@@ -315,6 +315,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Imposição de permissões demonstrada nos dois sentidos: o app com `perms=ipc` nasce com o canal de controle e funciona (pedido → eco → saída limpa); o **mesmo binário** instalado **sem** a permissão nasce **sem** o handle — a capacidade não existe para ele (modelo de capabilities: negação por omissão, sem checagens em runtime).
 - `utest` modo 48 + auto-teste de boot `user_launcher` (blockdev + fs + lançador; o kernel entrega o ELF real do `echo` por `MemoryObject`): instala os dois pacotes no NexoFS e exercita concessão e negação. 71 testes no boot.
 
+### Adicionado (Fase 6, bloco 8 — app gráfico instalado (permissão `janelas`))
+- O mapeamento permissão→capacidade ganhou **`janelas`**: o lançador abre uma sessão do compositor para o app **só se o manifesto a declara**, e a entrega pelo canal do app (o contrato `"sess"`).
+- `utest` modo 49 + auto-teste de boot `user_launch_gui` (blockdev + fs + **wm** + lançador; o kernel entrega o ELF real da **calculadora**): empacota, instala no NexoFS e lança — a janela **"calc" aparece** (conferida por `surface_info` na sessão shell) vinda de um binário executado **da instalação, não do initrd**; o app encerra limpo pelo cordão de vida. O mesmo binário instalado **sem** a permissão nasce sem sessão e sai com o próprio erro. 72 testes no boot. **Um aplicativo gráfico instalado, rodando com capacidades concedidas pelo manifesto.**
+
 ### Alterado (Fase 6, bloco 7 — ABI nativa v1 experimental)
 - **`ABI_VERSION` 0 → 1**: a ABI de syscalls foi declarada **v1 experimental** — o conjunto atual (33 syscalls 0–32, handles com direitos que só diminuem, canais NXIP, memória compartilhada, os dois spawns) passa a evoluir por **política aditiva**: syscalls novas ganham números novos, structs só crescem por campos com padrão zero no fim, protocolos IPC seguem o ipc-compat §3; qualquer quebra sobe a versão e é registrada aqui. `docs/spec/syscall-abi.md` atualizada com a política. Programas consultam por `abi_version` (os testes comparam contra a constante e seguem verdes).
 
