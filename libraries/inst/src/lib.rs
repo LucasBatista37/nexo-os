@@ -25,6 +25,8 @@ pub trait AppFs {
     fn write_file(&mut self, path: &str, data: &[u8]) -> Result<(), FsErr>;
     /// Lê `path` inteiro para `buf`; devolve o tamanho (erro se não existe/não cabe).
     fn read_file(&mut self, path: &str, buf: &mut [u8]) -> Result<usize, FsErr>;
+    /// Remove um arquivo ou diretório vazio.
+    fn unlink(&mut self, path: &str) -> Result<(), FsErr>;
 }
 
 /// Erros da instalação.
@@ -54,6 +56,8 @@ impl From<FsErr> for InstError {
 
 /// Raiz das instalações.
 pub const APPS_DIR: &str = "/apps";
+/// Versões mantidas por aplicativo: a corrente e a anterior (rollback).
+pub const KEEP_VERSIONS: u32 = 2;
 /// Lista de revogação: um nome de aplicativo por linha. Consultada por `install` e pelos
 /// lançadores ([`is_revoked`]); alimentada pelo processo de revisão ([`revoke`]).
 pub const REVOKED_PATH: &str = "/apps/.revoked";
@@ -197,10 +201,23 @@ pub fn install(fs: &mut impl AppFs, pkg: &[u8]) -> Result<u32, InstError> {
         p.manifest_bytes(),
     )?;
     let mut it = p.files();
+    let mut listing = [0u8; 1024];
+    let mut ll = 0usize;
     while let Ok(Some((fname, data))) = it.step() {
         let mut pb3 = [0u8; MAX_PATH];
         fs.write_file(versioned_path(name, next, fname, &mut pb3)?, data)?;
+        if ll + fname.len() < listing.len() {
+            listing[ll..ll + fname.len()].copy_from_slice(fname.as_bytes());
+            listing[ll + fname.len()] = b'\n';
+            ll += fname.len() + 1;
+        }
     }
+    // files.txt: o que a coleta ([`gc`]) precisa para esvaziar esta versão no futuro
+    let mut pb4 = [0u8; MAX_PATH];
+    fs.write_file(
+        versioned_path(name, next, "files.txt", &mut pb4)?,
+        &listing[..ll],
+    )?;
     // COMMIT: o ponteiro por último
     let mut cur = PathBuf::new();
     cur.push(APPS_DIR)?;
@@ -210,7 +227,50 @@ pub fn install(fs: &mut impl AppFs, pkg: &[u8]) -> Result<u32, InstError> {
     let mut vb = [0u8; 12];
     let v = ver_str(next, &mut vb);
     fs.write_file(cur.as_str(), v.as_bytes())?;
+    // pós-commit: coleta versões antigas (best-effort — falha aqui não desfaz a instalação)
+    let _ = gc(fs, name);
     Ok(next)
+}
+
+/// Coleta versões antigas de `name`: remove toda `vN` com `N <= corrente - KEEP_VERSIONS`.
+/// Best-effort — cada versão falha ou some por inteiro; a próxima instalação tenta de novo.
+/// Versões gravadas antes do `files.txt` existir não são tocadas. Devolve quantas removeu.
+pub fn gc(fs: &mut impl AppFs, name: &str) -> u32 {
+    let Some(cur) = current_version(fs, name) else {
+        return 0;
+    };
+    if cur <= KEEP_VERSIONS {
+        return 0;
+    }
+    let mut removed = 0;
+    for v in 1..=cur - KEEP_VERSIONS {
+        if gc_version(fs, name, v).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+fn gc_version(fs: &mut impl AppFs, name: &str, v: u32) -> Result<(), InstError> {
+    let mut pb = [0u8; MAX_PATH];
+    let mut list = [0u8; 1024];
+    let n = fs.read_file(versioned_path(name, v, "files.txt", &mut pb)?, &mut list)?;
+    let text = core::str::from_utf8(&list[..n]).map_err(|_| InstError::Fs)?;
+    for fname in text.lines() {
+        let fname = fname.trim();
+        if fname.is_empty() {
+            continue;
+        }
+        let mut p = [0u8; MAX_PATH];
+        let _ = fs.unlink(versioned_path(name, v, fname, &mut p)?);
+    }
+    for extra in ["files.txt", "manifest.txt"] {
+        let mut p = [0u8; MAX_PATH];
+        let _ = fs.unlink(versioned_path(name, v, extra, &mut p)?);
+    }
+    let mut p = [0u8; MAX_PATH];
+    fs.unlink(versioned_path(name, v, "", &mut p)?)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -267,6 +327,22 @@ mod tests {
             }
             buf[..d.len()].copy_from_slice(d);
             Ok(d.len())
+        }
+        fn unlink(&mut self, path: &str) -> Result<(), FsErr> {
+            self.tick()?;
+            if self.files.remove(path).is_some() {
+                return Ok(());
+            }
+            if self.dirs.contains(path) {
+                let mut prefix = String::from(path);
+                prefix.push('/');
+                if self.files.keys().any(|k| k.starts_with(&prefix)) {
+                    return Err(FsErr); // não vazio, como no NexoFS
+                }
+                self.dirs.remove(path);
+                return Ok(());
+            }
+            Err(FsErr)
         }
     }
 
@@ -335,6 +411,24 @@ mod tests {
                 assert_eq!(current_version(&mut fs, "calc"), Some(2));
                 assert_eq!(fs.files["/apps/calc.v2/calc.elf"], b"BBB");
             }
+        }
+    }
+
+    #[test]
+    fn gc_keeps_current_and_previous_only() {
+        let mut fs = Mock::new();
+        for v in 1..=4 {
+            let vs = std::format!("{v}");
+            install(&mut fs, &pkg(&vs, b"AAA")).unwrap();
+        }
+        assert_eq!(current_version(&mut fs, "calc"), Some(4));
+        assert!(fs.files.contains_key("/apps/calc.v4/calc.elf"));
+        assert!(fs.files.contains_key("/apps/calc.v3/calc.elf"));
+        // v1 e v2 coletadas por inteiro: arquivos, manifesto, files.txt e o diretório
+        for v in [1u32, 2] {
+            let prefix = std::format!("/apps/calc.v{v}/");
+            assert!(!fs.files.keys().any(|k| k.starts_with(&prefix)), "{prefix}");
+            assert!(!fs.dirs.contains(std::format!("/apps/calc.v{v}").as_str()));
         }
     }
 

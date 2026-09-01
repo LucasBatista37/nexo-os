@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 14 — coleta de versões antigas no instalador)
+- `nexo-inst`: **GC de versões** — cada instalação grava um `files.txt` (nomes dos arquivos da versão) e, **após** o commit do ponteiro, `gc()` remove por inteiro toda `vN` com `N ≤ corrente − KEEP_VERSIONS` (=2: corrente + anterior para rollback): arquivos listados, `files.txt`, `manifest.txt` e o diretório. Best-effort: falha na coleta nunca desfaz a instalação (a próxima tenta de novo); versões gravadas antes do `files.txt` existir são toleradas e não são tocadas. `AppFs` ganhou `unlink` (o NexoFS remove arquivo ou diretório vazio).
+- Motivação de campo: o ENOSPC determinístico do bloco 13 (disco de testes cheio de `v1..vN`). Testes: host (janela {corrente, anterior} exata; power-cut inalterado — a coleta é pós-commit) e `user_install` confere no NexoFS real que nenhuma versão coletável sobra, inclusive com disco legado.
+
 ### Infraestrutura (CI: retry quando o QEMU do runner morre por sinal)
 - `tools/test-qemu`: quando o QEMU morre por um **sinal do host** (245=SIGSEGV, 246=SIGBUS, 250=SIGABRT — visto duas vezes no runner do GitHub em 2026-09-01, em cenários distintos, com o guest saudável), o cenário é reexecutado (até 3 tentativas). Cenários que matam o QEMU de propósito (`kill_on`) não fazem retry. Escritas parciais no disco da tentativa abortada equivalem a um corte de energia — que o sistema precisa aguentar de qualquer forma (e o `powercut` prova).
 

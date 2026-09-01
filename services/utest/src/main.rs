@@ -1495,6 +1495,15 @@ impl nexo_inst::AppFs for InstFs<'_> {
         Ok(())
     }
 
+    fn unlink(&mut self, path: &str) -> Result<(), nexo_inst::FsErr> {
+        let (st, _, _) = self.c.call(3, 0, 0, 0, path.as_bytes());
+        if st == 0 {
+            Ok(())
+        } else {
+            Err(nexo_inst::FsErr)
+        }
+    }
+
     fn read_file(&mut self, path: &str, buf: &mut [u8]) -> Result<usize, nexo_inst::FsErr> {
         let (st, v, _) = self.c.call(0, 0, 0, 0, path.as_bytes());
         if st != 0 {
@@ -1618,6 +1627,19 @@ fn install_client() -> ! {
     if nexo_inst::current_version(&mut fs, "inst-demo") != Some(v0 + 2) {
         nexo_sys::exit(1214);
     }
+    // coleta de versoes antigas: depois das duas instalacoes acima a corrente e v0+2 e a
+    // janela mantida e {v0+1, v0+2}. Toda versao coletavel (<= v0, com files.txt) deve ter
+    // sido removida; versoes gravadas antes do files.txt existir sao toleradas (documentado).
+    for v in 1..=v0 {
+        let mut pb = [0u8; nexo_inst::MAX_PATH];
+        let path = nexo_inst::versioned_path("inst-demo", v, "files.txt", &mut pb)
+            .unwrap_or_else(|_| nexo_sys::exit(1219));
+        let mut tmp = [0u8; 1024];
+        if nexo_inst::AppFs::read_file(&mut fs, path, &mut tmp).is_ok() {
+            nexo_sys::exit(1220); // versao coletavel sobrou: gc nao rodou
+        }
+    }
+
     // revogacao (idempotente entre boots: na 2a execucao o app ja esta revogado)
     if !nexo_inst::is_revoked(&mut fs, "rev-demo") {
         let n = build_app_pkg(
