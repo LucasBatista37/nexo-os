@@ -64,6 +64,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_ipc", test_user_ipc),
     ("ipc_handoff", test_ipc_handoff),
     ("user_nvme", test_user_nvme),
+    ("user_nvme_fs", test_user_nvme_fs),
     ("user_services", test_user_services),
     ("user_syscall_fuzz", test_user_syscall_fuzz),
     ("pci", test_pci),
@@ -2927,6 +2928,51 @@ fn test_user_nvme() -> TestResult {
     drop((drv, client));
     sched::reap();
     check!(cc == 0, "cliente saiu com {cc}");
+    check!(dc == 0, "nvmedev saiu com {dc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    let frames = settled_free_frames(frames0, 8);
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// A pilha de armazenamento INTEIRA sobre NVMe: `fs` monta (formatando na primeira vez) um
+/// NexoFS no disco NVMe através do `nvmedev`, e o cliente persistente de sempre (modo 9,
+/// `boot.count`) roda sem mudar uma linha — nem o `fs` nem o cliente sabem que o disco mudou.
+fn test_user_nvme_fs() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    let Some(bdf) = crate::pci::devices()
+        .iter()
+        .find(|d| d.class == 0x01 && d.subclass == 0x08 && d.prog_if == 0x02)
+        .map(|d| d.bdf)
+    else {
+        return Err(String::from("NVMe ausente (rode com o disco NVMe)"));
+    };
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let (c, d) = ChannelEnd::create_pair();
+    let g = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let drv = crate::process::spawn_named("nvmedev", 0, alloc::vec![g, channel_handle(a)])
+        .map_err(String::from)?;
+    let fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
+            .map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 9, alloc::vec![channel_handle(d)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let fc = crate::process::wait_and_reap(&fs);
+    let dc = crate::process::wait_and_reap(&drv);
+    drop((drv, fs, client));
+    sched::reap();
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(fc == 0, "fs saiu com {fc}");
     check!(dc == 0, "nvmedev saiu com {dc}");
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
