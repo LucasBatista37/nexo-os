@@ -547,7 +547,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] criar terminal e shell;
 - [ ] criar gerenciador de arquivos;
 - [ ] criar editor de texto;
-- [ ] criar configurações;
+- [-] criar configurações — *`services/config`: janela com toggles **reais** de movimento reduzido e não-perturbe, acionados por clique — o clique dá o foco, e a posse da entrada é justamente o que as APIs mediadas exigem (a mediação trabalhando a favor do app); efeitos verificados de fora (`prefs` reflete; com DND um aviso não desenha banner) — auto-teste `user_config`. Pendem tema claro/escuro em runtime, escala e mais painéis*;
 - [ ] criar monitor de sistema;
 - [ ] criar visualizador de imagens e documentos básicos;
 - [-] criar calculadora, calendário e utilitários — *a **calculadora** existe (`services/calc`): o primeiro aplicativo real da plataforma — janela com visor e botões `nexo-ui` acionados pelos eventos `pointer` do compositor; "1 + 2 =" clicado de verdade e o resultado "3" lido pelo **clipboard mediado** (o clique dá o foco, o foco dá o clipboard) — auto-teste `user_calc` (wm + calc + driver). Lição de ciclo de vida: o canal com o orquestrador é o cordão de vida do app (senão app e compositor esperam um pelo outro no encerramento). Dígitos completos, mais operações, calendário e utilitários pendem*;

@@ -93,6 +93,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         47 => spawn_mem_client(param as usize),
         48 => launcher_client(param as usize),
         49 => launch_gui_client(param as usize),
+        50 => config_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -662,6 +663,131 @@ impl FsClient {
     fn data(&self, n: usize) -> &[u8] {
         &self.reply[12..12 + n]
     }
+}
+
+/// Modo 50: driver das Configuracoes. Handle 0 = sessao nexo.wm (bootstrap), handle 1 = canal com
+/// o app config. Clica nos toggles e confere os efeitos REAIS: prefs{} reflete o movimento
+/// reduzido; com nao-perturbe ligado, um aviso nao desenha banner (pixel intacto).
+fn config_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    // fundo azul cobrindo a tela (inclusive a regiao do banner)
+    let (bg, bg_base) = wm_create(s1, 0, 0, 64, 48, 0);
+    wm_fill(bg_base, 64, 48, 0, 0, 255);
+    wm_commit(s1, bg);
+    let _ = bg;
+
+    // sessao para o config
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1320));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1321));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1322);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1323),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1324);
+    }
+    let expect_pipe =
+        |pipe: nexo_sys::Handle, want: &[u8], code: i64, buf: &mut [u8; 256], hs: &mut [u32; 1]| {
+            match nexo_sys::channel_recv(pipe, buf, hs) {
+                Ok((n, _)) if &buf[..n] == want => {}
+                _ => nexo_sys::exit(code),
+            }
+        };
+    expect_pipe(pipe, b"pronto", 1325, &mut buf, &mut hs);
+
+    // saida + entrada sintetica
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1326));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1327);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1328));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1329));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1330));
+    let stride = outp.w;
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1331));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1332));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1333);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1334),
+    }
+    let prefs =
+        |s1: nexo_sys::Handle, out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 1]| -> u8 {
+            let m = nexo_proto::wm::PrefsRequest {}
+                .encode_msg(out)
+                .unwrap_or_else(|_| nexo_sys::exit(1335));
+            if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit(1336);
+            }
+            match nexo_sys::channel_recv(s1, buf, hs) {
+                Ok((n, _)) => {
+                    nexo_proto::wm::decode_prefs_response(&buf[..n])
+                        .unwrap_or_else(|_| nexo_sys::exit(1337))
+                        .reduce_motion
+                }
+                _ => nexo_sys::exit(1338),
+            }
+        };
+    let notify =
+        |s1: nexo_sys::Handle, out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 1]| {
+            let mut rq = nexo_proto::wm::NotifyRequest {
+                title: [0; 64],
+                title_len: 1,
+            };
+            rq.title[0] = b'x';
+            let m = rq.encode_msg(out).unwrap_or_else(|_| nexo_sys::exit(1339));
+            if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit(1340);
+            }
+            match nexo_sys::channel_recv(s1, buf, hs) {
+                Ok((n, _)) if nexo_proto::wm::decode_notify_response(&buf[..n]).is_ok() => {}
+                _ => nexo_sys::exit(1341),
+            }
+        };
+
+    // toggle RM: liga (prefs = 1) e desliga (prefs = 0)
+    wm_click(inj, 16, 16);
+    expect_pipe(pipe, b"rm1", 1342, &mut buf, &mut hs);
+    if prefs(s1, &mut out, &mut buf, &mut hs) != 1 {
+        nexo_sys::exit(1343);
+    }
+    wm_click(inj, 16, 16);
+    expect_pipe(pipe, b"rm0", 1344, &mut buf, &mut hs);
+    if prefs(s1, &mut out, &mut buf, &mut hs) != 0 {
+        nexo_sys::exit(1345);
+    }
+
+    // toggle NP: com DND, um aviso NAO desenha o banner. As leituras usam espera com timeout:
+    // a saida e memoria compartilhada e o wm pode estar NO MEIO de uma recomposicao (o composite
+    // pinta o fundo antes do banner), entao uma leitura unica pode pegar um estado transiente.
+    wm_click(inj, 32, 16);
+    expect_pipe(pipe, b"np1", 1346, &mut buf, &mut hs);
+    notify(s1, &mut out, &mut buf, &mut hs);
+    wm_wait_px(ob, stride, 60, 4, (0, 0, 255), 1347); // converge para o fundo (sem banner)
+    wm_click(inj, 32, 16);
+    expect_pipe(pipe, b"np0", 1348, &mut buf, &mut hs);
+    notify(s1, &mut out, &mut buf, &mut hs);
+    wm_wait_px(ob, stride, 60, 4, (40, 80, 200), 1349); // o banner aparece (fundo do banner)
+    nexo_sys::log("utest: config ok — toggles de RM e nao-perturbe com efeito real");
+    nexo_sys::exit(0)
 }
 
 /// Modo 49: lanca um app GRAFICO instalado. Handles: 0 = canal nexo.fs, 1 = MemoryObject com o

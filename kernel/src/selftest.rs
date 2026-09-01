@@ -102,6 +102,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_spawn_mem", test_user_spawn_mem),
     ("user_launcher", test_user_launcher),
     ("user_launch_gui", test_user_launch_gui),
+    ("user_config", test_user_config),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2969,6 +2970,44 @@ fn test_user_launch_gui() -> TestResult {
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
     let frames = settled_free_frames(frames0, 8);
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Configurações: toggles clicáveis com efeito real — `prefs` reflete o movimento reduzido e o
+/// não-perturbe suprime o banner de avisos.
+fn test_user_config() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (wa, wb) = ChannelEnd::create_pair();
+    let (pa, pb) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(wa),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let config = crate::process::spawn_named("config", 0, alloc::vec![channel_handle(pa)])
+        .map_err(String::from)?;
+    let driver = crate::process::spawn_named(
+        "utest",
+        50,
+        alloc::vec![channel_handle(wb), channel_handle(pb)],
+    )
+    .map_err(String::from)?;
+    let dc = crate::process::wait_and_reap(&driver);
+    let cc = crate::process::wait_and_reap(&config);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, config, driver));
+    let frames = settled_free_frames(frames0, 8);
+    check!(dc == 0, "driver saiu com {dc}");
+    check!(cc == 0, "config saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
     check!(
         frames + 8 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
