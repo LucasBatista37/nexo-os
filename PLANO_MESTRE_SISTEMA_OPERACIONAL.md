@@ -530,10 +530,10 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 **Resultado:** terceiros conseguem desenvolver, empacotar, instalar e atualizar aplicações.
 
 - [ ] estabilizar ABI nativa v1 experimental;
-- [ ] publicar SDK Rust;
+- [-] publicar SDK Rust — *o SDK existe e está documentado (`docs/sdk.md`: crates, contrato de apps, exemplos, empacotamento); "publicar" de verdade (crates versionados fora do repositório, canal de distribuição) pende da estabilização da ABI v1*;
 - [ ] publicar headers e toolchain C/C++;
-- [ ] criar gerador de projeto;
-- [ ] criar documentação e exemplos;
+- [x] criar gerador de projeto — *`tools/nexo-new <nome>`: gera um app funcional (janela `nexo-ui` seguindo o contrato de apps: sessão via canal do orquestrador, cordão de vida, eventos `pointer`) já **registrado** no workspace e no initrd, com `manifest.txt` NEXOPKG1; validado gerando e compilando um app do zero*;
+- [-] criar documentação e exemplos — *`docs/sdk.md` (contrato de apps, mediações, depuração) + três exemplos reais no repositório (`calc`, `greeter`, `shellui`) e os drivers de teste (`utest` 43–45); falta um tutorial passo a passo e docs de referência por API*;
 - [ ] criar depurador remoto e integração com GDB/LLDB quando viável;
 - [ ] criar profiler e visualizador de traces;
 - [x] definir formato de pacote e manifesto — *formato `NEXOPKG1` v1 (`docs/spec/pkg.md`): manifesto textual auditável (`name`/`version`/`entry`/`perms` — chaves desconhecidas são erro) + arquivos, tudo sob CRC32; biblioteca `libraries/pkg` (`nexo-pkg`, no_std/sem alocação/`forbid(unsafe)`, validação completa no parse, fuzz-lite de truncamentos e mutações nos testes de host) e ferramenta `tools/nexo-pack` (`build`/`inspect`, validada com o binário real da calculadora). Assinatura e instalação transacional vêm por cima, em blocos próprios*;

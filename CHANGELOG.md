@@ -295,6 +295,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `libraries/pkg` (`nexo-pkg`): parser `no_std`/sem alocação/`forbid(unsafe_code)` — `Package::parse` valida assinatura, versão, CRC e a tabela inteira de arquivos; `Manifest` com `perms()`/`declares()`. Testes de host: round-trip, rejeições (magic/versão/CRC/manifesto), fuzz-lite de truncamentos e mutações de 1 byte sem pânico.
 - `tools/nexo-pack` (`build`/`inspect`): empacota e inspeciona (revalidando CRC e estrutura); validado empacotando o binário real da calculadora.
 
+### Adicionado (Fase 6, bloco 3 — gerador de projeto e documentação do SDK)
+- `tools/nexo-new <nome>`: gera um aplicativo **funcional** (janela `nexo-ui` seguindo o contrato de apps — sessão `nexo.wm` recebida pelo canal do orquestrador, que é o cordão de vida; eventos `pointer` logados) já **registrado** no workspace de services e no initrd, com `manifest.txt` NEXOPKG1 pronto para o `nexo-pack`. Validado gerando um app do zero e compilando sem avisos.
+- `docs/sdk.md`: a documentação do SDK — os crates, o **contrato de um aplicativo** (canal do orquestrador/cordão de vida, janela/commit, eventos e RPCs no mesmo canal, mediações de clipboard/notificações/captura/preferências), o fluxo `nexo-new` → `cargo build` → `nexo-pack`, e os exemplos reais (`calc`, `greeter`, `shellui`).
+
 ### Adicionado (Fase 2, extra — memória compartilhada entre processos)
 - `MemoryObject` (`kind` 4) e syscalls `memory_create` (28, aloca N páginas zeradas ≤ 256) / `memory_map` (29, mapeia `USER|RW` cacheável na região de dispositivos). Transferir o handle por canal compartilha as **mesmas páginas físicas** entre processos; o objeto possui os frames e os libera quando ninguém mais o referencia (mapeamento sem posse, como MMIO). `sdk/nexo-sys` ganhou os wrappers.
 - Teste `user_shmem`: um produtor cria memória, escreve um marcador e transfere o handle a um consumidor por canal; o consumidor lê o marcador e responde na mesma memória; sem vazamento de quadros. 42 testes no boot. Base para o compositor (buffers de janela) e payloads grandes de IPC (ipc-compat §2.6).

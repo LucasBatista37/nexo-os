@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Gera um aplicativo novo do Nexo OS (Plano §Fase 6: "criar gerador de projeto").
+
+Uso: tools/nexo-new <nome>
+Cria services/<nome>/ (Cargo.toml + build.rs + src/main.rs com uma janela nexo-ui funcional,
+seguindo o contrato de apps: sessão nexo.wm recebida pelo canal do orquestrador, que também é o
+cordão de vida), registra o crate no workspace de services e no initrd (tools/build-image) e gera
+o manifesto NEXOPKG1. Depois: (cd services && cargo build --release -p nexo-<nome>).
+"""
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+MAIN_RS = '''//! `{name}` — aplicativo gerado por `tools/nexo-new`. Handle 0 = canal com o orquestrador
+//! (recebe a sessão `nexo.wm` em "sess"; o canal é o **cordão de vida**: caiu, o app encerra).
+#![no_std]
+#![no_main]
+
+use nexo_gfx::{{PixelFormat, Rect, Surface}};
+use nexo_proto::wm;
+use nexo_rt::log;
+use nexo_sys::Handle;
+use nexo_sys::abi::Status;
+use nexo_ui::{{Button, Theme}};
+
+const PIPE: Handle = 0;
+const W: i32 = 32;
+const H: i32 = 24;
+
+fn fail(code: i64, what: &str) -> ! {{
+    log!("{name}: falha: {{}}", what);
+    nexo_sys::exit(code)
+}}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn _start(_arg: u64) -> ! {{
+    let theme = Theme::dark();
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+    let sess: Handle = match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {{
+        Ok((n, 1)) if &buf[..n] == b"sess" => hs[0],
+        _ => fail(20, "sessao nao recebida"),
+    }};
+
+    let mut out = [0u8; 384];
+    let req = wm::CreateSurfaceRequest {{
+        x: 8,
+        y: 8,
+        w: W,
+        h: H,
+        z: 10,
+        display: 0,
+    }};
+    let m = req.encode_msg(&mut out).unwrap_or_else(|_| fail(21, "enc create"));
+    if nexo_sys::channel_send(sess, &out[..m], &[]) != Status::Ok {{
+        fail(22, "send create");
+    }}
+    let (n, nh) =
+        nexo_sys::channel_recv(sess, &mut buf, &mut hs).unwrap_or_else(|_| fail(23, "recv create"));
+    let cs = wm::decode_create_surface_response(&buf[..n]).unwrap_or_else(|_| fail(24, "dec create"));
+    if nh != 1 {{
+        fail(25, "sem handle");
+    }}
+    let id = cs.id;
+    let base = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| fail(26, "map"));
+
+    // pinta a janela: fundo do tema + um botão
+    {{
+        // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
+        let px = unsafe {{ core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize) }};
+        let mut s = Surface::new(px, W as u32, H as u32, W as u32, PixelFormat::Rgbx8888)
+            .unwrap_or_else(|| fail(27, "superficie"));
+        s.clear(theme.bg);
+        Button::new(Rect::new(4, 8, 24, 10), "oi").draw(&mut s, &theme);
+    }}
+    let m = wm::CommitRequest {{ id }}.encode_msg(&mut out).unwrap_or_else(|_| fail(28, "enc commit"));
+    if nexo_sys::channel_send(sess, &out[..m], &[]) != Status::Ok {{
+        fail(29, "send commit");
+    }}
+    let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
+    log!("{name}: janela pronta (id {{}})", id);
+
+    loop {{
+        // cordão de vida + eventos (cliques chegam como `pointer`)
+        match nexo_sys::channel_try_recv(PIPE, &mut buf, &mut hs) {{
+            Ok(_) | Err(Status::WouldBlock) => {{}}
+            Err(_) => nexo_sys::exit(0),
+        }}
+        match nexo_sys::channel_try_recv(sess, &mut buf, &mut hs) {{
+            Ok((n, _)) => {{
+                if let Ok(ev) = wm::decode_pointer_event(&buf[..n]) {{
+                    log!("{name}: clique em ({{}}, {{}})", ev.x, ev.y);
+                }}
+            }}
+            Err(Status::WouldBlock) => {{
+                let _ = nexo_sys::channel_wait_any(&[sess, PIPE]);
+            }}
+            Err(_) => nexo_sys::exit(0),
+        }}
+    }}
+}}
+'''
+
+CARGO = '''[package]
+name = "nexo-{name}"
+description = "Aplicativo {name} do Nexo OS (gerado por tools/nexo-new)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+nexo-sys.workspace = true
+nexo-rt = {{ workspace = true, features = ["panic-handler"] }}
+nexo-proto.workspace = true
+nexo-gfx.workspace = true
+nexo-ui.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+'''
+
+MANIFEST = '''name={name}
+version=0.1.0
+entry=nexo-{name}
+perms=janelas
+'''
+
+
+def main() -> int:
+    if len(sys.argv) != 2 or not re.fullmatch(r"[a-z][a-z0-9-]{1,23}", sys.argv[1]):
+        print("uso: tools/nexo-new <nome>  (minúsculas, dígitos e '-'; 2..24)", file=sys.stderr)
+        return 1
+    name = sys.argv[1]
+    app = ROOT / "services" / name
+    if app.exists():
+        print(f"erro: services/{name} já existe", file=sys.stderr)
+        return 1
+    (app / "src").mkdir(parents=True)
+    (app / "Cargo.toml").write_text(CARGO.format(name=name))
+    (app / "build.rs").write_bytes((ROOT / "services" / "build.rs").read_bytes())
+    (app / "src" / "main.rs").write_text(MAIN_RS.format(name=name))
+    (app / "manifest.txt").write_text(MANIFEST.format(name=name))
+    # registra no workspace e no initrd
+    for path, pat in [(ROOT / "services" / "Cargo.toml", r'(members = \[[^\]]*)"\]'),
+                      (ROOT / "tools" / "build-image", r'(SERVICES = \[[^\]]*)"\]')]:
+        text = path.read_text()
+        new, count = re.subn(pat, rf'\g<1>", "{name}"]', text, count=1)
+        if count != 1:
+            print(f"erro: não consegui registrar em {path}", file=sys.stderr)
+            return 1
+        path.write_text(new)
+    print(f"services/{name}/ criado e registrado (workspace + initrd).")
+    print(f"compile: (cd services && cargo build --release -p nexo-{name})")
+    print(f"empacote: tools/nexo-pack build --manifest services/{name}/manifest.txt "
+          f"--out {name}.npk services/target/x86_64-unknown-none/release/nexo-{name}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
