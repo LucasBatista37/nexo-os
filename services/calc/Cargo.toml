@@ -1,0 +1,17 @@
+[package]
+name = "nexo-calc"
+description = "Calculadora grafica do Nexo OS: o primeiro aplicativo real da plataforma — janela com botoes nexo-ui acionados pelos eventos pointer do compositor; o resultado vai para o clipboard mediado"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+nexo-sys.workspace = true
+nexo-rt = { workspace = true, features = ["panic-handler"] }
+nexo-proto.workspace = true
+nexo-gfx.workspace = true
+nexo-ui.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

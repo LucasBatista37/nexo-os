@@ -550,7 +550,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] criar configurações;
 - [ ] criar monitor de sistema;
 - [ ] criar visualizador de imagens e documentos básicos;
-- [ ] criar calculadora, calendário e utilitários;
+- [-] criar calculadora, calendário e utilitários — *a **calculadora** existe (`services/calc`): o primeiro aplicativo real da plataforma — janela com visor e botões `nexo-ui` acionados pelos eventos `pointer` do compositor; "1 + 2 =" clicado de verdade e o resultado "3" lido pelo **clipboard mediado** (o clique dá o foco, o foco dá o clipboard) — auto-teste `user_calc` (wm + calc + driver). Lição de ciclo de vida: o canal com o orquestrador é o cordão de vida do app (senão app e compositor esperam um pelo outro no encerramento). Dígitos completos, mais operações, calendário e utilitários pendem*;
 - [ ] portar um motor web existente com sandbox, se recursos permitirem;
 - [ ] criar APIs de compartilhamento entre aplicativos;
 - [ ] publicar release `0.6-sdk`.

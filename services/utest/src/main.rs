@@ -88,6 +88,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         42 => wm_center(),
         43 => shellui_driver(),
         44 => shellcenter_driver(),
+        45 => calc_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -2412,6 +2413,86 @@ fn wm_input() -> ! {
     wm_wait_px(ob, stride, 6, 6, (255, 0, 0), 542);
 
     nexo_sys::log("utest: wm input ok — clique traz a janela sob o ponteiro para a frente");
+    nexo_sys::exit(0)
+}
+
+/// Modo 45: driver da calculadora — o primeiro app real. Handle 0 = sessao nexo.wm (bootstrap),
+/// handle 1 = canal com a calc. Entrega a sessao a calc, clica nos botoes "1 + 2 =" (eventos
+/// pointer nas coordenadas dos botoes) e confere o resultado "3" pelo clipboard mediado.
+fn calc_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 384];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    // janela do driver (fica com o foco inicial), longe da calc
+    let (_w, w_base) = wm_create(s1, 48, 0, 8, 8, 0);
+    wm_fill(w_base, 8, 8, 128, 128, 128);
+    wm_commit(s1, _w);
+
+    // sessao para a calc
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1170));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1171));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1172);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1173),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1174);
+    }
+
+    // entrada sintetica
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1175));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1176));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1177);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1178),
+    }
+
+    // espera a calc criar a janela: da um tempo curto e clica; a FIFO do canal de entrada
+    // garante a ordem entre os cliques, e o "eq" no pipe sincroniza o fim.
+    nexo_sys::sleep_ns(300_000_000);
+    // botoes (janela da calc em (8,8); botao k no centro local (4+k*8, 18)):
+    for k in [0i32, 1, 2, 3] {
+        wm_click(inj, 12 + k * 8, 26);
+        nexo_sys::sleep_ns(30_000_000); // deixa a calc repintar entre cliques
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"eq" => {}
+        _ => nexo_sys::exit(1179),
+    }
+
+    // foco de volta ao driver e le o resultado pelo clipboard mediado
+    wm_click(inj, 52, 4);
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_pointer_event(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1180),
+    }
+    let m = nexo_proto::wm::ClipboardGetRequest {}
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1181));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1182);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1183));
+    let r = nexo_proto::wm::decode_clipboard_get_response(&buf[..n])
+        .unwrap_or_else(|_| nexo_sys::exit(1184));
+    if r.data() != b"3" {
+        nexo_sys::exit(1185);
+    }
+    nexo_sys::log("utest: calc ok — 1 + 2 = 3, clicado por eventos pointer e lido pelo clipboard");
     nexo_sys::exit(0)
 }
 

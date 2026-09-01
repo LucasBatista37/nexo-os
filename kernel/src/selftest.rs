@@ -97,6 +97,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wm_center", test_user_wm_center),
     ("user_shellui", test_user_shellui),
     ("user_shellcenter", test_user_shellcenter),
+    ("user_calc", test_user_calc),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2705,6 +2706,44 @@ fn test_user_shellcenter() -> TestResult {
     let frames = settled_free_frames(frames0, 8);
     check!(dc == 0, "driver saiu com {dc}");
     check!(sc == 0, "shellui saiu com {sc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// O primeiro aplicativo real: a calculadora — botões `nexo-ui` acionados por eventos `pointer`,
+/// resultado lido pelo clipboard mediado (1 + 2 = 3, tudo por cliques).
+fn test_user_calc() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (wa, wb) = ChannelEnd::create_pair();
+    let (pa, pb) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(wa),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let calc = crate::process::spawn_named("calc", 0, alloc::vec![channel_handle(pa)])
+        .map_err(String::from)?;
+    let driver = crate::process::spawn_named(
+        "utest",
+        45,
+        alloc::vec![channel_handle(wb), channel_handle(pb)],
+    )
+    .map_err(String::from)?;
+    let dc = crate::process::wait_and_reap(&driver);
+    let cc = crate::process::wait_and_reap(&calc);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, calc, driver));
+    let frames = settled_free_frames(frames0, 8);
+    check!(dc == 0, "driver saiu com {dc}");
+    check!(cc == 0, "calc saiu com {cc}");
     check!(wc == 0, "wm saiu com {wc}");
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");

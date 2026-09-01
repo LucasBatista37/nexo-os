@@ -17,6 +17,17 @@ name = "nexo-boot-abi"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-calc"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+ "nexo-ui",
+]
+
+[[package]]
 name = "nexo-consoledev"
 version = "0.0.1"
 dependencies = [
