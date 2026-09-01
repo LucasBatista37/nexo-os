@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-31 (commit `cdbc03d`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-31 (commit `b5057b8`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 160 · 🟡 61 · ⬜ 314 · ⛔ 0 → **36% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 

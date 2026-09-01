@@ -396,6 +396,71 @@ fn sys_channel_recv(p: &process::Process, f: &TrapFrame, nonblock: bool) -> (Sta
     )
 }
 
+/// Retira da tabela do processo os handles listados em `hptr[0..nh]` (todos com `TRANSFER`;
+/// repetidos são inválidos) para transferi-los a um filho.
+fn take_spawn_handles(
+    p: &process::Process,
+    hptr: u64,
+    nh: usize,
+) -> Result<Vec<crate::ipc::Handle>, Status> {
+    let raw_handles = copy_from_user(hptr, (nh * 4) as u64)?;
+    let ids: Vec<u32> = raw_handles
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
+        .collect();
+    let mut moved = Vec::with_capacity(ids.len());
+    let mut table = p.handles.lock();
+    for (i, id) in ids.iter().enumerate() {
+        // Handles repetidos na mesma mensagem: o segundo `take` falharia.
+        if ids[..i].contains(id) {
+            return Err(Status::InvalidArgs);
+        }
+        match table.get(*id) {
+            Ok(hh) if hh.rights.contains(RIGHT_TRANSFER) => {}
+            Ok(_) => return Err(Status::Denied),
+            Err(e) => return Err(e),
+        }
+    }
+    for id in &ids {
+        moved.push(table.take(*id)?);
+    }
+    Ok(moved)
+}
+
+/// Cria um processo a partir de um ELF na memória do chamador (aplicativos instalados).
+fn sys_process_spawn_mem(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
+    let (elf_ptr, elf_len, arg, hptr, nh) = (f.rdi, f.rsi, f.rdx, f.r10, f.r8 as usize);
+    if elf_len == 0 || elf_len > SPAWN_MEM_MAX || nh > MSG_HANDLES_MAX {
+        return (Status::TooBig, 0);
+    }
+    let elf = match copy_from_user(elf_ptr, elf_len) {
+        Ok(b) => b,
+        Err(e) => return (e, 0),
+    };
+    let moved = match take_spawn_handles(p, hptr, nh) {
+        Ok(m) => m,
+        Err(e) => return (e, 0),
+    };
+    match process::spawn_bytes(&elf, arg, moved) {
+        Ok(child) => {
+            let h = Handle {
+                object: Object::Process(child),
+                rights: Rights(RIGHTS_PROCESS_DEFAULT),
+            };
+            match p.handles.lock().insert(h) {
+                Ok(i) => (Status::Ok, i as u64),
+                Err(e) => (e, 0),
+            }
+        }
+        Err(e) => {
+            kwarn!("process_spawn_mem pelo pid {}: {e}", p.pid);
+            (Status::InvalidArgs, 0)
+        }
+    }
+}
+
 fn sys_process_spawn(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let (name_ptr, name_len, arg, hptr, nh) = (f.rdi, f.rsi, f.rdx, f.r10, f.r8 as usize);
     if name_len > nexo_initrd::NAME_MAX as u64 || nh > MSG_HANDLES_MAX {
@@ -408,37 +473,10 @@ fn sys_process_spawn(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let Ok(name) = core::str::from_utf8(&name_bytes) else {
         return (Status::InvalidArgs, 0);
     };
-    let raw_handles = match copy_from_user(hptr, (nh * 4) as u64) {
-        Ok(d) => d,
+    let moved = match take_spawn_handles(p, hptr, nh) {
+        Ok(m) => m,
         Err(e) => return (e, 0),
     };
-    let ids: Vec<u32> = raw_handles
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|c| u32::from_le_bytes(*c))
-        .collect();
-    let mut moved = Vec::with_capacity(ids.len());
-    {
-        let mut table = p.handles.lock();
-        for (i, id) in ids.iter().enumerate() {
-            // Handles repetidos na mesma mensagem: o segundo `take` falharia.
-            if ids[..i].contains(id) {
-                return (Status::InvalidArgs, 0);
-            }
-            match table.get(*id) {
-                Ok(hh) if hh.rights.contains(RIGHT_TRANSFER) => {}
-                Ok(_) => return (Status::Denied, 0),
-                Err(e) => return (e, 0),
-            }
-        }
-        for id in &ids {
-            match table.take(*id) {
-                Ok(h) => moved.push(h),
-                Err(e) => return (e, 0),
-            }
-        }
-    }
     match process::spawn_named(name, arg, moved) {
         Ok(child) => {
             let h = Handle {
@@ -771,6 +809,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_MEMORY_UNMAP => sys_memory_unmap(&p, f),
         SYS_FB_INFO => sys_fb_info(f),
         SYS_PROCESS_SPAWN => sys_process_spawn(&p, f),
+        SYS_PROCESS_SPAWN_MEM => sys_process_spawn_mem(&p, f),
         SYS_PCI_ENUM | SYS_PCI_CFG_READ | SYS_PCI_CFG_WRITE | SYS_MMIO_MAP | SYS_DMA_ALLOC
         | SYS_IRQ_ALLOC | SYS_IRQ_WAIT | SYS_DEVICE_OPEN => sys_device(&p, f),
         SYS_PROCESS_WAIT => {

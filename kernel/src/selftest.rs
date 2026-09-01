@@ -99,6 +99,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_shellcenter", test_user_shellcenter),
     ("user_calc", test_user_calc),
     ("user_install", test_user_install),
+    ("user_spawn_mem", test_user_spawn_mem),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2792,6 +2793,50 @@ fn test_user_install() -> TestResult {
     let frames = settled_free_frames(frames0, 4);
     check!(
         frames + 4 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Execução a partir da memória: o kernel entrega o ELF do `echo` num `MemoryObject`; o cliente
+/// o spawna com `process_spawn_mem`, conversa com o filho e o encerra limpo — o elo
+/// "instalar → executar" da plataforma de aplicativos.
+fn test_user_spawn_mem() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, MemoryObject, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let elf = crate::initrd::find("echo").ok_or("echo ausente do initrd")?;
+    // copia o ELF para um MemoryObject (o transporte de bytes grandes para o usuário)
+    let pages = (elf.len() as u64).div_ceil(nexo_mm::PAGE_SIZE);
+    let mut frames = Vec::new();
+    for i in 0..pages as usize {
+        let fr = phys::allocate_zeroed_frame().ok_or("sem quadros para o ELF")?;
+        let src = &elf[i * 4096..elf.len().min((i + 1) * 4096)];
+        let dst = virt::phys_to_virt(fr).as_mut_ptr::<u8>();
+        // SAFETY: quadro recém-alocado, exclusivo, mapeado no physmap.
+        unsafe { core::ptr::copy_nonoverlapping(src.as_ptr(), dst, src.len()) };
+        frames.push(fr);
+    }
+    let mem = Handle {
+        object: Object::Memory(Arc::new(MemoryObject {
+            frames,
+            len: pages * nexo_mm::PAGE_SIZE,
+        })),
+        rights: Rights(nexo_syscall_abi::RIGHTS_MEMORY_DEFAULT),
+    };
+    let (a, b) = ChannelEnd::create_pair();
+    let arg = 47u64 | ((elf.len() as u64) << 8);
+    let client = crate::process::spawn_named("utest", arg, alloc::vec![channel_handle(b), mem])
+        .map_err(String::from)?;
+    let _keep = a; // a ponta do kernel só mantém o canal vivo durante o teste
+    let cc = crate::process::wait_and_reap(&client);
+    drop((client, _keep));
+    let frames = settled_free_frames(frames0, 8);
+    check!(cc == 0, "cliente saiu com {cc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
     );
     Ok(())

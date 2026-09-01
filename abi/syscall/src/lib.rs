@@ -91,8 +91,16 @@ pub const SYS_MEMORY_UNMAP: u64 = 30;
 /// pela concessão do dispositivo de vídeo ([`SYS_MMIO_MAP`], o framebuffer é um BAR). `NotSupported`
 /// se não há framebuffer.
 pub const SYS_FB_INFO: u64 = 31;
+/// Cria um processo a partir de um **ELF em memória do chamador** (`a1` = ponteiro, `a2` = tamanho
+/// ≤ [`SPAWN_MEM_MAX`]; `a3` = argumento; `R10`/`R8` = handles transferidos como em
+/// [`SYS_PROCESS_SPAWN`]). É como aplicativos **instalados** (fora do initrd) são executados: o
+/// lançador lê o ELF da instalação e o entrega aqui. Mesmo isolamento de qualquer processo (W^X,
+/// espaço próprio, só os handles transferidos). `RDX` = handle do processo.
+pub const SYS_PROCESS_SPAWN_MEM: u64 = 32;
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 31;
+pub const SYS_MAX: u64 = 32;
+/// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
+pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
 pub const MEMORY_MAX_PAGES: u64 = 256;
 /// Tipo de objeto: memória compartilhável.
@@ -375,6 +383,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_MEMORY_MAP => "memory_map",
         SYS_MEMORY_UNMAP => "memory_unmap",
         SYS_FB_INFO => "fb_info",
+        SYS_PROCESS_SPAWN_MEM => "process_spawn_mem",
         _ => "?",
     }
 }

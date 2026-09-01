@@ -224,6 +224,17 @@ pub fn spawn_named(
     spawn_elf_with_handles(static_name, elf, arg, handles)
 }
 
+/// Cria um processo a partir de um ELF **em memória** (aplicativos instalados, fora do initrd).
+/// A carga é síncrona (os segmentos são copiados para o espaço novo durante a chamada), então o
+/// chamador pode descartar os bytes ao voltar. Mesmas validações do initrd (faixa, W^X).
+pub fn spawn_bytes(
+    elf: &[u8],
+    arg: u64,
+    handles: Vec<crate::ipc::Handle>,
+) -> Result<Arc<Process>, &'static str> {
+    spawn_elf_with_handles("app", elf, arg, handles)
+}
+
 struct UserStart {
     entry: u64,
     user_sp: u64,

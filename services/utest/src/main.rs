@@ -90,6 +90,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         44 => shellcenter_driver(),
         45 => calc_driver(),
         46 => install_client(),
+        47 => spawn_mem_client(param as usize),
         _ => nexo_sys::exit(203),
     }
 }
@@ -661,6 +662,53 @@ impl FsClient {
     }
 }
 
+/// Modo 47: executa um programa a partir da MEMORIA (process_spawn_mem) — o elo "instalar ->
+/// executar". Handle 0 = canal com o kernel; handle 1 = MemoryObject com o ELF do `echo`
+/// (`param` = tamanho real). Mapeia, spawna com um canal de controle, conversa com o filho
+/// (pedido/eco) e o encerra limpo fechando o controle.
+fn spawn_mem_client(elf_len: usize) -> ! {
+    let mem: nexo_sys::Handle = 1;
+    let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| nexo_sys::exit(1230));
+    // SAFETY: base .. base+elf_len esta dentro do MemoryObject mapeado (USER|RW).
+    let elf = unsafe { core::slice::from_raw_parts(base as *const u8, elf_len) };
+
+    // canal de controle do echo (protocolo do svcmgr: "serve" + canal do cliente)
+    let (ctl, ctl_child) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1231));
+    let child =
+        nexo_sys::process_spawn_mem(elf, 3, &[ctl_child]).unwrap_or_else(|_| nexo_sys::exit(1232));
+
+    let (cli, cli_child) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1233));
+    if nexo_sys::channel_send(ctl, b"serve", &[cli_child]) != Status::Ok {
+        nexo_sys::exit(1234);
+    }
+    if nexo_sys::channel_send(cli, b"ola do spawn_mem", &[]) != Status::Ok {
+        nexo_sys::exit(1235);
+    }
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let n = match nexo_sys::channel_recv(cli, &mut buf, &mut hs) {
+        Ok((n, _)) => n,
+        _ => nexo_sys::exit(1236),
+    };
+    if &buf[..n] != b"echo: ola do spawn_mem" {
+        nexo_sys::exit(1237);
+    }
+    // fecha o controle: o echo sai limpo com 0
+    if nexo_sys::handle_close(ctl) != Status::Ok {
+        nexo_sys::exit(1238);
+    }
+    let code = nexo_sys::process_wait(child).unwrap_or_else(|_| nexo_sys::exit(1239));
+    if code != 0 {
+        nexo_sys::exit(1240);
+    }
+    // ELF invalido e recusado sem derrubar nada
+    if nexo_sys::process_spawn_mem(b"lixo-que-nao-e-elf", 0, &[]).is_ok() {
+        nexo_sys::exit(1241);
+    }
+    nexo_sys::log("utest: spawn_mem ok — ELF da memoria executou, ecoou e saiu limpo");
+    nexo_sys::exit(0)
+}
+
 /// Adaptador do instalador transacional sobre o protocolo `nexo.fs` (via [`FsClient`]).
 struct InstFs<'a> {
     c: &'a mut FsClient,
@@ -782,13 +830,15 @@ fn install_client() -> ! {
     let mut fs = InstFs { c: &mut c };
     let mut pkg = [0u8; 512];
 
+    // O disco de dados PERSISTE entre boots: as versões são relativas à corrente.
+    let v0 = nexo_inst::current_version(&mut fs, "inst-demo").unwrap_or(0);
     let n = build_pkg(b"0.1", b"PAYLOAD-V1", &mut pkg);
     let v = nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1200));
-    if v != 1 || nexo_inst::current_version(&mut fs, "inst-demo") != Some(1) {
+    if v != v0 + 1 || nexo_inst::current_version(&mut fs, "inst-demo") != Some(v0 + 1) {
         nexo_sys::exit(1201);
     }
     let mut pb = [0u8; nexo_inst::MAX_PATH];
-    let path = nexo_inst::versioned_path("inst-demo", 1, "app.elf", &mut pb)
+    let path = nexo_inst::versioned_path("inst-demo", v0 + 1, "app.elf", &mut pb)
         .unwrap_or_else(|_| nexo_sys::exit(1202));
     let mut back = [0u8; 64];
     let bn = nexo_inst::AppFs::read_file(&mut fs, path, &mut back)
@@ -797,14 +847,14 @@ fn install_client() -> ! {
         nexo_sys::exit(1204);
     }
 
-    // atualizacao para a v2: o ponteiro vira, a v1 continua intacta
+    // atualizacao: o ponteiro vira, a versao anterior continua intacta
     let n = build_pkg(b"0.2", b"PAYLOAD-V2!", &mut pkg);
     let v = nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1205));
-    if v != 2 || nexo_inst::current_version(&mut fs, "inst-demo") != Some(2) {
+    if v != v0 + 2 || nexo_inst::current_version(&mut fs, "inst-demo") != Some(v0 + 2) {
         nexo_sys::exit(1206);
     }
     let mut pb = [0u8; nexo_inst::MAX_PATH];
-    let path = nexo_inst::versioned_path("inst-demo", 2, "app.elf", &mut pb)
+    let path = nexo_inst::versioned_path("inst-demo", v0 + 2, "app.elf", &mut pb)
         .unwrap_or_else(|_| nexo_sys::exit(1207));
     let bn = nexo_inst::AppFs::read_file(&mut fs, path, &mut back)
         .unwrap_or_else(|_| nexo_sys::exit(1208));
@@ -812,7 +862,7 @@ fn install_client() -> ! {
         nexo_sys::exit(1209);
     }
     let mut pb = [0u8; nexo_inst::MAX_PATH];
-    let path = nexo_inst::versioned_path("inst-demo", 1, "app.elf", &mut pb)
+    let path = nexo_inst::versioned_path("inst-demo", v0 + 1, "app.elf", &mut pb)
         .unwrap_or_else(|_| nexo_sys::exit(1210));
     let bn = nexo_inst::AppFs::read_file(&mut fs, path, &mut back)
         .unwrap_or_else(|_| nexo_sys::exit(1211));
@@ -825,7 +875,7 @@ fn install_client() -> ! {
     if nexo_inst::install(&mut fs, &pkg[..n]).is_ok() {
         nexo_sys::exit(1213);
     }
-    if nexo_inst::current_version(&mut fs, "inst-demo") != Some(2) {
+    if nexo_inst::current_version(&mut fs, "inst-demo") != Some(v0 + 2) {
         nexo_sys::exit(1214);
     }
     nexo_sys::log("utest: install ok — v1 -> v2 transacional no NexoFS; corrompido nao instala");

@@ -229,6 +229,23 @@ pub fn process_spawn(name: &str, arg: u64, handles: &[Handle]) -> Result<Handle,
     if st.is_ok() { Ok(v as Handle) } else { Err(st) }
 }
 
+/// Cria um processo a partir de um ELF na memória deste processo (aplicativos instalados);
+/// `handles` são transferidos ao filho como em [`process_spawn`].
+pub fn process_spawn_mem(elf: &[u8], arg: u64, handles: &[Handle]) -> Result<Handle, Status> {
+    // SAFETY: ponteiros e tamanhos vêm de slices válidas.
+    let (st, v) = unsafe {
+        raw5(
+            abi::SYS_PROCESS_SPAWN_MEM,
+            elf.as_ptr() as u64,
+            elf.len() as u64,
+            arg,
+            handles.as_ptr() as u64,
+            handles.len() as u64,
+        )
+    };
+    if st.is_ok() { Ok(v as Handle) } else { Err(st) }
+}
+
 /// Aguarda o processo terminar; devolve o código de saída.
 pub fn process_wait(h: Handle) -> Result<i64, Status> {
     // SAFETY: sem ponteiros.
