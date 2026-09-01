@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 21 — gerenciador de arquivos)
+- `services/arquivos`: **gerenciador de arquivos** (MVP de navegação) — lista um diretório do `nexo.fs` (entrada por linha, pastas em acento, arquivos em branco); clique numa pasta **entra nela** (re-lista e repinta, emite `"pasta <dir>"`); clique num arquivo emite `"abrir <caminho>"` ao orquestrador — **o gerenciador aponta; quem abre é quem tem as capacidades**.
+- Auto-teste `user_arquivos` (80º) + modo 59 do `utest`: prepara `/docs` (arquivo + subpasta), lista por conta própria para conhecer a ordem, e navega clicando: entra em `sub` (mensagem + listagem nova conferida por glifos) e "abre" `c.txt` (mensagem exata). Idempotente entre boots.
+
 ### Adicionado (Fase 6, bloco 20 — editor de texto + nexo-textgrid)
 - `nexo-textgrid`: a grade de texto do terminal virou biblioteca compartilhada (quebra, rolagem, backspace, mapa evdev→ASCII) com testes de host; **`\n` agora inclui o retorno de carro** (modo *newline* — idempotente para o `\r\n` que o shell emite, e o que um editor espera de Enter). `services/term` refatorado para usá-la (o `user_term` prova a equivalência).
 - `services/editor`: **editor de texto** (MVP de notas) — abre um arquivo do `nexo.fs`, mostra o texto na grade com cursor de acento, edita no fim do texto e **F2 salva** (truncate + write reais). Em "fecha", **devolve o canal do fs** ao orquestrador antes de sair: capacidades emprestadas voltam.

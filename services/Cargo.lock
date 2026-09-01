@@ -14,6 +14,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-arquivos"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-blockdev"
 version = "0.0.1"
 dependencies = [

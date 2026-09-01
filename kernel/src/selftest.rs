@@ -109,6 +109,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_term", test_user_term),
     ("user_visor", test_user_visor),
     ("user_editor", test_user_editor),
+    ("user_arquivos", test_user_arquivos),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -3309,6 +3310,63 @@ fn test_user_visor() -> TestResult {
     let frames = settled_free_frames(frames0, 8);
     check!(dc == 0, "driver saiu com {dc}");
     check!(vc == 0, "visor saiu com {vc}");
+    check!(fc == 0, "servidor fs saiu com {fc}");
+    check!(bc == 0, "blockdev saiu com {bc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+fn test_user_arquivos() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (wa, wb) = ChannelEnd::create_pair();
+    let (pa, pb) = ChannelEnd::create_pair();
+    let (a, b) = ChannelEnd::create_pair();
+    let (c, d) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(wa),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let blk = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a)],
+    )
+    .map_err(String::from)?;
+    let fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
+            .map_err(String::from)?;
+    let arq = crate::process::spawn_named("arquivos", 0, alloc::vec![channel_handle(pa)])
+        .map_err(String::from)?;
+    let driver = crate::process::spawn_named(
+        "utest",
+        59,
+        alloc::vec![channel_handle(wb), channel_handle(pb), channel_handle(d)],
+    )
+    .map_err(String::from)?;
+    let dc = crate::process::wait_and_reap(&driver);
+    let vc = crate::process::wait_and_reap(&arq);
+    let fc = crate::process::wait_and_reap(&fs);
+    let bc = crate::process::wait_and_reap(&blk);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, blk, fs, arq, driver));
+    sched::reap();
+    let frames = settled_free_frames(frames0, 8);
+    check!(dc == 0, "driver saiu com {dc}");
+    check!(vc == 0, "arquivos saiu com {vc}");
     check!(fc == 0, "servidor fs saiu com {fc}");
     check!(bc == 0, "blockdev saiu com {bc}");
     check!(wc == 0, "wm saiu com {wc}");

@@ -102,6 +102,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         56 => agenda_driver(),
         57 => consent_driver(param as usize),
         58 => editor_driver(),
+        59 => arquivos_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1206,6 +1207,147 @@ fn editor_driver() -> ! {
     }
 
     nexo_sys::log("utest: editor ok — digitado, salvo e conferido no NexoFS real");
+    nexo_sys::exit(0)
+}
+
+/// Modo 59: gerenciador de arquivos. Prepara /docs (a.txt + sub/c.txt), lista o diretorio por
+/// conta propria para saber a ordem, entrega o fs ao app e navega CLICANDO: entrar em "sub"
+/// emite "pasta /docs/sub" e a listagem muda; clicar em "c.txt" emite "abrir /docs/sub/c.txt"
+/// — o gerenciador aponta, quem abre e o orquestrador. Handles: 0 wm, 1 pipe, 2 fs.
+fn arquivos_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    // prepara o diretorio e memoriza a ordem das entradas de /docs
+    let mut names = [[0u8; 24]; 6];
+    let mut lens = [0usize; 6];
+    let mut kinds = [0u8; 6];
+    let mut count = 0usize;
+    {
+        let mut c = FsClient {
+            ch: 2,
+            req: [0; 4096],
+            reply: [0; 4096],
+        };
+        {
+            let mut fs = InstFs { c: &mut c };
+            use nexo_inst::AppFs;
+            fs.mkdir("/docs").unwrap_or_else(|_| nexo_sys::exit(1510));
+            fs.write_file("/docs/a.txt", b"A")
+                .unwrap_or_else(|_| nexo_sys::exit(1511));
+            fs.mkdir("/docs/sub")
+                .unwrap_or_else(|_| nexo_sys::exit(1512));
+            fs.write_file("/docs/sub/c.txt", b"C")
+                .unwrap_or_else(|_| nexo_sys::exit(1513));
+        }
+        let (st, _, dl) = c.call(6, 0, 0, 0, b"/docs");
+        if st != 0 {
+            nexo_sys::exit(1514);
+        }
+        let entries: [u8; 4096] = c.reply;
+        let mut pos = 12usize;
+        let end = 12 + dl;
+        while pos + 6 <= end && count < 6 {
+            let kind = entries[pos + 4];
+            let nl = entries[pos + 5] as usize;
+            if pos + 6 + nl > end {
+                break;
+            }
+            lens[count] = nl.min(24);
+            names[count][..lens[count]].copy_from_slice(&entries[pos + 6..pos + 6 + lens[count]]);
+            kinds[count] = kind;
+            count += 1;
+            pos += 6 + nl;
+        }
+        if count < 2 {
+            nexo_sys::exit(1515);
+        }
+    }
+    let row_of = |want: &[u8]| -> usize {
+        for r in 0..count {
+            if &names[r][..lens[r]] == want {
+                return r;
+            }
+        }
+        nexo_sys::exit(1516)
+    };
+
+    // sessao para o app + entrada sintetica
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1517));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1518));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1519);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1520),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1521);
+    }
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1522));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1523));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1524);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1525),
+    }
+    if nexo_sys::channel_send(pipe, b"abre /docs", &[2]) != Status::Ok {
+        nexo_sys::exit(1526);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pronto" => {}
+        _ => nexo_sys::exit(1527),
+    }
+
+    // saida composta: a primeira entrada esta na linha 0, na cor do seu tipo
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1528));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1529);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1530));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1531));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1532));
+    let stride = outp.w;
+    let first_color = if kinds[0] == 2 {
+        (0x6f, 0x9f, 0xff)
+    } else {
+        (255, 255, 255)
+    };
+    let (gx, gy) = glyph_diff_pixel(names[0][0], b' ').unwrap_or_else(|| nexo_sys::exit(1533));
+    wm_wait_px(ob, stride, gx, gy, first_color, 1534);
+
+    // clica em "sub": navegacao emite "pasta /docs/sub" e a listagem passa a mostrar c.txt
+    let r_sub = row_of(b"sub");
+    wm_click(inj, 4, (r_sub as i32) * 8 + 4);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pasta /docs/sub" => {}
+        _ => nexo_sys::exit(1535),
+    }
+    let (cx, cy) = glyph_diff_pixel(b'c', b' ').unwrap_or_else(|| nexo_sys::exit(1536));
+    wm_wait_px(ob, stride, cx, cy, (255, 255, 255), 1537);
+
+    // clica em "c.txt": o app pede ao orquestrador que abra
+    wm_click(inj, 4, 4);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"abrir /docs/sub/c.txt" => {}
+        _ => nexo_sys::exit(1538),
+    }
+
+    nexo_sys::log("utest: arquivos ok — navegou por clique e delegou a abertura");
     nexo_sys::exit(0)
 }
 

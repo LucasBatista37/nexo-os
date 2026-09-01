@@ -1,0 +1,4 @@
+name=arquivos
+version=0.1.0
+entry=nexo-arquivos
+perms=janelas
