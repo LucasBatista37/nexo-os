@@ -748,6 +748,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             4 => (Status::Ok, process::count() as u64),
             5 => (Status::Ok, crate::mm::phys::stats().free),
             6 => (Status::Ok, crate::mm::phys::stats().total_usable),
+            7 => (Status::Ok, crate::time::wall_epoch()),
             _ => (Status::InvalidArgs, 0),
         },
         SYS_HANDLE_CLOSE => match p.handles.lock().take(f.rdi as u32) {

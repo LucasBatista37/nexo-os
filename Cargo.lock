@@ -18,6 +18,10 @@ name = "nexo-boot-abi"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-cal"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-elf"
 version = "0.0.1"
 

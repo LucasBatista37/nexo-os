@@ -1,6 +1,6 @@
 [package]
-name = "nexo-utest"
-description = "Programa de auto-teste de usuario (ABI, isolamento, IPC)"
+name = "nexo-agenda"
+description = "Aplicativo agenda do Nexo OS (gerado por tools/nexo-new)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,14 +10,8 @@ build = "build.rs"
 nexo-sys.workspace = true
 nexo-rt = { workspace = true, features = ["panic-handler"] }
 nexo-proto.workspace = true
-nexo-netstack.workspace = true
-nexo-net.workspace = true
 nexo-gfx.workspace = true
-nexo-font.workspace = true
 nexo-cal.workspace = true
-nexo-ui.workspace = true
-nexo-pkg.workspace = true
-nexo-inst.workspace = true
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

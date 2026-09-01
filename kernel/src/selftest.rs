@@ -104,6 +104,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_launch_gui", test_user_launch_gui),
     ("user_config", test_user_config),
     ("user_monitor", test_user_monitor),
+    ("user_agenda", test_user_agenda),
     ("user_term", test_user_term),
     ("user_visor", test_user_visor),
     ("gfx", test_gfx),
@@ -3087,6 +3088,42 @@ fn test_user_monitor() -> TestResult {
     let frames = settled_free_frames(frames0, 8);
     check!(dc == 0, "driver saiu com {dc}");
     check!(cc == 0, "monitor saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+fn test_user_agenda() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (wa, wb) = ChannelEnd::create_pair();
+    let (pa, pb) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(wa),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let mon = crate::process::spawn_named("agenda", 0, alloc::vec![channel_handle(pa)])
+        .map_err(String::from)?;
+    let driver = crate::process::spawn_named(
+        "utest",
+        56,
+        alloc::vec![channel_handle(wb), channel_handle(pb)],
+    )
+    .map_err(String::from)?;
+    let dc = crate::process::wait_and_reap(&driver);
+    let cc = crate::process::wait_and_reap(&mon);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, mon, driver));
+    let frames = settled_free_frames(frames0, 8);
+    check!(dc == 0, "driver saiu com {dc}");
+    check!(cc == 0, "agenda saiu com {cc}");
     check!(wc == 0, "wm saiu com {wc}");
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");

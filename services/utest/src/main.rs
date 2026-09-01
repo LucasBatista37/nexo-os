@@ -99,6 +99,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         53 => visor_driver(),
         54 => wm_real_pointer(),
         55 => wm_merged_input(),
+        56 => agenda_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1013,6 +1014,81 @@ fn visor_driver() -> ! {
     wm_wait_px(ob, stride, 8 + 12, 8 + 9, (255, 255, 255), 1426);
 
     nexo_sys::log("utest: visor ok — PPM do NexoFS decodificado e apresentado");
+    nexo_sys::exit(0)
+}
+
+/// Modo 56: calendario. Le o relogio de parede do kernel (debug_info 7), computa com a
+/// nexo-cal a mesma grade que a agenda deve pintar e confere na saida composta: hoje em acento,
+/// o dia 1 em cinza e o slot alem do ultimo dia vazio (fundo).
+fn agenda_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    let epoch = nexo_sys::debug_info(7);
+    if epoch == 0 {
+        nexo_sys::exit(1430); // ambiente de teste tem RTC
+    }
+    let today = nexo_cal::civil_from_epoch(epoch);
+    let first_slot =
+        nexo_cal::weekday_from_days(nexo_cal::days_from_civil(today.year, today.month, 1));
+    let ndays = nexo_cal::days_in_month(today.year, today.month);
+
+    // sessao para a agenda
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1431));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1432));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1433);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1434),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1435);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pronto" => {}
+        _ => nexo_sys::exit(1436),
+    }
+
+    // saida composta
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1437));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1438);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1439));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1440));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1441));
+    let stride = outp.w;
+
+    // centro da celula do slot k: (1 + col*9 + 4, 1 + row*7 + 3), janela da agenda em (0,0)
+    let center = |slot: u8| -> (i32, i32) {
+        let (col, row) = (slot as i32 % 7, slot as i32 / 7);
+        (1 + col * 9 + 4, 1 + row * 7 + 3)
+    };
+    let today_slot = first_slot + today.day - 1;
+    let (tx, ty) = center(today_slot);
+    wm_wait_px(ob, stride, tx, ty, (0x6f, 0x9f, 0xff), 1442); // hoje: acento
+    if today.day != 1 {
+        let (fx, fy) = center(first_slot);
+        wm_wait_px(ob, stride, fx, fy, (0x50, 0x55, 0x60), 1443); // dia 1: cinza
+    }
+    let after = first_slot + ndays;
+    if after < 42 {
+        let (ax, ay) = center(after);
+        wm_wait_px(ob, stride, ax, ay, (0x14, 0x15, 0x18), 1444); // depois do fim: fundo
+    }
+
+    nexo_sys::log("utest: agenda ok — mes real do RTC, hoje em acento na grade");
     nexo_sys::exit(0)
 }
 

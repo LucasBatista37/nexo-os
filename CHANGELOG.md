@@ -324,6 +324,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 17 — relógio de parede e calendário)
+- Kernel: **RTC CMOS** lido uma vez no boot (`arch/x86_64/src/rtc.rs`: guarda de atualização-em-andamento, leitura dupla até estabilizar, BCD/12h conforme o registrador B; século fixo 20xx) ancora o relógio de parede: `debug_info` seletor 7 = **segundos Unix (UTC)** agora (0 = RTC ilegível). No QEMU o RTC é UTC por padrão; conferido contra o relógio do host (Δ = tempo de boot).
+- `nexo-cal`: datas civis `no_std`/sem alocação (algoritmos de Hinnant): epoch ↔ (ano, mês, dia), dia da semana, bissextos, dias no mês — testes de host com datas conhecidas (inclusive além de 2038) e **round-trip dia a dia por 400 anos**.
+- `services/agenda`: **calendário** — o mês corrente numa grade 7×6 (segunda primeiro), hoje em acento, data do relógio de parede real. Auto-teste `user_agenda` (77º) + modo 56 do `utest`: o driver computa a mesma grade com a `nexo-cal` e confere na saída composta hoje (acento), o dia 1 (cinza) e o vazio depois do fim do mês.
+
 ### Adicionado (Fase 6, bloco 16 — entrada mesclada: teclado + tablet num canal)
 - Fase 4 do cenário `input`: dois `virtio-input` reais no mesmo boot (teclado e tablet), um `inputdev` para cada, ambos empurrando no **mesmo canal** de entrada do compositor — o assinante duplica a ponta de escrita (`RIGHT_DUPLICATE`) e entrega uma cópia a cada driver no `subscribe`; lotes evdev são atômicos por `send`, então a mescla é limpa e sem cabeçalhos extras. A tecla e o clique QMP chegam mesclados à mesma janela (modo 55 do `utest`, `input-test=4`). Fecha por inteiro "integrar mouse e teclado pelo serviço de entrada".
 

@@ -26,6 +26,7 @@ members = [
     "libraries/pkg",
     "libraries/inst",
     "libraries/img",
+    "libraries/cal",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
     "sdk/nexo-net",

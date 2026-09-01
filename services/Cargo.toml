@@ -1,7 +1,7 @@
 # Workspace dos programas de usuario (alvo x86_64-unknown-none em ring 3, ver .cargo/config.toml).
 [workspace]
 resolver = "2"
-members = ["init", "svcmgr", "echo", "echo-client", "utest", "blockdev", "fs", "rngdev", "devmgr", "espfs", "vfs", "consoledev", "shell", "inputdev", "netdev", "netd", "wm", "greeter", "shellui", "calc", "config", "monitor", "term", "visor"]
+members = ["init", "svcmgr", "echo", "echo-client", "utest", "blockdev", "fs", "rngdev", "devmgr", "espfs", "vfs", "consoledev", "shell", "inputdev", "netdev", "netd", "wm", "greeter", "shellui", "calc", "config", "monitor", "term", "visor", "agenda"]
 
 [workspace.package]
 version = "0.0.1"
@@ -25,6 +25,7 @@ nexo-ui = { path = "../libraries/ui" }
 nexo-pkg = { path = "../libraries/pkg" }
 nexo-inst = { path = "../libraries/inst" }
 nexo-img = { path = "../libraries/img" }
+nexo-cal = { path = "../libraries/cal" }
 
 [profile.dev]
 panic = "abort"

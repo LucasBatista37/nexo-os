@@ -66,6 +66,13 @@ pub fn init() {
     let c = calibrate();
     TSC_HZ.store(c.tsc_hz, Ordering::Relaxed);
     TSC_BASE.store(cpu::rdtsc(), Ordering::Relaxed);
+    match nexo_arch_x86_64::rtc::read_epoch() {
+        Some(e) => {
+            BOOT_EPOCH.store(e, Ordering::Relaxed);
+            kinfo!("time: RTC (UTC): epoch {e} no boot");
+        }
+        None => kinfo!("time: RTC ilegivel — relogio de parede indisponivel"),
+    }
     APIC_TIMER_HZ.store(c.apic_hz, Ordering::Relaxed);
     let initial = (c.apic_hz / APIC_DIVIDE.factor() as u64 / HZ).max(1);
     APIC_INITIAL.store(initial, Ordering::Relaxed);
@@ -132,6 +139,19 @@ pub fn monotonic_ns() -> u64 {
 /// Em emulação (TCG) as interrupções periódicas do timer coalescem enquanto
 /// a CPU está em `hlt`, logo `ticks()` pode ficar atrás do tempo real; o TSC
 /// é a referência de tempo, e os ticks servem ao escalonador.
+/// Segundos Unix (UTC) no boot, lidos do RTC (0 = RTC indisponível).
+static BOOT_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+/// Relógio de parede: segundos Unix (UTC) agora; 0 se o RTC não pôde ser lido no boot.
+pub fn wall_epoch() -> u64 {
+    let base = BOOT_EPOCH.load(Ordering::Relaxed);
+    if base == 0 {
+        0
+    } else {
+        base + uptime_ms() / 1000
+    }
+}
+
 pub fn uptime_ms() -> u64 {
     if tsc_hz() == 0 {
         ticks() * 1000 / HZ

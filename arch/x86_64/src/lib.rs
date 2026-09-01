@@ -28,6 +28,8 @@ pub mod pic;
 #[cfg(target_arch = "x86_64")]
 pub mod qemu;
 #[cfg(target_arch = "x86_64")]
+pub mod rtc;
+#[cfg(target_arch = "x86_64")]
 pub mod serial;
 
 #[cfg(all(target_arch = "x86_64", target_os = "none"))]

@@ -129,7 +129,8 @@ pub fn abi_version() -> u64 {
 }
 
 /// Informação de depuração (`sel`: 0 CPUs, 1 uptime ms, 2 syscalls do processo, 3 handles do
-/// processo, 4 processos vivos, 5 quadros físicos livres, 6 quadros físicos utilizáveis).
+/// processo, 4 processos vivos, 5 quadros físicos livres, 6 quadros físicos utilizáveis,
+/// 7 relógio de parede em segundos Unix UTC — 0 se o RTC não pôde ser lido no boot).
 pub fn debug_info(sel: u64) -> u64 {
     // SAFETY: sem ponteiros.
     unsafe { raw(abi::SYS_DEBUG_INFO, sel, 0, 0).1 }

@@ -3,6 +3,17 @@
 version = 4
 
 [[package]]
+name = "nexo-agenda"
+version = "0.0.1"
+dependencies = [
+ "nexo-cal",
+ "nexo-gfx",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-blockdev"
 version = "0.0.1"
 dependencies = [
@@ -14,6 +25,10 @@ dependencies = [
 
 [[package]]
 name = "nexo-boot-abi"
+version = "0.0.1"
+
+[[package]]
+name = "nexo-cal"
 version = "0.0.1"
 
 [[package]]
@@ -277,6 +292,7 @@ dependencies = [
 name = "nexo-utest"
 version = "0.0.1"
 dependencies = [
+ "nexo-cal",
  "nexo-font",
  "nexo-gfx",
  "nexo-inst",
