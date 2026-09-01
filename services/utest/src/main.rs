@@ -91,6 +91,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         45 => calc_driver(),
         46 => install_client(),
         47 => spawn_mem_client(param as usize),
+        48 => launcher_client(param as usize),
         _ => nexo_sys::exit(203),
     }
 }
@@ -662,7 +663,144 @@ impl FsClient {
     }
 }
 
-/// Modo 47: executa um programa a partir da MEMORIA (process_spawn_mem) — o elo "instalar ->
+/// Empacota `elf` num NEXOPKG1 com o manifesto dado; devolve o tamanho em `out`.
+fn build_app_pkg(manifest: &[u8], elf: &[u8], out: &mut [u8]) -> usize {
+    let name = b"app.elf";
+    let mut o = 0;
+    out[o..o + 8].copy_from_slice(nexo_pkg::MAGIC);
+    o += 8;
+    out[o..o + 4].copy_from_slice(&nexo_pkg::VERSION.to_le_bytes());
+    o += 4;
+    out[o..o + 4].copy_from_slice(&(manifest.len() as u32).to_le_bytes());
+    o += 4;
+    out[o..o + 4].copy_from_slice(&1u32.to_le_bytes());
+    o += 4;
+    let crc_at = o;
+    o += 4;
+    let body_at = o;
+    out[o..o + manifest.len()].copy_from_slice(manifest);
+    o += manifest.len();
+    out[o..o + 2].copy_from_slice(&(name.len() as u16).to_le_bytes());
+    o += 2;
+    out[o..o + name.len()].copy_from_slice(name);
+    o += name.len();
+    out[o..o + 4].copy_from_slice(&(elf.len() as u32).to_le_bytes());
+    o += 4;
+    out[o..o + elf.len()].copy_from_slice(elf);
+    o += elf.len();
+    let crc = nexo_pkg::crc32(&out[body_at..o]);
+    out[crc_at..crc_at + 4].copy_from_slice(&crc.to_le_bytes());
+    o
+}
+
+/// Lanca a versao corrente instalada de `app`: le o manifesto, concede o canal de controle SO se
+/// a permissao "ipc" foi declarada, le o ELF da instalacao e executa da memoria. Devolve
+/// (handle do filho, Some(canal de controle) se concedido).
+fn launch_installed(
+    fs: &mut InstFs,
+    app: &str,
+    elf_buf: &mut [u8],
+) -> (nexo_sys::Handle, Option<nexo_sys::Handle>) {
+    let v = nexo_inst::current_version(fs, app).unwrap_or_else(|| nexo_sys::exit(1250));
+    let mut pb = [0u8; nexo_inst::MAX_PATH];
+    let mpath = nexo_inst::versioned_path(app, v, "manifest.txt", &mut pb)
+        .unwrap_or_else(|_| nexo_sys::exit(1251));
+    let mut mbuf = [0u8; 256];
+    let mn =
+        nexo_inst::AppFs::read_file(fs, mpath, &mut mbuf).unwrap_or_else(|_| nexo_sys::exit(1252));
+    let manifest = nexo_pkg::Manifest::parse(&mbuf[..mn]).unwrap_or_else(|_| nexo_sys::exit(1253));
+    // portal de capacidades: so o que o manifesto DECLARA e concedido
+    let grant_ipc = manifest.declares("ipc");
+    let mut pb = [0u8; nexo_inst::MAX_PATH];
+    let epath = nexo_inst::versioned_path(app, v, manifest.entry, &mut pb)
+        .unwrap_or_else(|_| nexo_sys::exit(1254));
+    let en =
+        nexo_inst::AppFs::read_file(fs, epath, elf_buf).unwrap_or_else(|_| nexo_sys::exit(1255));
+    if grant_ipc {
+        let (ctl, ctl_child) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1256));
+        let child = nexo_sys::process_spawn_mem(&elf_buf[..en], 3, &[ctl_child])
+            .unwrap_or_else(|_| nexo_sys::exit(1257));
+        (child, Some(ctl))
+    } else {
+        let child = nexo_sys::process_spawn_mem(&elf_buf[..en], 3, &[])
+            .unwrap_or_else(|_| nexo_sys::exit(1258));
+        (child, None)
+    }
+}
+
+/// Modo 48: o laco COMPLETO da plataforma — empacota um app real (o `echo`, entregue pelo kernel
+/// num MemoryObject), instala transacionalmente no NexoFS, e um LANCADOR le o manifesto instalado
+/// e concede capacidades so pelas permissoes declaradas: com "ipc" o app recebe o canal e ecoa;
+/// sem, nasce sem canal (a capacidade nao e concedida) e sai com o erro proprio.
+fn launcher_client(elf_len: usize) -> ! {
+    let mem: nexo_sys::Handle = 1;
+    let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| nexo_sys::exit(1260));
+    // SAFETY: base .. base+elf_len esta dentro do MemoryObject mapeado.
+    let elf = unsafe { core::slice::from_raw_parts(base as *const u8, elf_len) };
+
+    let mut c = FsClient {
+        ch: 0,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let mut fs = InstFs { c: &mut c };
+    static mut PKG: [u8; 40960] = [0; 40960];
+    static mut ELF_BUF: [u8; 32768] = [0; 32768];
+    // SAFETY: utest tem uma unica thread; os buffers estaticos evitam estourar a pilha.
+    let (pkg, elf_buf) = unsafe {
+        (
+            &mut *core::ptr::addr_of_mut!(PKG),
+            &mut *core::ptr::addr_of_mut!(ELF_BUF),
+        )
+    };
+
+    // app COM a permissao "ipc": recebe o canal e ecoa
+    let n = build_app_pkg(
+        b"name=eco-app\nversion=1.0\nentry=app.elf\nperms=ipc\n",
+        elf,
+        pkg,
+    );
+    nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1261));
+    let (child, ctl) = launch_installed(&mut fs, "eco-app", elf_buf);
+    let ctl = ctl.unwrap_or_else(|| nexo_sys::exit(1262));
+    let (cli, cli_child) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1263));
+    if nexo_sys::channel_send(ctl, b"serve", &[cli_child]) != Status::Ok {
+        nexo_sys::exit(1264);
+    }
+    if nexo_sys::channel_send(cli, b"instalado", &[]) != Status::Ok {
+        nexo_sys::exit(1265);
+    }
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    let n = match nexo_sys::channel_recv(cli, &mut buf, &mut hs) {
+        Ok((n, _)) => n,
+        _ => nexo_sys::exit(1266),
+    };
+    if &buf[..n] != b"echo: instalado" {
+        nexo_sys::exit(1267);
+    }
+    let _ = nexo_sys::handle_close(ctl);
+    if nexo_sys::process_wait(child) != Ok(0) {
+        nexo_sys::exit(1268);
+    }
+
+    // app SEM a permissao: o lancador NAO concede o canal; o filho sai com o erro proprio (20)
+    let n = build_app_pkg(b"name=eco-sem\nversion=1.0\nentry=app.elf\n", elf, pkg);
+    nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1269));
+    let (child, ctl) = launch_installed(&mut fs, "eco-sem", elf_buf);
+    if ctl.is_some() {
+        nexo_sys::exit(1270);
+    }
+    if nexo_sys::process_wait(child) != Ok(20) {
+        nexo_sys::exit(1271);
+    }
+    nexo_sys::log(
+        "utest: launcher ok — instalado executa; capacidade so com a permissao declarada",
+    );
+    nexo_sys::exit(0)
+}
+
+/// Modo 47: executa um programa a partir da MEMORIA/// Modo 47: executa um programa a partir da MEMORIA (process_spawn_mem) — o elo "instalar ->
 /// executar". Handle 0 = canal com o kernel; handle 1 = MemoryObject com o ELF do `echo`
 /// (`param` = tamanho real). Mapeia, spawna com um canal de controle, conversa com o filho
 /// (pedido/eco) e o encerra limpo fechando o controle.
