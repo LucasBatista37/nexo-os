@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-31 (commit `274fe65`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-31 (commit `cdbc03d`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 159 · 🟡 61 · ⬜ 315 · ⛔ 0 → **35% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 160 · 🟡 61 · ⬜ 314 · ⛔ 0 → **36% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -14,7 +14,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 | Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 17 | 3 | 1 | 88% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 14 | 3 | 47% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 9 | 14 | 2 | 64% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
-| Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 2 | 4 | 19 | 16% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
+| Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 3 | 4 | 18 | 20% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
 | Fase 7 — Áudio, mídia, USB e hardware real (anos 5–7) | ⬜ não iniciado | 0 | 0 | 20 | 0% | 12–24 meses | USB/HID/armazenamento, NVMe/AHCI, áudio, Ethernet real, Wi-Fi, GPU/display, energia/suspensão, laboratório de hardware |
 | Fase 8 — Segurança, instalação, atualização e recuperação (anos 5–8) | ⬜ não iniciado | 0 | 0 | 22 | 0% | 9–15 meses | criptografia de disco, TPM, trust root, A/B, rollback, recovery, instalador, Secure Boot, backup, crash dumps, fuzzing contínuo, revisão externa |
 | Fase 9 — Beta público controlado (anos 7–10) | ⬜ não iniciado | 0 | 0 | 20 | 0% | 12–24 meses | hardware certificado, canais de release, servidores de símbolos/bugs, i18n, acessibilidade AA, documentação, 20→100 testadores, ABI candidata |
@@ -199,7 +199,7 @@ Gate: ⬜ não iniciado.
 | ⬜ | testar usabilidade com usuários externos |  |
 | ⬜ | publicar release `0.5-desktop` |  |
 
-### Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) — 16% (2 ✅, 4 🟡, 19 ⬜)
+### Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) — 20% (3 ✅, 4 🟡, 18 ⬜)
 
 Gate: ⬜ não iniciado. 
 
@@ -214,7 +214,7 @@ Gate: ⬜ não iniciado.
 | ⬜ | criar profiler e visualizador de traces |  |
 | ✅ | definir formato de pacote e manifesto | formato `NEXOPKG1` v1 (`docs/spec/pkg.md`): manifesto textual auditável (`name`/`version`/`entry`/`perms` — chaves desconhecidas são erro) + arquivos, tudo sob CRC32; biblioteca `libraries/pkg` (`nexo-pkg`, no_std/sem alocação/`forbid(unsafe)`, validação completa no parse, fuzz-lite de truncamentos e mutações nos testes de host) e ferramenta `tools/nexo-pack` (`build`/`inspect`, validada com o binário real da calculadora). Assinatura e instalação transacional vêm por cima, em blocos próprios |
 | ⬜ | implementar assinatura e verificação de pacotes |  |
-| ⬜ | implementar instalação transacional |  |
+| ✅ | implementar instalação transacional | `libraries/inst` (`nexo-inst`): diretório **versionado** (`/apps/<nome>.v<N>/`) + o ponteiro `/apps/<nome>.cur` gravado **por último** (o commit, no espírito do NexoFS); corte antes do commit deixa a versão anterior corrente e intacta, e a retentativa re-preenche os mesmos caminhos. Testes de host com **falha injetada em cada operação** (invariante conferida em todos os pontos de corte) e integração real no boot: `user_install` instala v1 → v2 sobre o `nexo.fs` (adaptador via protocolo tipado), v1 intacta, pacote corrompido rejeitado sem tocar nada. Pendem GC de versões antigas e o instalador como serviço com fluxo de consentimento (permissões do manifesto) |
 | 🟡 | implementar permissões declarativas e consentimento | a **declaração** existe: o manifesto NEXOPKG1 lista as permissões que o app precisa (`perms=`, com `Manifest::declares()` para consulta); a **imposição** (instalador/portais concedendo capabilities conforme o declarado) e o fluxo de consentimento do usuário vêm com a instalação |
 | ⬜ | criar portal de arquivos, câmera, microfone e notificações |  |
 | ⬜ | criar repositório de pacotes de desenvolvimento |  |

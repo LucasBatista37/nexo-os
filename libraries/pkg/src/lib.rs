@@ -120,6 +120,7 @@ impl<'a> Manifest<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Package<'a> {
     manifest: Manifest<'a>,
+    manifest_bytes: &'a [u8],
     files: &'a [u8],
     file_count: u32,
 }
@@ -166,6 +167,7 @@ impl<'a> Package<'a> {
         }
         Ok(Package {
             manifest,
+            manifest_bytes: &payload[..manifest_len],
             files,
             file_count,
         })
@@ -174,6 +176,11 @@ impl<'a> Package<'a> {
     /// O manifesto.
     pub fn manifest(&self) -> Manifest<'a> {
         self.manifest
+    }
+
+    /// Os bytes crus do manifesto (para o instalador gravar junto do app).
+    pub fn manifest_bytes(&self) -> &'a [u8] {
+        self.manifest_bytes
     }
 
     /// Quantos arquivos o pacote tem.

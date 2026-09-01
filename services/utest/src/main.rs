@@ -89,6 +89,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         43 => shellui_driver(),
         44 => shellcenter_driver(),
         45 => calc_driver(),
+        46 => install_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -658,6 +659,177 @@ impl FsClient {
     fn data(&self, n: usize) -> &[u8] {
         &self.reply[12..12 + n]
     }
+}
+
+/// Adaptador do instalador transacional sobre o protocolo `nexo.fs` (via [`FsClient`]).
+struct InstFs<'a> {
+    c: &'a mut FsClient,
+}
+
+impl nexo_inst::AppFs for InstFs<'_> {
+    fn mkdir(&mut self, path: &str) -> Result<(), nexo_inst::FsErr> {
+        let (st, _, _) = self.c.call(0, 0, 0, 0, path.as_bytes());
+        if st == 0 {
+            return Ok(()); // ja existe: idempotente
+        }
+        let (st, _, _) = self.c.call(2, 0, 0, 0, path.as_bytes());
+        if st == 0 {
+            Ok(())
+        } else {
+            Err(nexo_inst::FsErr)
+        }
+    }
+
+    fn write_file(&mut self, path: &str, data: &[u8]) -> Result<(), nexo_inst::FsErr> {
+        let (st, v, _) = self.c.call(0, 0, 0, 0, path.as_bytes());
+        let ino = if st == 0 {
+            v as u32
+        } else {
+            let (st, v, _) = self.c.call(1, 0, 0, 0, path.as_bytes());
+            if st != 0 {
+                return Err(nexo_inst::FsErr);
+            }
+            v as u32
+        };
+        let (st, _, _) = self.c.call(9, ino, 0, 0, &[]);
+        if st != 0 {
+            return Err(nexo_inst::FsErr);
+        }
+        let mut off = 0usize;
+        while off < data.len() {
+            let n = (data.len() - off).min(3900);
+            let (st, w, _) = self.c.call(5, ino, off as u64, 0, &data[off..off + n]);
+            if st != 0 || w as usize != n {
+                return Err(nexo_inst::FsErr);
+            }
+            off += n;
+        }
+        Ok(())
+    }
+
+    fn read_file(&mut self, path: &str, buf: &mut [u8]) -> Result<usize, nexo_inst::FsErr> {
+        let (st, v, _) = self.c.call(0, 0, 0, 0, path.as_bytes());
+        if st != 0 {
+            return Err(nexo_inst::FsErr);
+        }
+        let ino = v as u32;
+        let size = u64::from_le_bytes(self.c.reply[13..21].try_into().unwrap()) as usize;
+        if size > buf.len() {
+            return Err(nexo_inst::FsErr);
+        }
+        let mut off = 0usize;
+        while off < size {
+            let want = (size - off).min(3900) as u32;
+            let (st, dl, _) = self.c.call(4, ino, off as u64, want, &[]);
+            if st != 0 || dl == 0 {
+                return Err(nexo_inst::FsErr);
+            }
+            let dl = dl as usize;
+            buf[off..off + dl].copy_from_slice(self.c.data(dl));
+            off += dl;
+        }
+        Ok(size)
+    }
+}
+
+/// Monta um pacote NEXOPKG1 minimo em `out` (manifesto + 1 arquivo "app.elf" com `payload`).
+fn build_pkg(version: &[u8], payload: &[u8], out: &mut [u8; 512]) -> usize {
+    let mut manifest = [0u8; 96];
+    let mut ml = 0;
+    for part in [
+        b"name=inst-demo\nversion=".as_slice(),
+        version,
+        b"\nentry=app.elf\nperms=janelas\n",
+    ] {
+        manifest[ml..ml + part.len()].copy_from_slice(part);
+        ml += part.len();
+    }
+    let name = b"app.elf";
+    let plen = ml + 2 + name.len() + 4 + payload.len();
+    // payload do pacote
+    let mut body = [0u8; 400];
+    let mut o = 0;
+    body[o..o + ml].copy_from_slice(&manifest[..ml]);
+    o += ml;
+    body[o..o + 2].copy_from_slice(&(name.len() as u16).to_le_bytes());
+    o += 2;
+    body[o..o + name.len()].copy_from_slice(name);
+    o += name.len();
+    body[o..o + 4].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    o += 4;
+    body[o..o + payload.len()].copy_from_slice(payload);
+    o += payload.len();
+    assert!(o == plen);
+    // cabecalho
+    out[..8].copy_from_slice(nexo_pkg::MAGIC);
+    out[8..12].copy_from_slice(&nexo_pkg::VERSION.to_le_bytes());
+    out[12..16].copy_from_slice(&(ml as u32).to_le_bytes());
+    out[16..20].copy_from_slice(&1u32.to_le_bytes());
+    out[20..24].copy_from_slice(&nexo_pkg::crc32(&body[..o]).to_le_bytes());
+    out[24..24 + o].copy_from_slice(&body[..o]);
+    24 + o
+}
+
+/// Modo 46: instalacao transacional sobre o NexoFS real (handle 0 = canal nexo.fs). Instala a v1
+/// de um pacote, le o arquivo de volta pelo caminho versionado, atualiza para a v2 (o ponteiro
+/// .cur vira por ultimo) e confere que a v1 segue intacta.
+fn install_client() -> ! {
+    let mut c = FsClient {
+        ch: 0,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let mut fs = InstFs { c: &mut c };
+    let mut pkg = [0u8; 512];
+
+    let n = build_pkg(b"0.1", b"PAYLOAD-V1", &mut pkg);
+    let v = nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1200));
+    if v != 1 || nexo_inst::current_version(&mut fs, "inst-demo") != Some(1) {
+        nexo_sys::exit(1201);
+    }
+    let mut pb = [0u8; nexo_inst::MAX_PATH];
+    let path = nexo_inst::versioned_path("inst-demo", 1, "app.elf", &mut pb)
+        .unwrap_or_else(|_| nexo_sys::exit(1202));
+    let mut back = [0u8; 64];
+    let bn = nexo_inst::AppFs::read_file(&mut fs, path, &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1203));
+    if &back[..bn] != b"PAYLOAD-V1" {
+        nexo_sys::exit(1204);
+    }
+
+    // atualizacao para a v2: o ponteiro vira, a v1 continua intacta
+    let n = build_pkg(b"0.2", b"PAYLOAD-V2!", &mut pkg);
+    let v = nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1205));
+    if v != 2 || nexo_inst::current_version(&mut fs, "inst-demo") != Some(2) {
+        nexo_sys::exit(1206);
+    }
+    let mut pb = [0u8; nexo_inst::MAX_PATH];
+    let path = nexo_inst::versioned_path("inst-demo", 2, "app.elf", &mut pb)
+        .unwrap_or_else(|_| nexo_sys::exit(1207));
+    let bn = nexo_inst::AppFs::read_file(&mut fs, path, &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1208));
+    if &back[..bn] != b"PAYLOAD-V2!" {
+        nexo_sys::exit(1209);
+    }
+    let mut pb = [0u8; nexo_inst::MAX_PATH];
+    let path = nexo_inst::versioned_path("inst-demo", 1, "app.elf", &mut pb)
+        .unwrap_or_else(|_| nexo_sys::exit(1210));
+    let bn = nexo_inst::AppFs::read_file(&mut fs, path, &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1211));
+    if &back[..bn] != b"PAYLOAD-V1" {
+        nexo_sys::exit(1212);
+    }
+    // pacote corrompido nao muda nada
+    let n = build_pkg(b"0.3", b"MAL", &mut pkg);
+    pkg[20] ^= 0xff; // quebra o crc
+    if nexo_inst::install(&mut fs, &pkg[..n]).is_ok() {
+        nexo_sys::exit(1213);
+    }
+    if nexo_inst::current_version(&mut fs, "inst-demo") != Some(2) {
+        nexo_sys::exit(1214);
+    }
+    nexo_sys::log("utest: install ok — v1 -> v2 transacional no NexoFS; corrompido nao instala");
+    nexo_sys::exit(0)
 }
 
 /// Modo 9: cria, le, altera, lista e remove arquivos; contador de boots persistente.

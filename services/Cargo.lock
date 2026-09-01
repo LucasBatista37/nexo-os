@@ -129,6 +129,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-inst"
+version = "0.0.1"
+dependencies = [
+ "nexo-pkg",
+]
+
+[[package]]
 name = "nexo-net"
 version = "0.0.1"
 dependencies = [
@@ -158,6 +165,10 @@ dependencies = [
 
 [[package]]
 name = "nexo-netstack"
+version = "0.0.1"
+
+[[package]]
+name = "nexo-pkg"
 version = "0.0.1"
 
 [[package]]
@@ -232,8 +243,10 @@ name = "nexo-utest"
 version = "0.0.1"
 dependencies = [
  "nexo-gfx",
+ "nexo-inst",
  "nexo-net",
  "nexo-netstack",
+ "nexo-pkg",
  "nexo-proto",
  "nexo-rt",
  "nexo-sys",

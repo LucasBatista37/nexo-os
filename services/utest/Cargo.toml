@@ -14,6 +14,8 @@ nexo-netstack.workspace = true
 nexo-net.workspace = true
 nexo-gfx.workspace = true
 nexo-ui.workspace = true
+nexo-pkg.workspace = true
+nexo-inst.workspace = true
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

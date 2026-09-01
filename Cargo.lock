@@ -46,6 +46,13 @@ name = "nexo-initrd"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-inst"
+version = "0.0.1"
+dependencies = [
+ "nexo-pkg",
+]
+
+[[package]]
 name = "nexo-mm"
 version = "0.0.1"
 dependencies = [

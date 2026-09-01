@@ -24,6 +24,7 @@ members = [
     "libraries/wm",
     "libraries/ui",
     "libraries/pkg",
+    "libraries/inst",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
     "sdk/nexo-net",

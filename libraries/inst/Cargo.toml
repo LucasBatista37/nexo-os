@@ -1,0 +1,12 @@
+[package]
+name = "nexo-inst"
+description = "Instalacao transacional de pacotes NEXOPKG1 do Nexo OS: diretorio versionado + ponteiro .cur gravado por ultimo (o commit) — no_std, sem alocacao, testavel no host com corte de energia simulado"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexo-pkg = { path = "../pkg" }
+
+[lints]
+workspace = true

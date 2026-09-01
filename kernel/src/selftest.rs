@@ -98,6 +98,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_shellui", test_user_shellui),
     ("user_shellcenter", test_user_shellcenter),
     ("user_calc", test_user_calc),
+    ("user_install", test_user_install),
     ("gfx", test_gfx),
     ("symbols", test_symbols),
 ];
@@ -2749,6 +2750,48 @@ fn test_user_calc() -> TestResult {
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
     check!(
         frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Instalação transacional de pacotes no NexoFS real: v1 → v2 com o ponteiro `.cur` gravado por
+/// último; a v1 fica intacta; pacote corrompido não muda nada.
+fn test_user_install() -> TestResult {
+    use crate::ipc::ChannelEnd;
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let (c, d) = ChannelEnd::create_pair();
+    let driver = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a)],
+    )
+    .map_err(String::from)?;
+    let fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
+            .map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 46, alloc::vec![channel_handle(d)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let fc = crate::process::wait_and_reap(&fs);
+    let dc = crate::process::wait_and_reap(&driver);
+    drop((driver, fs, client));
+    sched::reap();
+    check!(cc == 0, "instalador saiu com {cc}");
+    check!(fc == 0, "servidor fs saiu com {fc}");
+    check!(dc == 0, "driver saiu com {dc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    let frames = settled_free_frames(frames0, 4);
+    check!(
+        frames + 4 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
     );
     Ok(())
