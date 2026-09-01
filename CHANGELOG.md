@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 7 antecipada, bloco 27 — MSI-X no nvmedev)
+- `nvmedev` agora usa **MSI-X**: programação genérica da entrada 0 da tabela (walk da cap list PCI 0x11 — sem depender do transporte virtio), CQ de E/S criada com IEN/IV=0 e a espera de conclusão dorme em `irq_wait` (poll curto antes, para conclusões rápidas). Sem a capability, cai para polling e o log diz o modo. Ambos os testes NVMe verdes sob interrupção (o `fs` fez 83 pedidos dormindo entre conclusões).
+
 ### Adicionado (Fase 6, bloco 26 — repositório local de pacotes)
 - `nexo-inst`: **repositório local** — `install_from_repo(fs, nome, buf)` instala a partir de `/repo/<nome>.npk` pelo caminho oficial: toda a validação de sempre (NEXOPKG1 completo no parse, revogação, transação com commit por último, coleta de versões). O buffer de leitura vem do chamador — o tamanho aceito fica sob controle de quem instala.
 - Testes: host (instala do repositório; pacote ausente falha sem tocar nada; app revogado é recusado pelo MESMO caminho) e `user_install` no NexoFS real (idempotente entre boots, versões relativas).

@@ -89,8 +89,9 @@ impl QueuePair {
         DOORBELLS + (2 * self.qid as u64 + 1) * (4u64 << self.dstrd)
     }
 
-    /// Submete um comando de 64 B e espera a conclusão (polling); devolve (status, dw0).
-    fn command(&mut self, m: &Mmio, sqe: &[u32; 16]) -> (u16, u32) {
+    /// Submete um comando de 64 B e espera a conclusão; devolve (status, dw0). Com `irq`,
+    /// dorme em `irq_wait` entre verificações (MSI-X); sem, faz *polling* puro.
+    fn command(&mut self, m: &Mmio, sqe: &[u32; 16], mut irq: Option<&mut IrqWait>) -> (u16, u32) {
         let mut sqe = *sqe;
         let cid = self.cid;
         self.cid = self.cid.wrapping_add(1);
@@ -126,11 +127,59 @@ impl QueuePair {
             if spins > 200_000_000 {
                 fail(81, "conclusao NVMe nao chegou");
             }
-            if spins.is_multiple_of(1024) {
+            if let Some(w) = irq.as_deref_mut() {
+                // ja ha um doorbell batido: dorme ate a proxima interrupcao (coalescida)
+                if spins > 64
+                    && let Ok(c) = nexo_sys::irq_wait(DEV, w.vector, w.seen)
+                {
+                    w.seen = c;
+                }
+            } else if spins.is_multiple_of(1024) {
                 nexo_sys::yield_now();
             }
         }
     }
+}
+
+/// Estado da espera por interrupção (vetor MSI-X 0 + contagem já vista).
+struct IrqWait {
+    vector: u32,
+    seen: u64,
+}
+
+/// Programa a entrada 0 da tabela MSI-X da função (cap 0x11): endereço/dado da mensagem e
+/// habilita MSI-X no controle. Devolve `false` se a função não tem a capability.
+fn msix_setup(bdf: u16, bars: &nexo_sys::abi::PciInfo, addr: u64, data: u32) -> bool {
+    let read = |off: u16| nexo_sys::pci_cfg_read(DEV, bdf, off).unwrap_or(0);
+    let mut cap = (read(0x34) & 0xfc) as u16;
+    let mut guard = 0;
+    while cap != 0 && guard < 32 {
+        let hdr = read(cap);
+        if hdr & 0xff == 0x11 {
+            let table = read(cap + 4);
+            let (tbir, toff) = ((table & 7) as usize, (table & !7) as u64);
+            let b = bars.bars[tbir];
+            if b.size == 0 || b.flags & 1 != 0 {
+                return false;
+            }
+            let Ok(base) = nexo_sys::mmio_map(DEV, b.base, b.size) else {
+                return false;
+            };
+            let t = Mmio(base + toff);
+            t.w32(0, addr as u32);
+            t.w32(4, (addr >> 32) as u32);
+            t.w32(8, data);
+            t.w32(12, 0); // desmascara a entrada 0
+            // MSI-X enable (bit 15 do message control), sem function mask (bit 14)
+            let ctrl = read(cap);
+            let mc = ((ctrl >> 16) as u16 | 0x8000) & !0x4000;
+            let _ = nexo_sys::pci_cfg_write(DEV, bdf, cap, (ctrl & 0xffff) | ((mc as u32) << 16));
+            return true;
+        }
+        cap = ((hdr >> 8) & 0xfc) as u16;
+        guard += 1;
+    }
+    false
 }
 
 /// Monta uma SQE zerada com opcode, nsid e PRP1.
@@ -207,7 +256,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let idbuf = dma();
     let mut e = sqe(0x06, 0, idbuf.phys);
     e[10] = 1; // CNS
-    let (st, _) = admin.command(&m, &e);
+    let (st, _) = admin.command(&m, &e, None);
     if st != 0 {
         fail(87, "identify controller");
     }
@@ -220,7 +269,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     // Identify Namespace 1 (CNS=0): NSZE em [0..8]; tamanho de bloco do LBAF ativo
     let mut e = sqe(0x06, 1, idbuf.phys);
     e[10] = 0;
-    let (st, _) = admin.command(&m, &e);
+    let (st, _) = admin.command(&m, &e, None);
     if st != 0 {
         fail(88, "identify namespace");
     }
@@ -240,20 +289,29 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         fail(89, "so blocos de 512 B no MVP");
     }
 
+    // MSI-X (vetor 0) para a fila de E/S; sem a capability, cai para polling
+    let mut irq = nexo_sys::irq_alloc(DEV)
+        .ok()
+        .filter(|i| msix_setup(info.bdf, &info, i.msi_address, i.msi_data))
+        .map(|i| IrqWait {
+            vector: i.vector,
+            seen: 0,
+        });
+
     // par de filas de E/S (qid 1): primeiro a CQ, depois a SQ apontando para ela
     let iosq = dma();
     let iocq = dma();
     let mut e = sqe(0x05, 0, iocq.phys); // Create IO CQ
     e[10] = 1 | ((QD as u32 - 1) << 16);
-    e[11] = 1; // PC, sem interrupcao
-    let (st, _) = admin.command(&m, &e);
+    e[11] = if irq.is_some() { 1 | 2 } else { 1 }; // PC (+IEN com IV=0 sob MSI-X)
+    let (st, _) = admin.command(&m, &e, None);
     if st != 0 {
         fail(90, "create io cq");
     }
     let mut e = sqe(0x01, 0, iosq.phys); // Create IO SQ
     e[10] = 1 | ((QD as u32 - 1) << 16);
     e[11] = 1 | (1 << 16); // PC | CQID=1
-    let (st, _) = admin.command(&m, &e);
+    let (st, _) = admin.command(&m, &e, None);
     if st != 0 {
         fail(91, "create io sq");
     }
@@ -269,11 +327,12 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     };
     let data = dma(); // pagina unica de dados (PRP1) — cobre os 3584 B do nexo.block
     log!(
-        "nvmedev: nvme bdf {:#06x} pronto ({} setores de 512 B, timeout {} ms, serial {})",
+        "nvmedev: nvme bdf {:#06x} pronto ({} setores de 512 B, timeout {} ms, serial {}, {})",
         info.bdf,
         nsze,
         timeout_ms,
-        core::str::from_utf8(&serial).unwrap_or("?").trim()
+        core::str::from_utf8(&serial).unwrap_or("?").trim(),
+        if irq.is_some() { "MSI-X" } else { "polling" }
     );
 
     // serve nexo.block v0 (sincrono: um pedido em voo)
@@ -313,7 +372,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     e[10] = rq.sector as u32;
                     e[11] = (rq.sector >> 32) as u32;
                     e[12] = (count - 1) as u32;
-                    let (st, _) = io.command(&m, &e);
+                    let (st, _) = io.command(&m, &e, irq.as_mut());
                     if st != 0 {
                         block::encode_error(
                             block::ReadRequest::METHOD_ID,
@@ -361,7 +420,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     e[10] = rq.sector as u32;
                     e[11] = (rq.sector >> 32) as u32;
                     e[12] = (count - 1) as u32;
-                    let (st, _) = io.command(&m, &e);
+                    let (st, _) = io.command(&m, &e, irq.as_mut());
                     if st != 0 {
                         block::encode_error(
                             block::WriteRequest::METHOD_ID,
