@@ -116,7 +116,9 @@ fn sys_channel_send(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
         .iter()
         .map(|c| u32::from_le_bytes(*c))
         .collect();
-    // Retira os handles do remetente; falha se algum não for transferível.
+    // Retira os handles do remetente; falha se algum não for transferível. A guarda protege a
+    // janela tabela→fila do coletor de pontas (handles em mãos do kernel).
+    let _inflight = crate::ipc::InFlight::new();
     let mut moved = Vec::with_capacity(ids.len());
     {
         let mut table = p.handles.lock();
@@ -365,7 +367,14 @@ fn sys_channel_recv(p: &process::Process, f: &TrapFrame, nonblock: bool) -> (Sta
     let Object::Channel(end) = &handle.object else {
         return (Status::InvalidArgs, 0);
     };
-    let msg = match if nonblock { end.try_recv() } else { end.recv() } {
+    // A guarda mantém os handles da mensagem visíveis ao coletor de pontas enquanto estão em
+    // mãos do kernel (entre o pop da fila e a inserção na tabela) — sem ela, a saída de um
+    // processo em outra CPU fecharia pontas em trânsito (visto em campo no runner do CI).
+    let (msg, _inflight) = match if nonblock {
+        end.try_recv_guarded()
+    } else {
+        end.recv_guarded()
+    } {
         Ok(m) => m,
         Err(e) => return (e, 0),
     };
@@ -439,6 +448,8 @@ fn sys_process_spawn_mem(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
         Ok(b) => b,
         Err(e) => return (e, 0),
     };
+    // Guarda da janela tabela->tabela-do-filho (handles em maos do kernel).
+    let _inflight = crate::ipc::InFlight::new();
     let moved = match take_spawn_handles(p, hptr, nh) {
         Ok(m) => m,
         Err(e) => return (e, 0),
@@ -473,6 +484,8 @@ fn sys_process_spawn(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let Ok(name) = core::str::from_utf8(&name_bytes) else {
         return (Status::InvalidArgs, 0);
     };
+    // Guarda da janela tabela->tabela-do-filho (handles em maos do kernel).
+    let _inflight = crate::ipc::InFlight::new();
     let moved = match take_spawn_handles(p, hptr, nh) {
         Ok(m) => m,
         Err(e) => return (e, 0),

@@ -104,6 +104,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         58 => editor_driver(),
         59 => arquivos_driver(),
         60 => portal_driver(),
+        61 => handoff_sender(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1477,6 +1478,17 @@ fn portal_driver() -> ! {
     }
 
     nexo_sys::log("utest: portal ok — o app recebeu o conteudo; o fs ficou no portal");
+    nexo_sys::exit(0)
+}
+
+/// Modo 61: remetente do handoff de handle. Envia a ponta (handle 1) pelo pipe (handle 0) e
+/// SAI IMEDIATAMENTE — a mensagem (com o handle dentro) fica em transito durante o exit, e o
+/// coletor de pontas que roda na saida do processo NAO pode fecha-la (regressao do bug de
+/// campo: fs via "cliente desconectou" com o canal em transito).
+fn handoff_sender() -> ! {
+    if nexo_sys::channel_send(0, b"h", &[1]) != Status::Ok {
+        nexo_sys::exit(770);
+    }
     nexo_sys::exit(0)
 }
 

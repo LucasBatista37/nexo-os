@@ -62,6 +62,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_isolation", test_user_isolation),
     ("user_syscall_error", test_user_syscall_error),
     ("user_ipc", test_user_ipc),
+    ("ipc_handoff", test_ipc_handoff),
     ("user_services", test_user_services),
     ("user_syscall_fuzz", test_user_syscall_fuzz),
     ("pci", test_pci),
@@ -2855,6 +2856,48 @@ fn test_user_install() -> TestResult {
 /// Execução a partir da memória: o kernel entrega o ELF do `echo` num `MemoryObject`; o cliente
 /// o spawna com `process_spawn_mem`, conversa com o filho e o encerra limpo — o elo
 /// "instalar → executar" da plataforma de aplicativos.
+/// Handles em trânsito sobrevivem à saída do remetente: um processo envia uma ponta de canal
+/// pelo pipe e sai imediatamente; o coletor de pontas roda no exit com a mensagem ainda na
+/// fila, e a ponta transferida precisa continuar viva e utilizável (regressão do bug de campo:
+/// o `fs` via "cliente desconectou" com o canal em trânsito num runner carregado).
+fn test_ipc_handoff() -> TestResult {
+    use crate::ipc::{ChannelEnd, Message, Object};
+    let ends0 = crate::ipc::live_channel_ends();
+    for i in 0..20 {
+        let (pa, pb) = ChannelEnd::create_pair();
+        let (ca, cb) = ChannelEnd::create_pair();
+        let a = crate::process::spawn_named(
+            "utest",
+            61,
+            alloc::vec![channel_handle(pa), channel_handle(cb)],
+        )
+        .map_err(String::from)?;
+        let code = crate::process::wait_and_reap(&a);
+        check!(code == 0, "remetente saiu com {code} (iteracao {i})");
+        // a mensagem ficou em transito durante o exit; a ponta deve estar viva
+        let msg = pb
+            .recv()
+            .map_err(|e| alloc::format!("recv do handoff falhou na iteracao {i}: {e:?}"))?;
+        check!(msg.handles.len() == 1, "handoff sem handle (iteracao {i})");
+        let Object::Channel(vend) = &msg.handles[0].object else {
+            return Err(String::from("objeto transferido nao e canal"));
+        };
+        vend.send(Message {
+            data: alloc::vec![b'v', b'i', b'v', b'o'],
+            handles: alloc::vec![],
+        })
+        .map_err(|e| alloc::format!("ponta transferida morta na iteracao {i}: {e:?}"))?;
+        let eco = ca
+            .try_recv()
+            .map_err(|e| alloc::format!("eco nao chegou na iteracao {i}: {e:?}"))?;
+        check!(eco.data == b"vivo", "eco divergente (iteracao {i})");
+    }
+    sched::reap();
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    Ok(())
+}
+
 fn test_user_spawn_mem() -> TestResult {
     use crate::ipc::{ChannelEnd, Handle, MemoryObject, Object, Rights};
     let ends0 = crate::ipc::live_channel_ends();

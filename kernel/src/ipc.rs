@@ -209,6 +209,33 @@ pub struct ChannelEnd {
 }
 
 static LIVE_ENDS: AtomicU64 = AtomicU64::new(0);
+
+/// Handles em mãos do kernel (fora de qualquer tabela ou fila) durante send/recv/spawn.
+static IPC_INFLIGHT: AtomicU64 = AtomicU64::new(0);
+/// Geração: incrementada a cada nova janela em-trânsito (valida a marcação do coletor).
+static IPC_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// Guarda RAII de uma janela em-trânsito: handles retirados de uma fila/tabela mas ainda não
+/// inseridos no destino são INVISÍVEIS à marcação do coletor — sem esta guarda, um
+/// `collect_unreachable` concorrente (saída de processo em outra CPU) fecharia pontas vivas.
+/// Visto em campo: o fs enxergou "cliente desconectou" com o canal em trânsito num runner
+/// carregado (corrida entre o recv do destinatário e o exit do remetente).
+pub struct InFlight(());
+
+impl InFlight {
+    /// Abre uma janela em-trânsito (bump de geração + contador).
+    pub fn new() -> InFlight {
+        IPC_GEN.fetch_add(1, Ordering::AcqRel);
+        IPC_INFLIGHT.fetch_add(1, Ordering::AcqRel);
+        InFlight(())
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        IPC_INFLIGHT.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 static MESSAGES_SENT: AtomicU64 = AtomicU64::new(0);
 static COLLECTED: AtomicU64 = AtomicU64::new(0);
 /// Registro de todas as pontas existentes (fracas), para o coletor de ciclos.
@@ -232,13 +259,35 @@ pub fn collected_ends() -> u64 {
 /// handles dos processos vivos e das pontas presas pelo kernel, atravessando
 /// as filas; o resto é fechado (o que descarta as mensagens e quebra o ciclo).
 pub fn collect_unreachable() -> u64 {
+    // Janelas em-trânsito tornam handles invisíveis à marcação: espera zerar e valida a
+    // geração após marcar; se uma janela abriu no meio, recomeça (ou desiste — a próxima
+    // coleta apanha os ciclos; desistir nunca fecha nada vivo).
+    for _tentativa in 0..8 {
+        let mut spins = 0u32;
+        while IPC_INFLIGHT.load(Ordering::Acquire) != 0 {
+            spins += 1;
+            if spins > 100_000 {
+                return 0; // sistema ocupado: coleta adiada
+            }
+            core::hint::spin_loop();
+        }
+        let gen0 = IPC_GEN.load(Ordering::Acquire);
+        let closed = collect_marked(gen0);
+        if let Some(n) = closed {
+            return n;
+        }
+    }
+    0
+}
+
+fn collect_marked(gen0: u64) -> Option<u64> {
     let ends: Vec<Arc<ChannelEnd>> = {
         let mut reg = REGISTRY.lock();
         reg.retain(|w| w.strong_count() > 0);
         reg.iter().filter_map(|w| w.upgrade()).collect()
     };
     if ends.is_empty() {
-        return 0;
+        return Some(0);
     }
     let mut marked: Vec<*const ChannelEnd> = Vec::new();
     let mut work: Vec<Arc<ChannelEnd>> = Vec::new();
@@ -280,6 +329,11 @@ pub fn collect_unreachable() -> u64 {
             }
         }
     }
+    // valida: nenhuma janela em-trânsito abriu durante a marcação (senão a marcação pode ter
+    // perdido handles vivos que estavam em mãos do kernel)
+    if IPC_INFLIGHT.load(Ordering::Acquire) != 0 || IPC_GEN.load(Ordering::Acquire) != gen0 {
+        return None;
+    }
     let mut closed = 0;
     for e in &ends {
         if !marked.contains(&Arc::as_ptr(e)) && e.close() {
@@ -291,7 +345,7 @@ pub fn collect_unreachable() -> u64 {
         COLLECTED.fetch_add(closed, Ordering::Relaxed);
         kdebug!("ipc: coletor fechou {closed} ponta(s) de canal inalcancavel(is)");
     }
-    closed
+    Some(closed)
 }
 
 /// Mensagens enviadas desde o boot.
@@ -386,6 +440,39 @@ impl ChannelEnd {
     /// Entradas obsoletas são drenadas no próximo `send`/`close` (acordar a mais é inócuo).
     pub fn register_waiter(&self, t: crate::sched::ThreadId) {
         self.inner.lock().waiters[self.side].push(t);
+    }
+
+    /// Como [`ChannelEnd::try_recv`], mas devolve também uma guarda [`InFlight`] criada sob o
+    /// lock do canal no momento do pop: os handles da mensagem ficam protegidos do coletor até
+    /// a guarda cair (depois de inseridos na tabela do destinatário).
+    pub fn try_recv_guarded(&self) -> Result<(Message, InFlight), Status> {
+        let mut g = self.inner.lock();
+        if let Some(m) = g.queues[self.side].pop_front() {
+            let guard = InFlight::new();
+            return Ok((m, guard));
+        }
+        if g.closed[1 - self.side] {
+            return Err(Status::PeerClosed);
+        }
+        Err(Status::WouldBlock)
+    }
+
+    /// Como [`ChannelEnd::recv`], mas com a guarda de [`ChannelEnd::try_recv_guarded`]. A
+    /// guarda NÃO é mantida enquanto bloqueia — só nasce no pop.
+    pub fn recv_guarded(&self) -> Result<(Message, InFlight), Status> {
+        loop {
+            let mut g = self.inner.lock();
+            if let Some(m) = g.queues[self.side].pop_front() {
+                let guard = InFlight::new();
+                return Ok((m, guard));
+            }
+            if g.closed[1 - self.side] {
+                return Err(Status::PeerClosed);
+            }
+            let me = sched::current().map(|t| t.id).ok_or(Status::Denied)?;
+            g.waiters[self.side].push(me);
+            sched::park_with(g);
+        }
     }
 
     /// Como [`ChannelEnd::recv`], mas devolve `WouldBlock` em vez de bloquear.
