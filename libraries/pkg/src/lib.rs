@@ -116,6 +116,56 @@ impl<'a> Manifest<'a> {
     }
 }
 
+/// Índice do repositório local (`/repo/indice.txt`): uma linha por pacote, `nome versao`
+/// (separados por espaço; `#` comenta; linhas vazias ok). Validação completa no parse — o
+/// índice é informativo (a fonte da verdade é o `.npk`, validado inteiro na instalação), mas
+/// um índice ilegível é erro, não silêncio.
+pub struct RepoIndex<'a> {
+    text: &'a str,
+}
+
+impl<'a> RepoIndex<'a> {
+    /// Valida `bytes` como índice; nunca entra em pânico.
+    pub fn parse(bytes: &'a [u8]) -> Result<RepoIndex<'a>, PkgError> {
+        let text = core::str::from_utf8(bytes).map_err(|_| PkgError::BadManifest)?;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((name, version)) = line.split_once(' ') else {
+                return Err(PkgError::BadManifest);
+            };
+            let (name, version) = (name.trim(), version.trim());
+            if name.is_empty()
+                || name.len() > MAX_NAME
+                || name.contains('/')
+                || version.is_empty()
+                || version.len() > MAX_VERSION_STR
+            {
+                return Err(PkgError::BadManifest);
+            }
+        }
+        Ok(RepoIndex { text })
+    }
+
+    /// Itera `(nome, versão)` na ordem do arquivo.
+    pub fn entries(&self) -> impl Iterator<Item = (&'a str, &'a str)> {
+        self.text.lines().filter_map(|l| {
+            let l = l.trim();
+            if l.is_empty() || l.starts_with('#') {
+                return None;
+            }
+            l.split_once(' ').map(|(n, v)| (n.trim(), v.trim()))
+        })
+    }
+
+    /// Versão anunciada de `name`, se listado.
+    pub fn find(&self, name: &str) -> Option<&'a str> {
+        self.entries().find(|(n, _)| *n == name).map(|(_, v)| v)
+    }
+}
+
 /// Um pacote validado (assinatura, versão, CRC e limites conferidos no `parse`).
 #[derive(Clone, Copy, Debug)]
 pub struct Package<'a> {
@@ -323,6 +373,22 @@ mod tests {
         // sem '='
         let bytes = build("name\n", &[]);
         assert_eq!(Package::parse(&bytes).unwrap_err(), PkgError::BadManifest);
+    }
+
+    #[test]
+    fn repo_index_parses_and_finds() {
+        let idx = RepoIndex::parse(b"# repositorio\ncalc 0.1.0\neco 2.0\n\n").unwrap();
+        assert_eq!(idx.entries().count(), 2);
+        assert_eq!(idx.find("eco"), Some("2.0"));
+        assert_eq!(idx.find("sumido"), None);
+        // linha sem versao, nome com barra ou longo demais: erro
+        assert!(RepoIndex::parse(b"so-nome\n").is_err());
+        assert!(RepoIndex::parse(b"a/b 1.0\n").is_err());
+        assert!(RepoIndex::parse(&[0xff, 0xfe]).is_err());
+        let longo = [b'x'; 40];
+        let mut linha = longo.to_vec();
+        linha.extend_from_slice(b" 1.0\n");
+        assert!(RepoIndex::parse(&linha).is_err());
     }
 
     #[test]

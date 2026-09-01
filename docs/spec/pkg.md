@@ -40,3 +40,12 @@ concessão de capabilities) vem nos blocos de instalação.
 - assinatura e verificação (hash assinado do pacote inteiro);
 - instalação transacional (staging + troca atômica, no espírito do commit do NexoFS);
 - repositório e revisão/revogação.
+
+## Repositório local
+
+Um repositório é um diretório (no sistema: `/repo`) com `<nome>.npk` — o nome do arquivo **é** o
+`name` do manifesto — e um `indice.txt` com uma linha `nome versao` por pacote, em ordem
+alfabética (`#` comenta). O índice é informativo (`nexo_pkg::RepoIndex` valida e consulta); a
+fonte da verdade é sempre o `.npk`, validado por inteiro na instalação
+(`nexo_inst::install_from_repo`, que preserva revogação, transação e coleta). A ferramenta
+`tools/nexo-repo` (`build`/`check`) gera e confere o índice a partir dos pacotes.

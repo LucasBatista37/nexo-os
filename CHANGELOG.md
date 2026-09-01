@@ -324,6 +324,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 28 — índice do repositório + nexo-repo)
+- `nexo-pkg`: **`RepoIndex`** — o `indice.txt` do repositório local (`nome versao` por linha, `#` comenta) validado no parse (`no_std`, sem alocação; UTF-8, limites de nome/versão, nome sem `/`), com `entries()`/`find()`. Informativo por desenho: a fonte da verdade é o `.npk`, validado inteiro na instalação.
+- `tools/nexo-repo` (`build`/`check`): gera e confere o índice a partir dos `.npk` de um diretório; impõe a convenção **nome do arquivo = nome do manifesto** e rejeita duplicatas. Testado com pacotes reais do `nexo-pack`.
+- `Makefile`: margem do stress prolongado `DURATION+300` → `+900` — o relógio do guest (TCG) atrasa sob carga do host e 300 s quase mataram um gate de 24 h (lição de 2026-09-01, documentada no alvo).
+
 ### Infraestrutura (CI: retry por sinal do host também nas fases de input e no shell)
 - Terceiro SIGSEGV do QEMU no runner do GitHub em um dia, desta vez na fase 1 do cenário `input` — o caminho `Popen`+QMP que o retry do harness ainda não cobria. `run_input_phase` e `run_shell_scenario` agora reexecutam (até 3×) quando o código de saída é morte por sinal do host (245/246/250), como os demais cenários.
 

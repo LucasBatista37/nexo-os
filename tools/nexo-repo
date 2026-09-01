@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Gera e confere o indice do repositorio local de pacotes NEXOPKG1.
+
+Convencao (docs/spec/pkg.md): um diretorio com `<nome>.npk` (o nome do arquivo E o nome do
+manifesto) e um `indice.txt` com uma linha `nome versao` por pacote, em ordem alfabetica.
+No sistema, o diretorio vive em `/repo` e `nexo_inst::install_from_repo` instala pelo caminho
+oficial; o indice e informativo (`nexo_pkg::RepoIndex`) — a fonte da verdade e o `.npk`.
+
+Uso:
+  tools/nexo-repo build <dir>    # (re)escreve <dir>/indice.txt a partir dos .npk
+  tools/nexo-repo check <dir>    # falha se o indice divergir dos .npk
+"""
+
+import argparse
+import struct
+import sys
+from pathlib import Path
+
+HEADER_LEN = 24
+MAGIC = b"NEXOPKG1"
+
+
+def die(msg: str) -> "None":
+    print(f"nexo-repo: {msg}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def manifest_of(npk: Path) -> dict:
+    data = npk.read_bytes()
+    if len(data) < HEADER_LEN or data[:8] != MAGIC:
+        die(f"{npk.name}: nao e um NEXOPKG1")
+    version, mlen, _count, _crc = struct.unpack_from("<IIII", data, 8)
+    if version != 1:
+        die(f"{npk.name}: versao de formato {version} desconhecida")
+    if HEADER_LEN + mlen > len(data):
+        die(f"{npk.name}: manifesto truncado")
+    manifest = {}
+    for line in data[HEADER_LEN:HEADER_LEN + mlen].decode("utf-8", "strict").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line and "=" in line:
+            k, v = line.split("=", 1)
+            manifest[k.strip()] = v.strip()
+    for k in ("name", "version"):
+        if k not in manifest:
+            die(f"{npk.name}: manifesto sem '{k}'")
+    return manifest
+
+
+def index_lines(repo: Path) -> list:
+    lines = []
+    seen = set()
+    for npk in sorted(repo.glob("*.npk")):
+        m = manifest_of(npk)
+        if npk.stem != m["name"]:
+            die(f"{npk.name}: nome do arquivo difere do manifesto ('{m['name']}') — "
+                "a convencao /repo/<nome>.npk exige que sejam iguais")
+        if m["name"] in seen:
+            die(f"{npk.name}: nome duplicado no repositorio")
+        seen.add(m["name"])
+        lines.append(f"{m['name']} {m['version']}")
+    return lines
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for c in ("build", "check"):
+        p = sub.add_parser(c)
+        p.add_argument("dir", type=Path)
+    a = ap.parse_args()
+    repo = a.dir
+    if not repo.is_dir():
+        die(f"{repo}: nao e um diretorio")
+    lines = index_lines(repo)
+    idx = repo / "indice.txt"
+    text = "".join(f"{l}\n" for l in lines)
+    if a.cmd == "build":
+        idx.write_text(text, encoding="utf-8")
+        print(f"nexo-repo: {idx} com {len(lines)} pacote(s)")
+        return 0
+    atual = idx.read_text(encoding="utf-8") if idx.exists() else ""
+    if atual != text:
+        die(f"{idx} divergente dos .npk (rode 'nexo-repo build {repo}')")
+    print(f"nexo-repo: {idx} confere ({len(lines)} pacote(s))")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
