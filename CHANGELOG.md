@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 10 — mecanismo de revogação)
+- `nexo-inst`: **revogação** — a lista `/apps/.revoked` (um nome por linha) é consultada pelo `install`, que recusa apps revogados (`InstError::Revoked`); `is_revoked()` serve aos lançadores (não executar o que foi revogado) e `revoke()` alimenta a lista (idempotente). Lista ilegível = **falha fechada** (nega tudo). Testes de host (revogado não instala; outros seguem livres) e o `user_install` ganhou a etapa no NexoFS real, idempotente entre boots (na 2ª execução o app já está revogado e o teste confere a recusa direto).
+
 ### Alterado (Fase 6, bloco 7 — ABI nativa v1 experimental)
 - **`ABI_VERSION` 0 → 1**: a ABI de syscalls foi declarada **v1 experimental** — o conjunto atual (33 syscalls 0–32, handles com direitos que só diminuem, canais NXIP, memória compartilhada, os dois spawns) passa a evoluir por **política aditiva**: syscalls novas ganham números novos, structs só crescem por campos com padrão zero no fim, protocolos IPC seguem o ipc-compat §3; qualquer quebra sobe a versão e é registrada aqui. `docs/spec/syscall-abi.md` atualizada com a política. Programas consultam por `abi_version` (os testes comparam contra a constante e seguem verdes).
 
