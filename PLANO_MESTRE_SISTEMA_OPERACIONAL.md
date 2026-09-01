@@ -536,10 +536,10 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] criar documentação e exemplos;
 - [ ] criar depurador remoto e integração com GDB/LLDB quando viável;
 - [ ] criar profiler e visualizador de traces;
-- [ ] definir formato de pacote e manifesto;
+- [x] definir formato de pacote e manifesto — *formato `NEXOPKG1` v1 (`docs/spec/pkg.md`): manifesto textual auditável (`name`/`version`/`entry`/`perms` — chaves desconhecidas são erro) + arquivos, tudo sob CRC32; biblioteca `libraries/pkg` (`nexo-pkg`, no_std/sem alocação/`forbid(unsafe)`, validação completa no parse, fuzz-lite de truncamentos e mutações nos testes de host) e ferramenta `tools/nexo-pack` (`build`/`inspect`, validada com o binário real da calculadora). Assinatura e instalação transacional vêm por cima, em blocos próprios*;
 - [ ] implementar assinatura e verificação de pacotes;
 - [ ] implementar instalação transacional;
-- [ ] implementar permissões declarativas e consentimento;
+- [-] implementar permissões declarativas e consentimento — *a **declaração** existe: o manifesto NEXOPKG1 lista as permissões que o app precisa (`perms=`, com `Manifest::declares()` para consulta); a **imposição** (instalador/portais concedendo capabilities conforme o declarado) e o fluxo de consentimento do usuário vêm com a instalação*;
 - [ ] criar portal de arquivos, câmera, microfone e notificações;
 - [ ] criar repositório de pacotes de desenvolvimento;
 - [ ] criar processo de revisão e revogação;

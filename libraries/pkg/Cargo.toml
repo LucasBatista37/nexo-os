@@ -1,0 +1,9 @@
+[package]
+name = "nexo-pkg"
+description = "Formato de pacote de aplicativos do Nexo OS (NEXOPKG1): manifesto chave=valor (nome, versao, entry, permissoes declarativas) + arquivos, com CRC32 — no_std, sem alocacao, testavel no host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

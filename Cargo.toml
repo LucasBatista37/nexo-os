@@ -23,6 +23,7 @@ members = [
     "libraries/gfx",
     "libraries/wm",
     "libraries/ui",
+    "libraries/pkg",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
     "sdk/nexo-net",

@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Empacota e inspeciona pacotes de aplicativo NEXOPKG1 do Nexo OS.
+
+Ver docs/spec/pkg.md e libraries/pkg (nexo-pkg). Uso:
+  tools/nexo-pack build --manifest manifest.txt --out app.npk arquivo1 [arquivo2 ...]
+  tools/nexo-pack inspect app.npk
+"""
+import argparse
+import pathlib
+import struct
+import sys
+import zlib
+
+MAGIC = b"NEXOPKG1"
+VERSION = 1
+MAX_FILES = 64
+
+
+def build(a) -> int:
+    manifest = pathlib.Path(a.manifest).read_bytes()
+    payload = bytearray(manifest)
+    if len(a.files) > MAX_FILES:
+        print(f"erro: {len(a.files)} arquivos (max {MAX_FILES})", file=sys.stderr)
+        return 1
+    for f in a.files:
+        p = pathlib.Path(f)
+        name = p.name.encode()
+        data = p.read_bytes()
+        payload += struct.pack("<H", len(name)) + name + struct.pack("<I", len(data)) + data
+    out = MAGIC + struct.pack("<III I", VERSION, len(manifest), len(a.files), zlib.crc32(bytes(payload)) & 0xFFFFFFFF) + payload
+    pathlib.Path(a.out).write_bytes(out)
+    print(f"{a.out}: {len(out)} bytes, {len(a.files)} arquivo(s), manifesto de {len(manifest)} bytes")
+    return 0
+
+
+def inspect(a) -> int:
+    b = pathlib.Path(a.pkg).read_bytes()
+    if len(b) < 24 or b[:8] != MAGIC:
+        print("erro: assinatura NEXOPKG1 ausente", file=sys.stderr)
+        return 1
+    ver, mlen, count, crc = struct.unpack("<IIII", b[8:24])
+    payload = b[24:]
+    if ver != VERSION:
+        print(f"erro: versao {ver} desconhecida", file=sys.stderr)
+        return 1
+    if zlib.crc32(payload) & 0xFFFFFFFF != crc:
+        print("erro: CRC32 nao confere (pacote corrompido)", file=sys.stderr)
+        return 1
+    print(f"pacote valido: versao {ver}, crc 0x{crc:08x}")
+    print("--- manifesto ---")
+    print(payload[:mlen].decode(errors="replace").rstrip())
+    rest = payload[mlen:]
+    print(f"--- {count} arquivo(s) ---")
+    for _ in range(count):
+        (nlen,) = struct.unpack("<H", rest[:2])
+        name = rest[2 : 2 + nlen].decode(errors="replace")
+        (dlen,) = struct.unpack("<I", rest[2 + nlen : 6 + nlen])
+        print(f"  {name}: {dlen} bytes")
+        rest = rest[6 + nlen + dlen :]
+    if rest:
+        print(f"erro: {len(rest)} bytes sobrando (tabela inconsistente)", file=sys.stderr)
+        return 1
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    b = sub.add_parser("build")
+    b.add_argument("--manifest", required=True)
+    b.add_argument("--out", required=True)
+    b.add_argument("files", nargs="*")
+    i = sub.add_parser("inspect")
+    i.add_argument("pkg")
+    a = ap.parse_args()
+    return build(a) if a.cmd == "build" else inspect(a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

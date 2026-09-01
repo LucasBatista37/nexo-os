@@ -65,6 +65,10 @@ name = "nexo-netstack"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-pkg"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-proto"
 version = "0.0.1"
 
