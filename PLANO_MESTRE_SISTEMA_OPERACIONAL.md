@@ -529,7 +529,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 **Resultado:** terceiros conseguem desenvolver, empacotar, instalar e atualizar aplicações.
 
-- [ ] estabilizar ABI nativa v1 experimental;
+- [-] estabilizar ABI nativa v1 experimental — *declarada: `ABI_VERSION = 1` (consultável por `abi_version`), 33 syscalls (0–32) especificadas em `docs/spec/syscall-abi.md` com **política aditiva** (números/campos novos apenas; quebras sobem a versão e vão ao CHANGELOG; protocolos IPC pelo ipc-compat §3). A promoção a estável pende do uso real por terceiros (gate F6) e do marco 0.9-beta*;
 - [-] publicar SDK Rust — *o SDK existe e está documentado (`docs/sdk.md`: crates, contrato de apps, exemplos, empacotamento); "publicar" de verdade (crates versionados fora do repositório, canal de distribuição) pende da estabilização da ABI v1*;
 - [ ] publicar headers e toolchain C/C++;
 - [x] criar gerador de projeto — *`tools/nexo-new <nome>`: gera um app funcional (janela `nexo-ui` seguindo o contrato de apps: sessão via canal do orquestrador, cordão de vida, eventos `pointer`) já **registrado** no workspace e no initrd, com `manifest.txt` NEXOPKG1; validado gerando e compilando um app do zero*;

@@ -1,5 +1,11 @@
-//! ABI de syscalls do Nexo OS — **versão 0 (instável)**. Especificação em
+//! ABI de syscalls do Nexo OS — **versão 1 (experimental)**. Especificação em
 //! `docs/spec/syscall-abi.md`.
+//!
+//! Política de evolução (Plano §Fase 6, "estabilizar ABI nativa v1 experimental"): a partir da
+//! v1, mudanças são **aditivas** (syscalls novas ganham números novos; structs só crescem por
+//! campos com padrão zero no fim); qualquer quebra exige subir [`ABI_VERSION`] e é registrada no
+//! CHANGELOG. Programas consultam a versão com [`SYS_ABI_VERSION`]. A promoção a "estável" vem
+//! com o uso por terceiros (gate F6) e o marco `0.9-beta` (ADR-0006).
 //!
 //! Convenção x86_64: instrução `syscall`; número em `RAX`; argumentos em
 //! `RDI, RSI, RDX, R10, R8, R9`; retorno: `RAX` = [`Status`] (0 = OK),
@@ -9,7 +15,7 @@
 #![deny(unsafe_code)]
 
 /// Versão da ABI devolvida por [`SYS_ABI_VERSION`].
-pub const ABI_VERSION: u64 = 0;
+pub const ABI_VERSION: u64 = 1;
 
 /// Encerra o processo atual. `a0` = código de saída.
 pub const SYS_EXIT: u64 = 0;

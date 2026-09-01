@@ -1,8 +1,13 @@
-# Especificação — ABI de syscalls (versão 0, instável)
+# Especificação — ABI de syscalls (versão 1, experimental)
 
 **Crate de referência:** `abi/syscall` (`nexo-syscall-abi`). **SDK mínimo:** `sdk/nexo-sys`. **Implementação:** `kernel/src/x86/syscall.rs`, entrada em `arch/x86_64/src/syscall.rs`.
 
-Antes de `0.9-beta` esta ABI muda sem aviso (ADR-0006). A versão é consultável por `SYS_ABI_VERSION`.
+**Política da v1 (experimental):** mudanças são **aditivas** — syscalls novas recebem números
+novos (o próximo é 33); structs de ABI só crescem por campos com padrão zero no fim; protocolos
+IPC seguem o ipc-compat §3. Qualquer quebra exige subir `ABI_VERSION` (consultável por
+`SYS_ABI_VERSION`; hoje = 1) e registro no CHANGELOG. A promoção a "estável" vem com o uso por
+terceiros (gate F6) e o marco `0.9-beta` (ADR-0006). A v1 congela o conjunto atual: 33 syscalls
+(0–32), handles com direitos que só diminuem, canais NXIP, memória compartilhada e os dois spawns.
 
 ## 1. Convenção (x86_64)
 
@@ -18,7 +23,7 @@ Antes de `0.9-beta` esta ABI muda sem aviso (ADR-0006). A versão é consultáve
 
 Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); código do kernel `0x08`, dados `0x10`.
 
-## 2. Syscalls v0
+## 2. Syscalls v1
 
 | Nº | Nome | Args | Retorno (`RDX`) | Erros |
 |---|---|---|---|---|
