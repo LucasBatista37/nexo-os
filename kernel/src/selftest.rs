@@ -63,6 +63,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_syscall_error", test_user_syscall_error),
     ("user_ipc", test_user_ipc),
     ("ipc_handoff", test_ipc_handoff),
+    ("user_nvme", test_user_nvme),
     ("user_services", test_user_services),
     ("user_syscall_fuzz", test_user_syscall_fuzz),
     ("pci", test_pci),
@@ -2895,6 +2896,45 @@ fn test_ipc_handoff() -> TestResult {
     sched::reap();
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    Ok(())
+}
+
+/// Driver NVMe em ring 3 servindo o `nexo.block`: o MESMO cliente cru do blockdev (modo 8)
+/// roda contra o `nvmedev` — capacidade, escrita/leitura com padrão e marcador de persistência
+/// no disco NVMe de dados. Substituibilidade por protocolo, com um controlador PCI real (QEMU).
+fn test_user_nvme() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    let Some(bdf) = crate::pci::devices()
+        .iter()
+        .find(|d| d.class == 0x01 && d.subclass == 0x08 && d.prog_if == 0x02)
+        .map(|d| d.bdf)
+    else {
+        return Err(String::from("NVMe ausente (rode com o disco NVMe)"));
+    };
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let g = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let drv = crate::process::spawn_named("nvmedev", 0, alloc::vec![g, channel_handle(a)])
+        .map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 8, alloc::vec![channel_handle(b)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let dc = crate::process::wait_and_reap(&drv);
+    drop((drv, client));
+    sched::reap();
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(dc == 0, "nvmedev saiu com {dc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    let frames = settled_free_frames(frames0, 8);
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
     Ok(())
 }
 

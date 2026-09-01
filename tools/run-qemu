@@ -39,7 +39,8 @@ FAILURE_EXIT = 35  # (0x11 << 1) | 1
 
 
 def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk=None, console_socket=None,
-             qmp_socket=None, input_keyboard=False, input_tablet=False, net=False, net_hostfwd=0, net_dump=None) -> list:
+             qmp_socket=None, input_keyboard=False, input_tablet=False, net=False, net_hostfwd=0, net_dump=None,
+             nvme_disk=None) -> list:
     qemu = require("qemu-system-x86_64", "Instale QEMU (macOS: brew install qemu; Debian: apt install qemu-system-x86)")
     ovmf = find_ovmf()
     cmd = [
@@ -60,12 +61,22 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
         cmd += [
             "-drive", f"if=none,id=nexodata,format=raw,file={disk}",
             "-device", "virtio-blk-pci,drive=nexodata,serial=nexodata,disable-legacy=on",
+        ]
+    if disk is not None:
+        cmd += [
             "-device", "virtio-rng-pci,disable-legacy=on",
             # A imagem de boot (GPT + ESP FAT32) tambem como virtio-blk somente leitura, depois
             # dos outros (BDF maior): o `espfs` le o ESP por ela; `file.locking=off` porque o
             # mesmo arquivo ja esta aberto como disco de boot (AHCI).
             "-drive", f"if=none,id=nexoboot,format=raw,readonly=on,file.locking=off,file={image}",
             "-device", "virtio-blk-pci,drive=nexoboot,serial=nexoboot,disable-legacy=on",
+        ]
+    if nvme_disk:
+        cmd += [
+            # NVMe de dados (Fase 7): o driver nvmedev serve nexo.block sobre ele. Depois do
+            # nexoboot para nao mudar a ordem/BDF dos dispositivos virtio existentes.
+            "-drive", f"if=none,id=nexonvme,format=raw,file={nvme_disk}",
+            "-device", "nvme,drive=nexonvme,serial=nexonvme",
         ]
     if console_socket is not None:
         cmd += [
@@ -103,6 +114,9 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--log", default=None, help="grava a saida serial neste arquivo")
     ap.add_argument("--gdb", action="store_true")
+    ap.add_argument("--nvme-disk", default=str(BUILD / "nvme-data.img"),
+                    help="disco NVMe de dados (criado com 8 MiB se nao existir; --no-nvme desativa)")
+    ap.add_argument("--no-nvme", action="store_true", help="nao anexa o disco NVMe")
     ap.add_argument("--disk", default=str(BUILD / "data.img"),
                     help="disco de dados virtio-blk (raw; criado com 16 MiB se nao existir)")
     ap.add_argument("--no-disk", action="store_true", help="nao anexa o disco de dados")
@@ -134,8 +148,15 @@ def main() -> int:
             disk.parent.mkdir(parents=True, exist_ok=True)
             with open(disk, "wb") as f:
                 f.truncate(16 * 1024 * 1024)
+    nvme_disk = None
+    if not a.no_nvme:
+        nvme_disk = Path(a.nvme_disk)
+        if not nvme_disk.exists():
+            nvme_disk.parent.mkdir(parents=True, exist_ok=True)
+            with open(nvme_disk, "wb") as f:
+                f.truncate(8 * 1024 * 1024)
     cmd = qemu_cmd(image, a.test, a.gdb, a.extra, a.smp, disk, a.console_socket, a.qmp_socket, a.input_keyboard, a.input_tablet,
-                   a.net, a.net_hostfwd, a.net_dump)
+                   a.net, a.net_hostfwd, a.net_dump, nvme_disk)
     log("$ " + " ".join(cmd))
     if not a.test and not a.log:
         return subprocess.call(cmd)

@@ -565,7 +565,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] implementar HID USB;
 - [ ] implementar armazenamento USB;
 - [ ] criar enumeração e autorização de dispositivos USB;
-- [ ] implementar NVMe ou AHCI conforme o computador de referência;
+- [-] implementar NVMe ou AHCI conforme o computador de referência — *o driver **NVMe** existe (`services/nvmedev`, ring 3): concessão de uma função PCI (classe 01h/08h/02h), BAR0 por `mmio_map`, DMA por páginas concedidas; filas de admin + E/S (identify controller/namespace, PRP1 único), servindo o MESMO protocolo `nexo.block` v0 — o cliente cru do blockdev roda contra ele **sem mudar uma linha** (substituibilidade por protocolo). QEMU `-device nvme` como referência (`run-qemu` anexa um disco NVMe de 8 MiB por padrão); auto-teste `user_nvme` (83º) com persistência entre boots. Pendem: interrupções (MSI-X; hoje polling), múltiplos pedidos em voo, PRP2/listas e hardware real*;
 - [ ] implementar teclado, touchpad e mouse reais;
 - [ ] implementar relógio, RTC e fusos horários;
 - [ ] implementar áudio no hardware de referência;
