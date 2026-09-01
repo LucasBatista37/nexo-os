@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-31 (commit `5d46167`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-08-31 (commit `2d2e5b0`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 160 · 🟡 63 · ⬜ 312 · ⛔ 0 → **36% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 160 · 🟡 64 · ⬜ 311 · ⛔ 0 → **36% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -14,7 +14,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 | Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 17 | 3 | 1 | 88% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 14 | 3 | 47% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 9 | 14 | 2 | 64% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
-| Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 3 | 6 | 16 | 24% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
+| Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 3 | 7 | 15 | 26% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
 | Fase 7 — Áudio, mídia, USB e hardware real (anos 5–7) | ⬜ não iniciado | 0 | 0 | 20 | 0% | 12–24 meses | USB/HID/armazenamento, NVMe/AHCI, áudio, Ethernet real, Wi-Fi, GPU/display, energia/suspensão, laboratório de hardware |
 | Fase 8 — Segurança, instalação, atualização e recuperação (anos 5–8) | ⬜ não iniciado | 0 | 0 | 22 | 0% | 9–15 meses | criptografia de disco, TPM, trust root, A/B, rollback, recovery, instalador, Secure Boot, backup, crash dumps, fuzzing contínuo, revisão externa |
 | Fase 9 — Beta público controlado (anos 7–10) | ⬜ não iniciado | 0 | 0 | 20 | 0% | 12–24 meses | hardware certificado, canais de release, servidores de símbolos/bugs, i18n, acessibilidade AA, documentação, 20→100 testadores, ABI candidata |
@@ -199,7 +199,7 @@ Gate: ⬜ não iniciado.
 | ⬜ | testar usabilidade com usuários externos |  |
 | ⬜ | publicar release `0.5-desktop` |  |
 
-### Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) — 24% (3 ✅, 6 🟡, 16 ⬜)
+### Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) — 26% (3 ✅, 7 🟡, 15 ⬜)
 
 Gate: ⬜ não iniciado. 
 
@@ -218,7 +218,7 @@ Gate: ⬜ não iniciado.
 | 🟡 | implementar permissões declarativas e consentimento | declaração **e imposição** existem: o manifesto NEXOPKG1 declara (`perms=`) e o **lançador** concede capacidades só pelo declarado — no auto-teste `user_launcher`, o app com `perms=ipc` nasce com o canal e funciona; o mesmo binário instalado **sem** a permissão nasce sem o handle (a capacidade simplesmente não existe para ele). O mapeamento permissão→capacidade já cobre `ipc` (canal) e **`janelas`** (sessão do compositor: a calculadora real, instalada no NexoFS, é lançada e cria a sua janela **só** com a permissão declarada — `user_launch_gui`); pendem `rede`/`arquivos` no lançador e o fluxo de **consentimento do usuário** (UI de prompt na primeira concessão) |
 | ⬜ | criar portal de arquivos, câmera, microfone e notificações |  |
 | ⬜ | criar repositório de pacotes de desenvolvimento |  |
-| ⬜ | criar processo de revisão e revogação |  |
+| 🟡 | criar processo de revisão e revogação | o **mecanismo de revogação** existe: a lista `/apps/.revoked` (um nome por linha; lista corrompida = falha fechada) é consultada pelo `install` (app revogado não instala — `InstError::Revoked`) e exposta aos lançadores (`is_revoked`); `revoke()` alimenta a lista (idempotente) — testes de host + `user_install` no NexoFS real, idempotente entre boots. Pendem o **processo** de revisão em si e a distribuição da lista (dependem do repositório de pacotes) |
 | ⬜ | portar toolchain e utilitários POSIX prioritários |  |
 | ⬜ | criar terminal e shell |  |
 | ⬜ | criar gerenciador de arquivos |  |

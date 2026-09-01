@@ -1272,7 +1272,31 @@ fn install_client() -> ! {
     if nexo_inst::current_version(&mut fs, "inst-demo") != Some(v0 + 2) {
         nexo_sys::exit(1214);
     }
-    nexo_sys::log("utest: install ok — v1 -> v2 transacional no NexoFS; corrompido nao instala");
+    // revogacao (idempotente entre boots: na 2a execucao o app ja esta revogado)
+    if !nexo_inst::is_revoked(&mut fs, "rev-demo") {
+        let n = build_app_pkg(
+            b"name=rev-demo\nversion=1.0\nentry=app.elf\n",
+            b"X",
+            &mut pkg,
+        );
+        nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1215));
+        nexo_inst::revoke(&mut fs, "rev-demo").unwrap_or_else(|_| nexo_sys::exit(1216));
+    }
+    if !nexo_inst::is_revoked(&mut fs, "rev-demo") {
+        nexo_sys::exit(1217);
+    }
+    let n = build_app_pkg(
+        b"name=rev-demo\nversion=2.0\nentry=app.elf\n",
+        b"Y",
+        &mut pkg,
+    );
+    match nexo_inst::install(&mut fs, &pkg[..n]) {
+        Err(nexo_inst::InstError::Revoked) => {}
+        _ => nexo_sys::exit(1218),
+    }
+    nexo_sys::log(
+        "utest: install ok — v1 -> v2 transacional no NexoFS; corrompido nao instala; revogado nao instala",
+    );
     nexo_sys::exit(0)
 }
 

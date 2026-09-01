@@ -542,7 +542,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [-] implementar permissões declarativas e consentimento — *declaração **e imposição** existem: o manifesto NEXOPKG1 declara (`perms=`) e o **lançador** concede capacidades só pelo declarado — no auto-teste `user_launcher`, o app com `perms=ipc` nasce com o canal e funciona; o mesmo binário instalado **sem** a permissão nasce sem o handle (a capacidade simplesmente não existe para ele). O mapeamento permissão→capacidade já cobre `ipc` (canal) e **`janelas`** (sessão do compositor: a calculadora real, instalada no NexoFS, é lançada e cria a sua janela **só** com a permissão declarada — `user_launch_gui`); pendem `rede`/`arquivos` no lançador e o fluxo de **consentimento do usuário** (UI de prompt na primeira concessão)*;
 - [ ] criar portal de arquivos, câmera, microfone e notificações;
 - [ ] criar repositório de pacotes de desenvolvimento;
-- [ ] criar processo de revisão e revogação;
+- [-] criar processo de revisão e revogação — *o **mecanismo de revogação** existe: a lista `/apps/.revoked` (um nome por linha; lista corrompida = falha fechada) é consultada pelo `install` (app revogado não instala — `InstError::Revoked`) e exposta aos lançadores (`is_revoked`); `revoke()` alimenta a lista (idempotente) — testes de host + `user_install` no NexoFS real, idempotente entre boots. Pendem o **processo** de revisão em si e a distribuição da lista (dependem do repositório de pacotes)*;
 - [ ] portar toolchain e utilitários POSIX prioritários;
 - [ ] criar terminal e shell;
 - [ ] criar gerenciador de arquivos;

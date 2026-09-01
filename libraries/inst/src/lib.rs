@@ -36,6 +36,8 @@ pub enum InstError {
     Fs,
     /// Caminho composto excedeu o limite interno.
     PathTooLong,
+    /// O aplicativo está na lista de revogação (`/apps/.revoked`): não instala nem lança.
+    Revoked,
 }
 
 impl From<PkgError> for InstError {
@@ -52,6 +54,11 @@ impl From<FsErr> for InstError {
 
 /// Raiz das instalações.
 pub const APPS_DIR: &str = "/apps";
+/// Lista de revogação: um nome de aplicativo por linha. Consultada por `install` e pelos
+/// lançadores ([`is_revoked`]); alimentada pelo processo de revisão ([`revoke`]).
+pub const REVOKED_PATH: &str = "/apps/.revoked";
+/// Tamanho máximo da lista de revogação.
+pub const REVOKED_MAX: usize = 1024;
 /// Tamanho máximo de um caminho composto.
 pub const MAX_PATH: usize = 96;
 
@@ -141,11 +148,44 @@ pub fn versioned_path<'a>(
     Ok(core::str::from_utf8(&out[..len]).unwrap_or(""))
 }
 
+/// `true` se `name` está na lista de revogação.
+pub fn is_revoked(fs: &mut impl AppFs, name: &str) -> bool {
+    let mut buf = [0u8; REVOKED_MAX];
+    let Ok(n) = fs.read_file(REVOKED_PATH, &mut buf) else {
+        return false; // sem lista = nada revogado
+    };
+    let Ok(text) = core::str::from_utf8(&buf[..n]) else {
+        return true; // lista corrompida: falha fechada (nega tudo)
+    };
+    text.lines().any(|l| l.trim() == name)
+}
+
+/// Acrescenta `name` à lista de revogação (idempotente). A partir daí, `install` recusa o app e
+/// lançadores devem consultar [`is_revoked`] antes de executar.
+pub fn revoke(fs: &mut impl AppFs, name: &str) -> Result<(), InstError> {
+    if is_revoked(fs, name) {
+        return Ok(());
+    }
+    let mut buf = [0u8; REVOKED_MAX];
+    let n = fs.read_file(REVOKED_PATH, &mut buf).unwrap_or(0);
+    if n + name.len() + 1 > REVOKED_MAX {
+        return Err(InstError::Fs);
+    }
+    buf[n..n + name.len()].copy_from_slice(name.as_bytes());
+    buf[n + name.len()] = b'\n';
+    fs.mkdir(APPS_DIR)?;
+    fs.write_file(REVOKED_PATH, &buf[..n + name.len() + 1])?;
+    Ok(())
+}
+
 /// Instala (ou atualiza) o pacote `pkg`; devolve a versão instalada. Transacional: o ponteiro
 /// `.cur` só é gravado depois de todo o conteúdo — antes disso, a versão corrente não muda.
 pub fn install(fs: &mut impl AppFs, pkg: &[u8]) -> Result<u32, InstError> {
     let p = Package::parse(pkg)?; // valida tudo antes de tocar no disco
     let name = p.manifest().name;
+    if is_revoked(fs, name) {
+        return Err(InstError::Revoked); // revisão/revogação: app revogado não instala
+    }
     let next = current_version(fs, name).map_or(1, |v| v + 1);
     fs.mkdir(APPS_DIR)?;
     let mut pb = [0u8; MAX_PATH];
@@ -296,6 +336,24 @@ mod tests {
                 assert_eq!(fs.files["/apps/calc.v2/calc.elf"], b"BBB");
             }
         }
+    }
+
+    #[test]
+    fn revoked_app_neither_installs_nor_reads_as_ok() {
+        let mut fs = Mock::new();
+        install(&mut fs, &pkg("1", b"AAA")).unwrap();
+        assert!(!is_revoked(&mut fs, "calc"));
+        revoke(&mut fs, "calc").unwrap();
+        revoke(&mut fs, "calc").unwrap(); // idempotente
+        assert!(is_revoked(&mut fs, "calc"));
+        assert!(matches!(
+            install(&mut fs, &pkg("2", b"BBB")),
+            Err(InstError::Revoked)
+        ));
+        // outro app segue instalável; lista com várias linhas funciona
+        revoke(&mut fs, "outro").unwrap();
+        assert!(is_revoked(&mut fs, "outro"));
+        assert!(!is_revoked(&mut fs, "livre"));
     }
 
     #[test]
