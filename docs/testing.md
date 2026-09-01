@@ -45,3 +45,20 @@
 ## Depuração
 
 `tools/run-qemu --gdb` inicia parado com gdbstub em `:1234`. No `lldb`: `target create build/kernel.elf`, `gdb-remote 1234`, `b nexo_kernel::kmain`, `c`. Os símbolos do kernel estão em `build/kernel.sym` (`llvm-nm -n`).
+
+## Regras aprendidas em campo (2026-09-01)
+
+- **Discos persistentes**: `build/data.img` (NexoFS) e `build/nvme-data.img` (NVMe, anexado por
+  padrão; `run-qemu --no-nvme` desativa) sobrevivem entre execuções. Teste que persiste estado
+  usa **diretório com prefixo exclusivo** (`/fm-teste`, `/portal-teste`, ...) e versões
+  **relativas** — nunca contadores absolutos. O padrão "1º boot passa, seguintes falham" é
+  colisão de estado, não flake.
+- **Sinal do host ≠ falha do guest**: quando o QEMU do runner morre por sinal (códigos
+  245/246/250 no shell), todos os executores de cenário reexecutam até 3×. Escritas parciais
+  da tentativa abortada equivalem a um corte de energia — que o `powercut` prova que aguentamos.
+- **Memória compartilhada**: leituras de pixel concorrentes a recomposições esperam
+  **convergência** (`wm_wait_px`); fim de vida se sinaliza por **mensagem**, nunca por pixel
+  (pixels rolam). Handles em trânsito são protegidos pelo kernel (`ipc::InFlight` — regressão
+  coberta por `ipc_handoff`).
+- **Suíte local sob carga** (ex.: stress de 24 h no mesmo host): exigir que o teste NOVO passe
+  e tratar o resto com o diagnóstico acima antes de culpar contenção.
