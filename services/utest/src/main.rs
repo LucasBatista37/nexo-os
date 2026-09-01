@@ -94,6 +94,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         48 => launcher_client(param as usize),
         49 => launch_gui_client(param as usize),
         50 => config_driver(),
+        51 => monitor_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -668,6 +669,67 @@ impl FsClient {
 /// Modo 50: driver das Configuracoes. Handle 0 = sessao nexo.wm (bootstrap), handle 1 = canal com
 /// o app config. Clica nos toggles e confere os efeitos REAIS: prefs{} reflete o movimento
 /// reduzido; com nao-perturbe ligado, um aviso nao desenha banner (pixel intacto).
+/// Modo 51: monitor de sistema. Abre uma sessao para o monitor, espera "pronto" e verifica na
+/// saida composta: as quatro celulas de estatistica verdes (kernel respondeu com valores saos) e
+/// o heartbeat alternando entre branco e magenta (o monitor esta vivo, relendo e recomitando).
+fn monitor_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    // fundo azul cobrindo a tela
+    let (bg, bg_base) = wm_create(s1, 0, 0, 64, 48, 0);
+    wm_fill(bg_base, 64, 48, 0, 0, 255);
+    wm_commit(s1, bg);
+
+    // sessao para o monitor
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1360));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1361));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1362);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1363),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1364);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pronto" => {}
+        _ => nexo_sys::exit(1365),
+    }
+
+    // saida composta
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1366));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1367);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1368));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1369));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1370));
+    let stride = outp.w;
+
+    // janela do monitor em (8,8); celula k em (10+8k, 10); heartbeat em (42,10)
+    for k in 0..4 {
+        wm_wait_px(ob, stride, 10 + 8 * k, 10, (0, 200, 0), 1371 + k as i64);
+    }
+    wm_wait_px(ob, stride, 42, 10, (255, 255, 255), 1375);
+    wm_wait_px(ob, stride, 42, 10, (255, 0, 255), 1376);
+    wm_wait_px(ob, stride, 42, 10, (255, 255, 255), 1377);
+
+    nexo_sys::log("utest: monitor ok — estatisticas do kernel saas e heartbeat vivo");
+    nexo_sys::exit(0)
+}
+
 fn config_driver() -> ! {
     let s1: nexo_sys::Handle = 0;
     let pipe: nexo_sys::Handle = 1;

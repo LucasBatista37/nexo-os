@@ -34,7 +34,7 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 4 | `sleep` | ns | 0 | — |
 | 5 | `get_pid` | — | pid | — |
 | 6 | `abi_version` | — | 0 | — |
-| 7 | `debug_info` | 0 CPUs online / 1 uptime ms / 2 syscalls do processo | valor | `InvalidArgs` |
+| 7 | `debug_info` | 0 CPUs online / 1 uptime ms / 2 syscalls do processo / 3 handles do processo / 4 processos vivos / 5 quadros livres / 6 quadros utilizáveis | valor | `InvalidArgs` |
 
 | 8 | `handle_close` | h | 0 | `BadHandle` |
 | 9 | `handle_duplicate` | h, rights | novo handle | `BadHandle`, `Denied` (sem `DUPLICATE` ou tentando ampliar direitos) |

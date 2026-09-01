@@ -746,6 +746,8 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             2 => (Status::Ok, p.syscalls.load(Ordering::Relaxed)),
             3 => (Status::Ok, p.handles.lock().len() as u64),
             4 => (Status::Ok, process::count() as u64),
+            5 => (Status::Ok, crate::mm::phys::stats().free),
+            6 => (Status::Ok, crate::mm::phys::stats().total_usable),
             _ => (Status::InvalidArgs, 0),
         },
         SYS_HANDLE_CLOSE => match p.handles.lock().take(f.rdi as u32) {

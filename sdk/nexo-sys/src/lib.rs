@@ -128,7 +128,8 @@ pub fn abi_version() -> u64 {
     unsafe { raw(abi::SYS_ABI_VERSION, 0, 0, 0).1 }
 }
 
-/// Informação de depuração (`sel`: 0 CPUs, 1 uptime ms, 2 syscalls do processo).
+/// Informação de depuração (`sel`: 0 CPUs, 1 uptime ms, 2 syscalls do processo, 3 handles do
+/// processo, 4 processos vivos, 5 quadros físicos livres, 6 quadros físicos utilizáveis).
 pub fn debug_info(sel: u64) -> u64 {
     // SAFETY: sem ponteiros.
     unsafe { raw(abi::SYS_DEBUG_INFO, sel, 0, 0).1 }

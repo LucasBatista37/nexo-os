@@ -324,6 +324,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 11 — monitor de sistema)
+- `services/monitor`: **monitor de sistema** — janela que lê a saúde do kernel via `debug_info` (CPUs online, uptime, processos vivos, memória física) e pinta uma célula verde/vermelha por estatística mais um *heartbeat* que alterna branco/magenta a cada releitura (~100 ms), provando de fora que o monitor está vivo.
+- `debug_info`: seletores novos (aditivos) — 5 quadros físicos livres, 6 quadros físicos utilizáveis (specs atualizadas).
+- Auto-teste `user_monitor` (74º) + modo 51 do `utest`: espera as quatro células verdes na saída composta e vê o heartbeat trocar de cor duas vezes.
+
 ### Adicionado (Fase 6, bloco 10 — mecanismo de revogação)
 - `nexo-inst`: **revogação** — a lista `/apps/.revoked` (um nome por linha) é consultada pelo `install`, que recusa apps revogados (`InstError::Revoked`); `is_revoked()` serve aos lançadores (não executar o que foi revogado) e `revoke()` alimenta a lista (idempotente). Lista ilegível = **falha fechada** (nega tudo). Testes de host (revogado não instala; outros seguem livres) e o `user_install` ganhou a etapa no NexoFS real, idempotente entre boots (na 2ª execução o app já está revogado e o teste confere a recusa direto).
 
