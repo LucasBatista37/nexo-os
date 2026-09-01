@@ -1,0 +1,4 @@
+name=visor
+version=0.1.0
+entry=nexo-visor
+perms=janelas

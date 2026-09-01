@@ -324,6 +324,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 13 — visualizador de imagens)
+- `nexo-img`: decodificador de imagens `no_std` e sem alocação — primeiro formato **PPM P6** (cabeçalho texto + trios RGB), com comentários, limites de dimensão e validação hostil: nenhum prefixo ou mutação pode causar pânico (testes de host incl. fuzz-lite de truncamentos).
+- `services/visor`: **visualizador de imagens** — recebe do orquestrador a sessão do compositor e um canal `nexo.fs` com "abre <caminho>", lê o arquivo em blocos, decodifica e apresenta numa janela do tamanho exato da imagem.
+- Auto-teste `user_visor` (76º) + modo 53 do `utest`: escreve um PPM 16×12 de quadrantes coloridos no NexoFS real (idempotente entre boots), transfere o canal do fs ao visor pelo pipe e confere os quatro quadrantes na saída composta.
+
+### Notas (disco de dados cheio ≠ corrupção)
+- Diagnóstico de campo: dezenas de execuções da suíte encheram o `build/data.img` local (16 MiB) — as instalações versionadas acumulam `v1..vN` sem coleta — e os testes de armazenamento passaram a falhar de forma **determinística** (ENOSPC gracioso, sem corrupção; disco fresco = suíte verde). Próximo passo natural: coleta de versões antigas no `nexo-inst`.
+
 ### Adicionado (Fase 6, bloco 12 — terminal gráfico)
 - `services/term`: **terminal gráfico** — uma janela que *serve* o protocolo `nexo.console` v1.0, e com isso o shell de diagnóstico existente roda dentro dela **sem mudar uma linha**: escritas do shell viram texto numa grade de glifos 8×8 (`nexo-font`) com quebra automática, `\r`/`\n`/backspace e rolagem (linha nova nasce limpa); as teclas que o compositor entrega à janela em foco viram a leitura da console — a mediação do compositor vale para o shell também.
 - Auto-teste `user_term` (75º) + modo 52 do `utest`: injeta `eco ola` e `sair` tecla a tecla pelo canal de entrada do compositor e confere os glifos do shell na saída composta usando um espelho da grade alimentado com o fluxo determinístico que o shell emite (fonte real `nexo-font` diz qual pixel acende). Encerramento por handshake: `sair` → shell despede-se e sai 0 → term detecta o console fechado, avisa `"fim"` ao orquestrador e sai 0 (pixels rolam durante ecos e não servem de sinal de encerramento — lição registrada no teste).

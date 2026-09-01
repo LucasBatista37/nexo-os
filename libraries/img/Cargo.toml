@@ -1,0 +1,9 @@
+[package]
+name = "nexo-img"
+description = "Decodificador de imagens do Nexo OS (PPM P6, no_std, sem alloc)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

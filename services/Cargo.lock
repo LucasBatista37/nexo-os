@@ -122,6 +122,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-img"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-init"
 version = "0.0.1"
 dependencies = [
@@ -297,6 +301,17 @@ dependencies = [
 [[package]]
 name = "nexo-virtio"
 version = "0.0.1"
+
+[[package]]
+name = "nexo-visor"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+ "nexo-img",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
 
 [[package]]
 name = "nexo-wm"

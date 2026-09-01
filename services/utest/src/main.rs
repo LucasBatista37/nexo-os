@@ -96,6 +96,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         50 => config_driver(),
         51 => monitor_driver(),
         52 => term_driver(),
+        53 => visor_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -922,6 +923,94 @@ fn term_driver() -> ! {
     }
 
     nexo_sys::log("utest: term ok — shell real numa janela, do teclado ao pixel");
+    nexo_sys::exit(0)
+}
+
+/// Modo 53: visualizador de imagens. Escreve um PPM P6 com quadrantes coloridos no NexoFS
+/// real (idempotente entre boots), entrega ao visor uma sessao do compositor e o canal do fs
+/// com "abre <caminho>", e confere os quatro quadrantes na saida composta.
+fn visor_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    // imagem de teste: 16x12, quadrantes TL vermelho / TR verde / BL azul / BR branco
+    const IW: u32 = 16;
+    const IH: u32 = 12;
+    let mut ppm = [0u8; 16 + (IW * IH * 3) as usize];
+    let hdr = b"P6\n16 12\n255\n";
+    ppm[..hdr.len()].copy_from_slice(hdr);
+    let mut o = hdr.len();
+    for y in 0..IH {
+        for x in 0..IW {
+            let c: (u8, u8, u8) = match (x >= IW / 2, y >= IH / 2) {
+                (false, false) => (200, 0, 0),
+                (true, false) => (0, 200, 0),
+                (false, true) => (0, 0, 200),
+                (true, true) => (255, 255, 255),
+            };
+            ppm[o] = c.0;
+            ppm[o + 1] = c.1;
+            ppm[o + 2] = c.2;
+            o += 3;
+        }
+    }
+    let mut fsc = FsClient {
+        ch: 2,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    {
+        use nexo_inst::AppFs;
+        let mut afs = InstFs { c: &mut fsc };
+        afs.write_file("/visor-teste.ppm", &ppm[..o])
+            .unwrap_or_else(|_| nexo_sys::exit(1410));
+    }
+
+    // sessao para o visor + canal do fs com o caminho
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1411));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1412));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1413);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1414),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1415);
+    }
+    if nexo_sys::channel_send(pipe, b"abre /visor-teste.ppm", &[2]) != Status::Ok {
+        nexo_sys::exit(1416);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pronto" => {}
+        _ => nexo_sys::exit(1417),
+    }
+
+    // saida composta: janela em (8,8) — um ponto no miolo de cada quadrante
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1418));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1419);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1420));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1421));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1422));
+    let stride = outp.w;
+    wm_wait_px(ob, stride, 8 + 3, 8 + 3, (200, 0, 0), 1423);
+    wm_wait_px(ob, stride, 8 + 12, 8 + 3, (0, 200, 0), 1424);
+    wm_wait_px(ob, stride, 8 + 3, 8 + 9, (0, 0, 200), 1425);
+    wm_wait_px(ob, stride, 8 + 12, 8 + 9, (255, 255, 255), 1426);
+
+    nexo_sys::log("utest: visor ok — PPM do NexoFS decodificado e apresentado");
     nexo_sys::exit(0)
 }
 
