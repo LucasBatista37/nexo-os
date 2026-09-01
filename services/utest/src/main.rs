@@ -2265,8 +2265,31 @@ fn install_client() -> ! {
         Err(nexo_inst::InstError::Revoked) => {}
         _ => nexo_sys::exit(1218),
     }
+    // repositorio local: o pacote em /repo/<nome>.npk instala pelo caminho oficial
+    {
+        use nexo_inst::AppFs;
+        let n = build_app_pkg(
+            b"name=repo-demo\nversion=1.0\nentry=app.elf\n",
+            b"R",
+            &mut pkg,
+        );
+        fs.mkdir("/repo").unwrap_or_else(|_| nexo_sys::exit(1221));
+        fs.write_file("/repo/repo-demo.npk", &pkg[..n])
+            .unwrap_or_else(|_| nexo_sys::exit(1222));
+        let v0r = nexo_inst::current_version(&mut fs, "repo-demo").unwrap_or(0);
+        let mut rbuf = [0u8; 512];
+        let v = nexo_inst::install_from_repo(&mut fs, "repo-demo", &mut rbuf)
+            .unwrap_or_else(|_| nexo_sys::exit(1223));
+        if v != v0r + 1 {
+            nexo_sys::exit(1224);
+        }
+        let mut rbuf2 = [0u8; 512];
+        if nexo_inst::install_from_repo(&mut fs, "sumido", &mut rbuf2).is_ok() {
+            nexo_sys::exit(1225);
+        }
+    }
     nexo_sys::log(
-        "utest: install ok — v1 -> v2 transacional no NexoFS; corrompido nao instala; revogado nao instala",
+        "utest: install ok — transacional; corrompido/revogado nao instalam; repositorio local instala",
     );
     nexo_sys::exit(0)
 }

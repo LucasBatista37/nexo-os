@@ -58,6 +58,8 @@ impl From<FsErr> for InstError {
 pub const APPS_DIR: &str = "/apps";
 /// Versões mantidas por aplicativo: a corrente e a anterior (rollback).
 pub const KEEP_VERSIONS: u32 = 2;
+/// Diretório do repositório local de pacotes: `/repo/<nome>.npk` (+ `indice.txt` informativo).
+pub const REPO_DIR: &str = "/repo";
 /// Lista de revogação: um nome de aplicativo por linha. Consultada por `install` e pelos
 /// lançadores ([`is_revoked`]); alimentada pelo processo de revisão ([`revoke`]).
 pub const REVOKED_PATH: &str = "/apps/.revoked";
@@ -230,6 +232,23 @@ pub fn install(fs: &mut impl AppFs, pkg: &[u8]) -> Result<u32, InstError> {
     // pós-commit: coleta versões antigas (best-effort — falha aqui não desfaz a instalação)
     let _ = gc(fs, name);
     Ok(next)
+}
+
+/// Instala `name` a partir do repositório local (`/repo/<name>.npk`), com toda a validação e
+/// as regras de sempre (revogação, transação, coleta). `buf` é o espaço de leitura do pacote
+/// (do chamador, para o tamanho ficar sob controle de quem instala).
+pub fn install_from_repo(
+    fs: &mut impl AppFs,
+    name: &str,
+    buf: &mut [u8],
+) -> Result<u32, InstError> {
+    let mut pb = PathBuf::new();
+    pb.push(REPO_DIR)?;
+    pb.push("/")?;
+    pb.push(name)?;
+    pb.push(".npk")?;
+    let n = fs.read_file(pb.as_str(), buf)?;
+    install(fs, &buf[..n])
 }
 
 /// Coleta versões antigas de `name`: remove toda `vN` com `N <= corrente - KEEP_VERSIONS`.
@@ -412,6 +431,25 @@ mod tests {
                 assert_eq!(fs.files["/apps/calc.v2/calc.elf"], b"BBB");
             }
         }
+    }
+
+    #[test]
+    fn installs_from_local_repo() {
+        let mut fs = Mock::new();
+        let p = pkg("1", b"AAA");
+        fs.dirs.insert("/repo".into());
+        fs.files.insert("/repo/calc.npk".into(), p.clone());
+        let mut buf = std::vec![0u8; p.len()];
+        assert_eq!(install_from_repo(&mut fs, "calc", &mut buf).unwrap(), 1);
+        assert_eq!(current_version(&mut fs, "calc"), Some(1));
+        // ausente no repositório: erro de fs, nada instalado
+        assert!(install_from_repo(&mut fs, "nao-existe", &mut buf).is_err());
+        // revogado: recusado pelo MESMO caminho
+        revoke(&mut fs, "calc").unwrap();
+        assert_eq!(
+            install_from_repo(&mut fs, "calc", &mut buf).unwrap_err(),
+            InstError::Revoked
+        );
     }
 
     #[test]
