@@ -90,6 +90,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-editor"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+ "nexo-textgrid",
+]
+
+[[package]]
 name = "nexo-espfs"
 version = "0.0.1"
 dependencies = [
@@ -290,7 +301,12 @@ dependencies = [
  "nexo-proto",
  "nexo-rt",
  "nexo-sys",
+ "nexo-textgrid",
 ]
+
+[[package]]
+name = "nexo-textgrid"
+version = "0.0.1"
 
 [[package]]
 name = "nexo-ui"

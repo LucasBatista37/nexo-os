@@ -1,0 +1,9 @@
+[package]
+name = "nexo-textgrid"
+description = "Grade de texto de celula fixa do Nexo OS (quebra, rolagem, backspace) + mapa evdev->ASCII"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

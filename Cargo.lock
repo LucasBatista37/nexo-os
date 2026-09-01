@@ -114,6 +114,10 @@ name = "nexo-syscall-abi"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-textgrid"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-ui"
 version = "0.0.1"
 dependencies = [

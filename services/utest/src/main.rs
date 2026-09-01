@@ -101,6 +101,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         55 => wm_merged_input(),
         56 => agenda_driver(),
         57 => consent_driver(param as usize),
+        58 => editor_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1090,6 +1091,121 @@ fn agenda_driver() -> ! {
     }
 
     nexo_sys::log("utest: agenda ok — mes real do RTC, hoje em acento na grade");
+    nexo_sys::exit(0)
+}
+
+/// Modo 58: editor de texto. Escreve /nota.txt, entrega ao editor a sessao e o canal do fs,
+/// digita "mundo" (com um typo corrigido por backspace) pela entrada sintetica do compositor,
+/// salva com F2 e — depois que o editor DEVOLVE o canal do fs no "fecha" — re-le o arquivo e
+/// confere o conteudo salvo. Handles: 0 wm (bootstrap), 1 pipe do editor, 2 fs.
+fn editor_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    {
+        let mut c = FsClient {
+            ch: 2,
+            req: [0; 4096],
+            reply: [0; 4096],
+        };
+        let mut fs = InstFs { c: &mut c };
+        nexo_inst::AppFs::write_file(&mut fs, "/nota.txt", b"ola\n")
+            .unwrap_or_else(|_| nexo_sys::exit(1480));
+    }
+
+    // sessao para o editor + entrada sintetica
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1481));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1482));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1483);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1484),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1485);
+    }
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1486));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1487));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1488);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1489),
+    }
+    if nexo_sys::channel_send(pipe, b"abre /nota.txt", &[2]) != Status::Ok {
+        nexo_sys::exit(1490);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pronto" => {}
+        _ => nexo_sys::exit(1491),
+    }
+
+    // saida composta: o conteudo inicial aparece ('o' de "ola" na celula (0,0))
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1492));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1493);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1494));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1495));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1496));
+    let stride = outp.w;
+    let (px, py) = glyph_diff_pixel(b'o', b' ').unwrap_or_else(|| nexo_sys::exit(1497));
+    wm_wait_px(ob, stride, px, py, (255, 255, 255), 1498);
+
+    // digita "mundoq" + backspace (typo corrigido) e confere a 2a linha: "mundo"
+    for code in [50u16, 22, 49, 32, 24, 16, 14] {
+        wm_key(inj, code, 1);
+        wm_key(inj, code, 0);
+    }
+    let (mx, my) = glyph_diff_pixel(b'm', b' ').unwrap_or_else(|| nexo_sys::exit(1499));
+    wm_wait_px(ob, stride, mx, 8 + my, (255, 255, 255), 1500);
+    let (ox, oy) = glyph_diff_pixel(b'o', b' ').unwrap_or_else(|| nexo_sys::exit(1501));
+    wm_wait_px(ob, stride, 4 * 8 + ox, 8 + oy, (255, 255, 255), 1502);
+
+    // F2 salva; o editor confirma
+    wm_key(inj, 60, 1);
+    wm_key(inj, 60, 0);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"salvo" => {}
+        _ => nexo_sys::exit(1503),
+    }
+
+    // fecha: o canal do fs volta e o arquivo salvo e conferido de fora
+    if nexo_sys::channel_send(pipe, b"fecha", &[]) != Status::Ok {
+        nexo_sys::exit(1504);
+    }
+    let fs_back = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, 1)) if &buf[..n] == b"fs" => hs[0],
+        _ => nexo_sys::exit(1505),
+    };
+    let mut c = FsClient {
+        ch: fs_back,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let mut fs = InstFs { c: &mut c };
+    let mut back = [0u8; 64];
+    let n = nexo_inst::AppFs::read_file(&mut fs, "/nota.txt", &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1506));
+    if &back[..n] != b"ola\nmundo" {
+        nexo_sys::exit(1507);
+    }
+
+    nexo_sys::log("utest: editor ok — digitado, salvo e conferido no NexoFS real");
     nexo_sys::exit(0)
 }
 

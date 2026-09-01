@@ -1,6 +1,6 @@
 [package]
-name = "nexo-term"
-description = "Aplicativo term do Nexo OS (gerado por tools/nexo-new)"
+name = "nexo-editor"
+description = "Aplicativo editor do Nexo OS (gerado por tools/nexo-new)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

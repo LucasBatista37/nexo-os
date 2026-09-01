@@ -15,6 +15,7 @@ use nexo_proto::wm;
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
+use nexo_textgrid::{Grid as TextGrid, evdev_char};
 
 const PIPE: Handle = 0;
 const CON: Handle = 1;
@@ -28,48 +29,7 @@ fn fail(code: i64, what: &str) -> ! {
     nexo_sys::exit(code)
 }
 
-/// Grade de texto do terminal: quebra automática em `COLS`, `\r`/`\n`/backspace e rolagem
-/// (a linha de baixo nasce limpa). É o "estado de tela" completo — a pintura é uma função pura
-/// desta grade, o que mantém os pixels determinísticos e testáveis.
-struct Grid {
-    cells: [[u8; COLS]; ROWS],
-    cx: usize,
-    cy: usize,
-}
-
-impl Grid {
-    fn new() -> Self {
-        Grid {
-            cells: [[b' '; COLS]; ROWS],
-            cx: 0,
-            cy: 0,
-        }
-    }
-    fn newline(&mut self) {
-        self.cy += 1;
-        if self.cy == ROWS {
-            self.cells.copy_within(1.., 0);
-            self.cells[ROWS - 1] = [b' '; COLS];
-            self.cy = ROWS - 1;
-        }
-    }
-    fn feed(&mut self, b: u8) {
-        match b {
-            b'\r' => self.cx = 0,
-            b'\n' => self.newline(),
-            0x08 => self.cx = self.cx.saturating_sub(1),
-            0x20..=0x7e => {
-                self.cells[self.cy][self.cx] = b;
-                self.cx += 1;
-                if self.cx == COLS {
-                    self.cx = 0;
-                    self.newline();
-                }
-            }
-            _ => {}
-        }
-    }
-}
+type Grid = TextGrid<COLS, ROWS>;
 
 fn redraw(base: u64, grid: &Grid) {
     // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
@@ -92,21 +52,6 @@ fn redraw(base: u64, grid: &Grid) {
             }
         }
     }
-}
-
-/// Tradução mínima de scancodes evdev (pressão) para ASCII.
-fn key_char(code: u16) -> Option<u8> {
-    Some(match code {
-        16..=25 => b"qwertyuiop"[code as usize - 16],
-        30..=38 => b"asdfghjkl"[code as usize - 30],
-        44..=50 => b"zxcvbnm"[code as usize - 44],
-        2..=10 => b"123456789"[code as usize - 2],
-        11 => b'0',
-        57 => b' ',
-        28 => b'\n',
-        14 => 0x08,
-        _ => return None,
-    })
 }
 
 /// Envia o commit e espera a resposta tolerando eventos intercalados na sessão: teclas viram
@@ -141,7 +86,7 @@ fn stash_key(keys: &mut ([u8; 64], usize), code: u16, value: u32) {
     if value != 1 {
         return;
     }
-    if let Some(ch) = key_char(code)
+    if let Some(ch) = evdev_char(code)
         && keys.1 < keys.0.len()
     {
         keys.0[keys.1] = ch;

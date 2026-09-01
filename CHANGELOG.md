@@ -324,6 +324,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 20 — editor de texto + nexo-textgrid)
+- `nexo-textgrid`: a grade de texto do terminal virou biblioteca compartilhada (quebra, rolagem, backspace, mapa evdev→ASCII) com testes de host; **`\n` agora inclui o retorno de carro** (modo *newline* — idempotente para o `\r\n` que o shell emite, e o que um editor espera de Enter). `services/term` refatorado para usá-la (o `user_term` prova a equivalência).
+- `services/editor`: **editor de texto** (MVP de notas) — abre um arquivo do `nexo.fs`, mostra o texto na grade com cursor de acento, edita no fim do texto e **F2 salva** (truncate + write reais). Em "fecha", **devolve o canal do fs** ao orquestrador antes de sair: capacidades emprestadas voltam.
+- Auto-teste `user_editor` (79º) + modo 58 do `utest`: escreve `/nota.txt`, digita "mundoq" + backspace pela entrada sintética do compositor, confere os glifos na saída composta, salva com F2 e re-lê o arquivo **de fora** com o canal devolvido: `ola\nmundo`.
+
 ### Documentação (Fase 6, bloco 19 — SDK atualizado com a plataforma dos blocos 10–18)
 - `docs/sdk.md`: tabela de crates ganhou `nexo-inst`/`nexo-img`/`nexo-cal`; o contrato de apps documenta o consentimento do lançador, a introspecção (`debug_info`, incl. o relógio de parede), o padrão de arquivos (`"abre <caminho>"` + canal `nexo.fs`; formato `v<N>` do `.cur`); exemplos apontam os sete apps reais do repositório; a seção de depuração herda as três lições pagas pelos testes (convergência em memória compartilhada, fim de vida por mensagem e não por pixel, idempotência com disco persistente).
 

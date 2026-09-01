@@ -1,0 +1,4 @@
+name=editor
+version=0.1.0
+entry=nexo-editor
+perms=janelas

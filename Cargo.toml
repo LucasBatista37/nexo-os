@@ -27,6 +27,7 @@ members = [
     "libraries/inst",
     "libraries/img",
     "libraries/cal",
+    "libraries/textgrid",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
     "sdk/nexo-net",
