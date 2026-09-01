@@ -1,0 +1,4 @@
+name=lanc
+version=0.1.0
+entry=nexo-lanc
+perms=janelas

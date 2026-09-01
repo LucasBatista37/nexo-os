@@ -166,6 +166,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-lanc"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+ "nexo-pkg",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-monitor"
 version = "0.0.1"
 dependencies = [

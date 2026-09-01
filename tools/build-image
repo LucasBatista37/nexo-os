@@ -14,7 +14,7 @@ from nexo_common import (BUILD, KERNEL_DIR, KERNEL_ELF, LOADER_DIR, LOADER_EFI, 
                          llvm_tool, log, require, run, sha256)
 
 SERVICES_DIR = ROOT / "services"
-SERVICES = ["init", "svcmgr", "echo", "echo-client", "utest", "blockdev", "fs", "rngdev", "devmgr", "espfs", "vfs", "consoledev", "shell", "inputdev", "netdev", "netd", "wm", "greeter", "shellui", "calc", "config", "monitor", "term", "visor", "agenda"]
+SERVICES = ["init", "svcmgr", "echo", "echo-client", "utest", "blockdev", "fs", "rngdev", "devmgr", "espfs", "vfs", "consoledev", "shell", "inputdev", "netdev", "netd", "wm", "greeter", "shellui", "calc", "config", "monitor", "term", "visor", "agenda", "lanc"]
 
 
 def service_elf(name: str, debug: bool) -> Path:

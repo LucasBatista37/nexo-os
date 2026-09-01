@@ -100,6 +100,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         54 => wm_real_pointer(),
         55 => wm_merged_input(),
         56 => agenda_driver(),
+        57 => consent_driver(param as usize),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1219,6 +1220,131 @@ fn config_driver() -> ! {
 /// Instala a calc com perms=janelas e a lanca: o lancador abre uma sessao do compositor SO porque
 /// a permissao foi declarada e a entrega pelo canal do app; a janela "calc" aparece (conferida por
 /// surface_info). O mesmo binario sem a permissao nasce sem sessao e sai com o proprio erro.
+/// Modo 57: consentimento no lancador. Instala dois apps (ambos declarando "janelas"), pede ao
+/// lanc que os abra e decide CLICANDO na janela de consentimento: Permitir lanca o app (a
+/// janela "calc" aparece) e Negar nao executa nada. Handles: 0 fs, 1 ELF, 2 wm (bootstrap),
+/// 3 pipe do lanc.
+fn consent_driver(elf_len: usize) -> ! {
+    let mem: nexo_sys::Handle = 1;
+    let wm_ch: nexo_sys::Handle = 2;
+    let pipe: nexo_sys::Handle = 3;
+    let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| nexo_sys::exit(1450));
+    // SAFETY: base .. base+elf_len esta dentro do MemoryObject mapeado.
+    let elf = unsafe { core::slice::from_raw_parts(base as *const u8, elf_len) };
+    static mut PKG4: [u8; 49152] = [0; 49152];
+    // SAFETY: utest tem uma unica thread; buffer estatico evita estourar a pilha.
+    let pkg = unsafe { &mut *core::ptr::addr_of_mut!(PKG4) };
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    {
+        let mut c = FsClient {
+            ch: 0,
+            req: [0; 4096],
+            reply: [0; 4096],
+        };
+        let mut fs = InstFs { c: &mut c };
+        let n = build_app_pkg(
+            b"name=app-sim\nversion=1.0\nentry=app.elf\nperms=janelas\n",
+            elf,
+            pkg,
+        );
+        nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1451));
+        let n = build_app_pkg(
+            b"name=app-nao\nversion=1.0\nentry=app.elf\nperms=janelas\n",
+            elf,
+            pkg,
+        );
+        nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1452));
+    }
+
+    // sessao para o lanc + entrada sintetica no compositor
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1453));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1454));
+    if nexo_sys::channel_send(wm_ch, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1455);
+    }
+    match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1456),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1457);
+    }
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1458));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1459));
+    if nexo_sys::channel_send(wm_ch, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1460);
+    }
+    match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1461),
+    }
+    let expect_pipe = |want: &[u8], code: i64, buf: &mut [u8; 384], hs: &mut [u32; 1]| {
+        match nexo_sys::channel_recv(pipe, buf, hs) {
+            Ok((n, _)) if &buf[..n] == want => {}
+            _ => nexo_sys::exit(code),
+        }
+    };
+    // procura uma janela em uso com o titulo dado; devolve se achou
+    let find_title = |want: &[u8], out: &mut [u8; 256], buf: &mut [u8; 384], hs: &mut [u32; 1]| {
+        for idx in 0..8u32 {
+            let m = nexo_proto::wm::SurfaceInfoRequest { index: idx }
+                .encode_msg(out)
+                .unwrap_or_else(|_| nexo_sys::exit(1462));
+            if nexo_sys::channel_send(wm_ch, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit(1463);
+            }
+            let (n, _) =
+                nexo_sys::channel_recv(wm_ch, buf, hs).unwrap_or_else(|_| nexo_sys::exit(1464));
+            let info = nexo_proto::wm::decode_surface_info_response(&buf[..n])
+                .unwrap_or_else(|_| nexo_sys::exit(1465));
+            if info.used == 1 && info.title() == want {
+                return true;
+            }
+        }
+        false
+    };
+
+    // rodada 1: PERMITIR — o app e lancado e a janela "calc" aparece
+    if nexo_sys::channel_send(pipe, b"abre app-sim", &[0]) != Status::Ok {
+        nexo_sys::exit(1466);
+    }
+    expect_pipe(b"pedido", 1467, &mut buf, &mut hs);
+    wm_click(inj, 8 + 2 + 10, 8 + 12 + 4); // centro do Permitir (janela do lanc em (8,8))
+    expect_pipe(b"permitido", 1468, &mut buf, &mut hs);
+    let start = nexo_sys::time_now();
+    while !find_title(b"calc", &mut out, &mut buf, &mut hs) {
+        if nexo_sys::time_now() - start > 10_000_000_000 {
+            nexo_sys::exit(1469);
+        }
+        nexo_sys::sleep_ns(10_000_000);
+    }
+    if nexo_sys::channel_send(pipe, b"fecha", &[]) != Status::Ok {
+        nexo_sys::exit(1470);
+    }
+    expect_pipe(b"fim", 1471, &mut buf, &mut hs);
+
+    // rodada 2: NEGAR — nada e executado ("negado" chega DEPOIS da decisao de nao lancar)
+    if nexo_sys::channel_send(pipe, b"abre app-nao", &[]) != Status::Ok {
+        nexo_sys::exit(1472);
+    }
+    expect_pipe(b"pedido", 1473, &mut buf, &mut hs);
+    wm_click(inj, 8 + 26 + 10, 8 + 12 + 4); // centro do Negar
+    expect_pipe(b"negado", 1474, &mut buf, &mut hs);
+    if find_title(b"calc", &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1475); // janela de um app negado: o consentimento falhou
+    }
+
+    nexo_sys::log("utest: consentimento ok — permitir lanca, negar nao executa");
+    nexo_sys::exit(0)
+}
+
 fn launch_gui_client(elf_len: usize) -> ! {
     let mem: nexo_sys::Handle = 1;
     let wm_ch: nexo_sys::Handle = 2;
