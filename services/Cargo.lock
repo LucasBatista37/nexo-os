@@ -253,6 +253,16 @@ name = "nexo-syscall-abi"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-term"
+version = "0.0.1"
+dependencies = [
+ "nexo-gfx",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-ui"
 version = "0.0.1"
 dependencies = [
@@ -263,6 +273,7 @@ dependencies = [
 name = "nexo-utest"
 version = "0.0.1"
 dependencies = [
+ "nexo-font",
  "nexo-gfx",
  "nexo-inst",
  "nexo-net",

@@ -95,6 +95,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         49 => launch_gui_client(param as usize),
         50 => config_driver(),
         51 => monitor_driver(),
+        52 => term_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -727,6 +728,200 @@ fn monitor_driver() -> ! {
     wm_wait_px(ob, stride, 42, 10, (255, 255, 255), 1377);
 
     nexo_sys::log("utest: monitor ok — estatisticas do kernel saas e heartbeat vivo");
+    nexo_sys::exit(0)
+}
+
+/// Espelho da grade do terminal (mesma semantica de `services/term`): e a especificacao do
+/// que deve aparecer na tela, alimentada com o fluxo de bytes que o shell comprovadamente emite.
+const TCOLS: usize = 8;
+const TROWS: usize = 6;
+struct TGrid {
+    cells: [[u8; TCOLS]; TROWS],
+    cx: usize,
+    cy: usize,
+}
+impl TGrid {
+    fn new() -> Self {
+        TGrid {
+            cells: [[b' '; TCOLS]; TROWS],
+            cx: 0,
+            cy: 0,
+        }
+    }
+    fn newline(&mut self) {
+        self.cy += 1;
+        if self.cy == TROWS {
+            self.cells.copy_within(1.., 0);
+            self.cells[TROWS - 1] = [b' '; TCOLS];
+            self.cy = TROWS - 1;
+        }
+    }
+    fn feed(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            match b {
+                b'\r' => self.cx = 0,
+                b'\n' => self.newline(),
+                0x08 => self.cx = self.cx.saturating_sub(1),
+                0x20..=0x7e => {
+                    self.cells[self.cy][self.cx] = b;
+                    self.cx += 1;
+                    if self.cx == TCOLS {
+                        self.cx = 0;
+                        self.newline();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    fn find_row(&self, want: &[u8; TCOLS]) -> Option<usize> {
+        (0..TROWS).rev().find(|&r| &self.cells[r] == want)
+    }
+}
+
+/// Primeiro pixel aceso do glifo de `want` que esteja apagado no glifo de `prev` — um pixel que
+/// comprovadamente muda quando a celula troca de `prev` para `want`.
+fn glyph_diff_pixel(want: u8, prev: u8) -> Option<(i32, i32)> {
+    let gw = nexo_font::glyph(want as char);
+    let gp = if (0x20..0x7f).contains(&prev) {
+        *nexo_font::glyph(prev as char)
+    } else {
+        [0u8; 8]
+    };
+    for row in 0..8 {
+        for col in 0..8 {
+            let bit = 0x80u8 >> col;
+            if gw[row] & bit != 0 && gp[row] & bit == 0 {
+                return Some((col, row as i32));
+            }
+        }
+    }
+    None
+}
+
+/// Digita uma linha no canal de entrada sintetico (pressao+soltura por tecla) terminando em Enter.
+fn term_type(inj: nexo_sys::Handle, text: &[u8]) {
+    for &ch in text {
+        let code: u16 = match ch {
+            b'a'..=b'z' => {
+                const QW: &[u8] = b"qwertyuiop";
+                const AS: &[u8] = b"asdfghjkl";
+                const ZX: &[u8] = b"zxcvbnm";
+                if let Some(i) = QW.iter().position(|&c| c == ch) {
+                    16 + i as u16
+                } else if let Some(i) = AS.iter().position(|&c| c == ch) {
+                    30 + i as u16
+                } else {
+                    44 + ZX.iter().position(|&c| c == ch).unwrap_or(0) as u16
+                }
+            }
+            b' ' => 57,
+            _ => continue,
+        };
+        wm_key(inj, code, 1);
+        wm_key(inj, code, 0);
+    }
+    wm_key(inj, 28, 1);
+    wm_key(inj, 28, 0);
+}
+
+/// Modo 52: terminal grafico hospedando o shell de diagnostico real. Abre a sessao do terminal,
+/// injeta teclas pelo canal de entrada do compositor (so a janela em foco as recebe), e confere
+/// na saida composta os glifos que o shell mandou desenhar: "ola" do `eco` e o "ate mais" do
+/// `sair` — fim de linha a fim de linha, do teclado ao pixel.
+fn term_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+
+    // sessao para o terminal (a janela dele e a primeira: recebe o foco ao nascer)
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1380));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1381));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1382);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1383),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1384);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pronto" => {}
+        _ => nexo_sys::exit(1385),
+    }
+
+    // saida composta + canal de entrada sintetico
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1386));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1387);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1388));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1389));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1390));
+    let stride = outp.w;
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1391));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1392));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1393);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1394),
+    }
+
+    // fase 1: "eco ola" — o fluxo que o shell emite e deterministico
+    let mut g = TGrid::new();
+    g.feed(b"\r\nNexo OS - shell de diagnostico (digite 'ajuda')\r\n> ");
+    g.feed(b"eco ola\r\nola\r\n> ");
+    let r = g
+        .find_row(b"ola     ")
+        .unwrap_or_else(|| nexo_sys::exit(1395));
+    if g.cells[r + 1][0] != b'>' {
+        nexo_sys::exit(1396);
+    }
+    term_type(inj, b"eco ola");
+    for (c, ch) in (*b"ola").into_iter().enumerate() {
+        let (px, py) = glyph_diff_pixel(ch, b' ').unwrap_or_else(|| nexo_sys::exit(1397));
+        wm_wait_px(
+            ob,
+            stride,
+            (c * 8) as i32 + px,
+            (r * 8) as i32 + py,
+            (255, 255, 255),
+            1398,
+        );
+    }
+    let (px, py) = glyph_diff_pixel(b'>', b' ').unwrap_or_else(|| nexo_sys::exit(1399));
+    wm_wait_px(
+        ob,
+        stride,
+        px,
+        ((r + 1) * 8) as i32 + py,
+        (255, 255, 255),
+        1400,
+    );
+
+    // fase 2: "sair" — o shell despede-se e sai; o term detecta o console fechado e avisa
+    // "fim" pelo pipe (pixels rolam durante os ecos e nao servem de sinal de encerramento)
+    term_type(inj, b"sair");
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"fim" => {}
+        _ => nexo_sys::exit(1401),
+    }
+
+    nexo_sys::log("utest: term ok — shell real numa janela, do teclado ao pixel");
     nexo_sys::exit(0)
 }
 
