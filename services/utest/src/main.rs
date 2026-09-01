@@ -1211,9 +1211,9 @@ fn editor_driver() -> ! {
     nexo_sys::exit(0)
 }
 
-/// Modo 59: gerenciador de arquivos. Prepara /docs (a.txt + sub/c.txt), lista o diretorio por
+/// Modo 59: gerenciador de arquivos. Prepara /fm-teste (a.txt + sub/c.txt), lista o diretorio por
 /// conta propria para saber a ordem, entrega o fs ao app e navega CLICANDO: entrar em "sub"
-/// emite "pasta /docs/sub" e a listagem muda; clicar em "c.txt" emite "abrir /docs/sub/c.txt"
+/// emite "pasta /fm-teste/sub" e a listagem muda; clicar em "c.txt" emite "abrir /fm-teste/sub/c.txt"
 /// — o gerenciador aponta, quem abre e o orquestrador. Handles: 0 wm, 1 pipe, 2 fs.
 fn arquivos_driver() -> ! {
     let s1: nexo_sys::Handle = 0;
@@ -1222,7 +1222,7 @@ fn arquivos_driver() -> ! {
     let mut buf = [0u8; 384];
     let mut hs = [0u32; 1];
 
-    // prepara o diretorio e memoriza a ordem das entradas de /docs
+    // prepara o diretorio e memoriza a ordem das entradas de /fm-teste
     let mut names = [[0u8; 24]; 6];
     let mut lens = [0usize; 6];
     let mut kinds = [0u8; 6];
@@ -1236,15 +1236,16 @@ fn arquivos_driver() -> ! {
         {
             let mut fs = InstFs { c: &mut c };
             use nexo_inst::AppFs;
-            fs.mkdir("/docs").unwrap_or_else(|_| nexo_sys::exit(1510));
-            fs.write_file("/docs/a.txt", b"A")
+            fs.mkdir("/fm-teste")
+                .unwrap_or_else(|_| nexo_sys::exit(1510));
+            fs.write_file("/fm-teste/a.txt", b"A")
                 .unwrap_or_else(|_| nexo_sys::exit(1511));
-            fs.mkdir("/docs/sub")
+            fs.mkdir("/fm-teste/sub")
                 .unwrap_or_else(|_| nexo_sys::exit(1512));
-            fs.write_file("/docs/sub/c.txt", b"C")
+            fs.write_file("/fm-teste/sub/c.txt", b"C")
                 .unwrap_or_else(|_| nexo_sys::exit(1513));
         }
-        let (st, _, dl) = c.call(6, 0, 0, 0, b"/docs");
+        let (st, _, dl) = c.call(6, 0, 0, 0, b"/fm-teste");
         if st != 0 {
             nexo_sys::exit(1514);
         }
@@ -1302,7 +1303,7 @@ fn arquivos_driver() -> ! {
         Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
         _ => nexo_sys::exit(1525),
     }
-    if nexo_sys::channel_send(pipe, b"abre /docs", &[2]) != Status::Ok {
+    if nexo_sys::channel_send(pipe, b"abre /fm-teste", &[2]) != Status::Ok {
         nexo_sys::exit(1526);
     }
     match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
@@ -1331,11 +1332,11 @@ fn arquivos_driver() -> ! {
     let (gx, gy) = glyph_diff_pixel(names[0][0], b' ').unwrap_or_else(|| nexo_sys::exit(1533));
     wm_wait_px(ob, stride, gx, gy, first_color, 1534);
 
-    // clica em "sub": navegacao emite "pasta /docs/sub" e a listagem passa a mostrar c.txt
+    // clica em "sub": navegacao emite "pasta /fm-teste/sub" e a listagem passa a mostrar c.txt
     let r_sub = row_of(b"sub");
     wm_click(inj, 4, (r_sub as i32) * 8 + 4);
     match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
-        Ok((n, _)) if &buf[..n] == b"pasta /docs/sub" => {}
+        Ok((n, _)) if &buf[..n] == b"pasta /fm-teste/sub" => {}
         _ => nexo_sys::exit(1535),
     }
     let (cx, cy) = glyph_diff_pixel(b'c', b' ').unwrap_or_else(|| nexo_sys::exit(1536));
@@ -1344,7 +1345,7 @@ fn arquivos_driver() -> ! {
     // clica em "c.txt": o app pede ao orquestrador que abra
     wm_click(inj, 4, 4);
     match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
-        Ok((n, _)) if &buf[..n] == b"abrir /docs/sub/c.txt" => {}
+        Ok((n, _)) if &buf[..n] == b"abrir /fm-teste/sub/c.txt" => {}
         _ => nexo_sys::exit(1538),
     }
 
@@ -1362,7 +1363,7 @@ fn portal_driver() -> ! {
     let mut buf = [0u8; 4096];
     let mut hs = [0u32; 1];
 
-    // conteudo conhecido + ordem das entradas de /docs (ja criado pelo modo 59 ou agora)
+    // conteudo conhecido + ordem das entradas de /portal-teste (diretorio exclusivo deste teste)
     let mut names = [[0u8; 24]; 6];
     let mut lens = [0usize; 6];
     let mut count = 0usize;
@@ -1375,11 +1376,12 @@ fn portal_driver() -> ! {
         {
             let mut fs = InstFs { c: &mut c };
             use nexo_inst::AppFs;
-            fs.mkdir("/docs").unwrap_or_else(|_| nexo_sys::exit(1550));
-            fs.write_file("/docs/a.txt", b"portal-conteudo")
+            fs.mkdir("/portal-teste")
+                .unwrap_or_else(|_| nexo_sys::exit(1550));
+            fs.write_file("/portal-teste/a.txt", b"portal-conteudo")
                 .unwrap_or_else(|_| nexo_sys::exit(1551));
         }
-        let (st, _, dl) = c.call(6, 0, 0, 0, b"/docs");
+        let (st, _, dl) = c.call(6, 0, 0, 0, b"/portal-teste");
         if st != 0 {
             nexo_sys::exit(1552);
         }
@@ -1433,7 +1435,7 @@ fn portal_driver() -> ! {
         Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
         _ => nexo_sys::exit(1562),
     }
-    if nexo_sys::channel_send(pipe, b"serve /docs", &[2]) != Status::Ok {
+    if nexo_sys::channel_send(pipe, b"serve /portal-teste", &[2]) != Status::Ok {
         nexo_sys::exit(1563);
     }
     // o "app": um par de canais; o portal fica com uma ponta
