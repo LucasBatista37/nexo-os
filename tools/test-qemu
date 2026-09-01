@@ -364,6 +364,50 @@ def qmp_send_keys(sock_path, keys) -> bool:
     return True
 
 
+def qmp_send_click(sock_path, x: int, y: int) -> bool:
+    """Conecta ao QMP e injeta um clique absoluto: move (0..32767) + botao esquerdo."""
+    import json
+    import socket
+
+    deadline = time.time() + 60
+    sk = None
+    last_err = "socket nunca apareceu"
+    while time.time() < deadline:
+        try:
+            sk = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sk.connect(str(sock_path))
+            break
+        except OSError as e:
+            last_err = str(e)
+            sk = None
+        time.sleep(0.3)
+    if sk is None:
+        log(f"qmp: {last_err}")
+        return False
+    sk.settimeout(10.0)
+    f = sk.makefile("rwb")
+    f.readline()  # saudacao
+    def cmd(obj):
+        f.write(json.dumps(obj).encode() + b"\n")
+        f.flush()
+        return f.readline()
+    try:
+        cmd({"execute": "qmp_capabilities"})
+        move = [{"type": "abs", "data": {"axis": "x", "value": x}},
+                {"type": "abs", "data": {"axis": "y", "value": y}}]
+        cmd({"execute": "input-send-event", "arguments": {"events": move}})
+        time.sleep(0.3)
+        down = [{"type": "btn", "data": {"down": True, "button": "left"}}]
+        up = [{"type": "btn", "data": {"down": False, "button": "left"}}]
+        cmd({"execute": "input-send-event", "arguments": {"events": move + down}})
+        time.sleep(0.3)
+        cmd({"execute": "input-send-event", "arguments": {"events": up}})
+    except OSError:
+        pass  # o clique valido encerra o teste e o QEMU pode sair antes do "up"
+    sk.close()
+    return True
+
+
 def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
     """Uma execucao do teste de entrada: boot com input-test=<variant>, teclas por QMP."""
     image = BUILD / "nexo-input.img"
@@ -377,19 +421,33 @@ def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
     if logfile.exists():
         logfile.unlink()
     runner_log = open(BUILD / "logs" / f"input-{variant}-runner.log", "wb")
+    input_flag = "--input-tablet" if variant == 3 else "--input-keyboard"
     proc = subprocess.Popen([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
-                             "--disk", BUILD / "nexo-input-data.img", "--input-keyboard",
+                             "--disk", BUILD / "nexo-input-data.img", input_flag,
                              "--qmp-socket", qmp_path, "--timeout", str(timeout), "--log", logfile],
                             stdout=runner_log, stderr=subprocess.STDOUT)
     ok = True
     # espera o kernel sinalizar que o driver esta pronto antes de injetar
+    ready_marker = b"ponteiro real: cadeia" if variant == 3 else b"[INPUT] aguardando teclas"
     deadline = time.time() + 90
     while time.time() < deadline:
-        if logfile.exists() and b"[INPUT] aguardando teclas" in logfile.read_bytes():
+        if logfile.exists() and ready_marker in logfile.read_bytes():
             break
         time.sleep(0.5)
     time.sleep(1.0)
-    if not qmp_send_keys(qmp_path, ["a", "b", "ret"]):
+    if variant == 3:
+        # clique no centro da janela do modo 54: pixel (20,20) da saida 64x48, normalizado.
+        # Repetido: o primeiro clique valido encerra o teste; repeticoes sao inofensivas.
+        clicked = False
+        for _ in range(3):
+            clicked = qmp_send_click(qmp_path, 20 * 32768 // 64, 20 * 32768 // 48) or clicked
+            time.sleep(1.0)
+            if logfile.exists() and b"wm ponteiro real ok" in logfile.read_bytes():
+                break
+        if not clicked:
+            log("FALHA: socket QMP nao respondeu")
+            ok = False
+    elif not qmp_send_keys(qmp_path, ["a", "b", "ret"]):
         log("FALHA: socket QMP nao respondeu")
         ok = False
     rc = proc.wait(timeout=timeout + 60)
@@ -429,6 +487,12 @@ def run_input_scenario(timeout: float) -> bool:
         r"utest: input real: tecla code=48 na janela 0",
         r"utest: input real: tecla code=28 na janela 0",
         r"utest: wm input real ok \(3 teclas, ultima code=28\)",
+        r"\[INPUT\] teste de entrada terminou com 0",
+        r"NEXO: boot completo"]) and ok
+    ok = run_input_phase(timeout, 3, [
+        r"inputdev: eixos absolutos: x max Some\(32767\), y max Some\(32767\)",
+        r"utest: ponteiro real: cadeia inputdev -> wm -> janela pronta",
+        r"utest: wm ponteiro real ok — clique local \(\d+, \d+\) na janela 0",
         r"\[INPUT\] teste de entrada terminou com 0",
         r"NEXO: boot completo"]) and ok
     log(f"=== cenario 'input': {'PASS' if ok else 'FAIL'} (logs: {BUILD / 'logs'}/input-*.log) ===")

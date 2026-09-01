@@ -1657,7 +1657,18 @@ pub fn input_test_mode(variant: u64) {
     };
     let _drv = crate::process::spawn_named("inputdev", 0, alloc::vec![g, channel_handle(a)])
         .expect("inputdev");
-    let client = if variant == 2 {
+    let client = if variant == 3 {
+        // Cadeia do PONTEIRO: inputdev(tablet) --subscribe{64x48}--> wm --pointer--> janela.
+        let (wa, wb) = ChannelEnd::create_pair();
+        let _wm =
+            crate::process::spawn_named("wm", 0, alloc::vec![channel_handle(wa)]).expect("wm");
+        crate::process::spawn_named(
+            "utest",
+            54,
+            alloc::vec![channel_handle(wb), channel_handle(b)],
+        )
+        .expect("utest")
+    } else if variant == 2 {
         // Cadeia completa: inputdev --subscribe--> canal --set_input--> wm --evento key--> janela.
         let (wa, wb) = ChannelEnd::create_pair();
         let _wm =
@@ -1672,6 +1683,7 @@ pub fn input_test_mode(variant: u64) {
         crate::process::spawn_named("utest", 13, alloc::vec![channel_handle(b)]).expect("utest")
     };
     kinfo!("[INPUT] aguardando teclas injetadas pelo host");
+    let _ = variant;
     let code = crate::process::wait_and_reap(&client);
     kinfo!("[INPUT] teste de entrada terminou com {code}");
 }

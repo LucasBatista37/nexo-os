@@ -97,6 +97,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         51 => monitor_driver(),
         52 => term_driver(),
         53 => visor_driver(),
+        54 => wm_real_pointer(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5066,6 +5067,78 @@ fn wm_grab() -> ! {
 /// transferindo a ponta de um canal novo) e entrega a outra ponta ao wm (`set_input`). Teclas
 /// fisicas (injetadas pelo host via QMP) percorrem inputdev -> wm -> evento `key` da janela em
 /// foco. Sai com 0 apos 3 teclas (esperado: 30, 48, 28).
+/// Modo 54: ponteiro real. Cadeia inputdev(tablet) --subscribe{64x48}--> canal --set_input-->
+/// wm --evento pointer--> janela. O tablet reporta ABS em 0..32767 (absinfo); o inputdev
+/// normaliza para os pixels da saida (v1.2) e o clique QMP do host chega como PointerEvent com
+/// coordenadas locais da janela sob o cursor.
+fn wm_real_pointer() -> ! {
+    let wm_ch: nexo_sys::Handle = 0;
+    let drv: nexo_sys::Handle = 1;
+    // janela unica cobrindo (10,10)..(30,30); clique no centro (20,20) => local (10,10)
+    let (a, a_base) = wm_create(wm_ch, 10, 10, 20, 20, 0);
+    wm_fill(a_base, 20, 20, 0, 255, 0);
+    wm_commit(wm_ch, a);
+
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 384];
+    let mut hs = [0u32; 1];
+    let (push_wm, push_drv) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(720));
+    let m = nexo_proto::input::SubscribeRequest {
+        chan: push_drv,
+        abs_w: 64,
+        abs_h: 48,
+    }
+    .encode_msg(&mut out)
+    .unwrap_or_else(|_| nexo_sys::exit(721));
+    if nexo_sys::channel_send(drv, &out[..m], &[push_drv]) != Status::Ok {
+        nexo_sys::exit(722);
+    }
+    match nexo_sys::channel_recv(drv, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::input::decode_subscribe_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(723),
+    }
+    let m = nexo_proto::wm::SetInputRequest { chan: push_wm }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(724));
+    if nexo_sys::channel_send(wm_ch, &out[..m], &[push_wm]) != Status::Ok {
+        nexo_sys::exit(725);
+    }
+    match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(726),
+    }
+    nexo_sys::log("utest: ponteiro real: cadeia inputdev -> wm -> janela pronta");
+
+    let start = nexo_sys::time_now();
+    loop {
+        let n = match nexo_sys::channel_recv(wm_ch, &mut buf, &mut hs) {
+            Ok((n, _)) => n,
+            _ => nexo_sys::exit(727),
+        };
+        if let Ok(ev) = nexo_proto::wm::decode_pointer_event(&buf[..n]) {
+            // tolerancia de +-1 pixel no arredondamento da normalizacao
+            if ev.surface == a && (ev.x - 10).abs() <= 1 && (ev.y - 10).abs() <= 1 {
+                nexo_rt::log!(
+                    "utest: wm ponteiro real ok — clique local ({}, {}) na janela {}",
+                    ev.x,
+                    ev.y,
+                    ev.surface
+                );
+                nexo_sys::exit(0)
+            }
+            nexo_rt::log!(
+                "utest: ponteiro real: clique local inesperado ({}, {})",
+                ev.x,
+                ev.y
+            );
+        }
+        if nexo_sys::time_now() - start > 30_000_000_000 {
+            nexo_rt::log!("utest: ponteiro real: sem clique valido em 30 s");
+            nexo_sys::exit(728)
+        }
+    }
+}
+
 fn wm_real_input() -> ! {
     let wm_ch: nexo_sys::Handle = 0;
     let drv: nexo_sys::Handle = 1;
@@ -5078,9 +5151,13 @@ fn wm_real_input() -> ! {
     let mut hs = [0u32; 1];
     // Assina o inputdev: a ponta `push_drv` vai para o driver, `push_wm` vira a fonte do wm.
     let (push_wm, push_drv) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(700));
-    let m = nexo_proto::input::SubscribeRequest { chan: push_drv }
-        .encode_msg(&mut out)
-        .unwrap_or_else(|_| nexo_sys::exit(701));
+    let m = nexo_proto::input::SubscribeRequest {
+        chan: push_drv,
+        abs_w: 0,
+        abs_h: 0,
+    }
+    .encode_msg(&mut out)
+    .unwrap_or_else(|_| nexo_sys::exit(701));
     if nexo_sys::channel_send(drv, &out[..m], &[push_drv]) != Status::Ok {
         nexo_sys::exit(702);
     }

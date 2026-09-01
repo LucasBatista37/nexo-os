@@ -168,6 +168,31 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         out
     };
 
+    // absinfo (tablet/ponteiro absoluto): maximo de cada eixo, para normalizar no subscribe.
+    // Config do virtio-input: select@0 (0x12 = ABS_INFO), subsel@1 (eixo), size@2, payload@8
+    // (min u32, max u32, ...).
+    let abs_max = |axis: u8| -> Option<u32> {
+        let d = t.device.as_ref()?;
+        d.w8(0, 0x12);
+        d.w8(1, axis);
+        if d.r8(2) == 0 {
+            return None; // dispositivo sem eixo absoluto (ex.: teclado)
+        }
+        let min = d.r32(8);
+        let max = d.r32(12);
+        if max > min { Some(max) } else { None }
+    };
+    let abs_max_x = abs_max(0);
+    let abs_max_y = abs_max(1);
+    if abs_max_x.is_some() || abs_max_y.is_some() {
+        log!(
+            "inputdev: eixos absolutos: x max {:?}, y max {:?}",
+            abs_max_x,
+            abs_max_y
+        );
+    }
+    let mut abs_dims: Option<(u32, u32)> = None;
+
     let mut push: Option<nexo_sys::Handle> = None;
     let mut buf = [0u8; 64];
     let mut reply = [0u8; 4096];
@@ -184,6 +209,11 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                         if let Some(old) = push.replace(rq.chan) {
                             let _ = nexo_sys::handle_close(old);
                         }
+                        abs_dims = if rq.abs_w > 0 && rq.abs_h > 0 {
+                            Some((rq.abs_w, rq.abs_h))
+                        } else {
+                            None
+                        };
                         let m = input::SubscribeResponse {}
                             .encode_msg(&mut reply)
                             .unwrap_or(0);
@@ -219,6 +249,31 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     // Sem assinante, os eventos ficam na fila para o `poll` (só consome o aviso).
                     if push.is_some() {
                         let n = drain(&mut q, &mut batch);
+                        // v1.2: normaliza EV_ABS X/Y do absinfo do dispositivo para 0..dim-1
+                        if let Some((aw, ah)) = abs_dims {
+                            let mut off = 0;
+                            while off + 8 <= n {
+                                let ty = u16::from_le_bytes([batch[off], batch[off + 1]]);
+                                let code = u16::from_le_bytes([batch[off + 2], batch[off + 3]]);
+                                let dim_max = match (ty, code) {
+                                    (3, 0) => abs_max_x.map(|m| (aw, m)),
+                                    (3, 1) => abs_max_y.map(|m| (ah, m)),
+                                    _ => None,
+                                };
+                                if let Some((dim, max)) = dim_max {
+                                    let v = u32::from_le_bytes([
+                                        batch[off + 4],
+                                        batch[off + 5],
+                                        batch[off + 6],
+                                        batch[off + 7],
+                                    ]);
+                                    let s = ((v as u64 * dim as u64) / (max as u64 + 1)) as u32;
+                                    let s = s.min(dim - 1);
+                                    batch[off + 4..off + 8].copy_from_slice(&s.to_le_bytes());
+                                }
+                                off += 8;
+                            }
+                        }
                         if n > 0
                             && let Some(pc) = push
                             && nexo_sys::channel_send(pc, &batch[..n], &[]) == Status::PeerClosed

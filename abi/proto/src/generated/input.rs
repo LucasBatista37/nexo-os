@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.input` v1.1 — **gerado por `tools/idlgen` de `idl/input.idl`; nao editar**.
+//! Protocolo tipado `nexo.input` v1.2 — **gerado por `tools/idlgen` de `idl/input.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x41ccd08b;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 1;
+pub const VERSION_MINOR: u16 = 2;
 
 /// `nexo.input.poll` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,6 +128,10 @@ impl PollResponse {
 pub struct SubscribeRequest {
     /// Handle `chan` (viaja no vetor de handles, nunca no payload).
     pub chan: u32,
+    /// Campo `abs_w`.
+    pub abs_w: u32,
+    /// Campo `abs_h`.
+    pub abs_h: u32,
 }
 
 impl SubscribeRequest {
@@ -140,14 +144,37 @@ impl SubscribeRequest {
         [self.chan]
     }
     /// Codifica o payload; devolve o tamanho.
-    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
-        Ok(0)
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.abs_w.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.abs_h.to_le_bytes());
+        o += 4;
+        Ok(o)
     }
     /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
     /// ausentes assumem o padrao — ipc-compat §3).
-    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
         let chan: u32 = 0; // injetado por decode_*_with_handles
-        Ok(SubscribeRequest { chan })
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let abs_w = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let abs_h = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let _ = o;
+        Ok(SubscribeRequest { chan, abs_w, abs_h })
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
     pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {

@@ -1,7 +1,7 @@
 # nexo.input — eventos de entrada (services/inputdev); formato evdev:
 # cada evento tem 8 bytes [type u16][code u16][value u32].
 # Erros remotos: 1 = pedido invalido.
-protocol input 1.1
+protocol input 1.2
 
 # Le os eventos disponiveis (sem bloquear; resposta pode vir vazia).
 method 1 poll {
@@ -16,9 +16,15 @@ method 1 poll {
 # cada lote de eventos evdev CRUS (8 bytes por evento, sem cabecalho NXIP) nesse canal, guiado
 # por interrupcao. Depois disso `poll` devolve vazio. A outra ponta do canal pode ser entregue
 # direto ao compositor (`nexo.wm set_input`), que le o mesmo formato.
+# v1.2 (aditivo): `abs_w`/`abs_h` > 0 pedem NORMALIZACAO dos eventos EV_ABS X/Y empurrados:
+# o driver le o `absinfo` do dispositivo (ex.: tablet 0..32767) e reescala para 0..abs_w-1 /
+# 0..abs_h-1 — tipicamente o tamanho da saida do compositor, que espera ABS em pixels.
+# Com 0 (padrao), os eventos passam crus (fontes sinteticas ja mandam pixels).
 method 2 subscribe {
     request {
         chan: handle,
+        abs_w: u32,
+        abs_h: u32,
     }
     response {
     }
