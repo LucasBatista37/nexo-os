@@ -572,10 +572,10 @@ def run_net_scenario(timeout: float) -> bool:
     logfile = BUILD / "logs" / "net.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
     log("=== cenario 'net' (ARP com o slirp) ===")
-    rc = subprocess.call([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
-                          "--disk", BUILD / "nexo-net-data.img", "--net", "--net-hostfwd", str(fwd_port),
-                             "--net-dump", BUILD / "logs" / "net.pcap",
-                          "--timeout", str(timeout), "--log", logfile])
+    rc = call_qemu([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
+                    "--disk", BUILD / "nexo-net-data.img", "--net", "--net-hostfwd", str(fwd_port),
+                    "--net-dump", BUILD / "logs" / "net.pcap",
+                    "--timeout", str(timeout), "--log", logfile])
     text = logfile.read_bytes().decode("utf-8", errors="replace")
     ok = True
     if rc != 33:
@@ -636,6 +636,25 @@ def run_net_scenario(timeout: float) -> bool:
     return ok
 
 
+# QEMU morto por um sinal do HOST (segfault/abort do proprio QEMU no runner) e falha de
+# infraestrutura, nao do convidado. Codigos vistos pelo shell: 256-11=245 (SIGSEGV),
+# 256-10=246 (SIGBUS), 256-6=250 (SIGABRT).
+HOST_SIGNAL_RCS = {245, 246, 250}
+
+
+def call_qemu(cmd, allow_retry=True, retries=2):
+    """subprocess.call com nova tentativa quando o QEMU morre por sinal do host. O disco do
+    cenario pode ficar com escritas parciais da tentativa abortada — equivalente a um corte de
+    energia, que o sistema precisa aguentar de qualquer forma (e o powercut prova)."""
+    rc = subprocess.call(cmd)
+    for attempt in range(retries):
+        if not allow_retry or rc not in HOST_SIGNAL_RCS:
+            return rc
+        log(f"QEMU morreu por sinal do host (rc={rc}); nova tentativa ({attempt + 2}/{retries + 1})")
+        rc = subprocess.call(cmd)
+    return rc
+
+
 def run_scenario(name: str, timeout: float) -> bool:
     if name == "shell":
         return run_shell_scenario(timeout)
@@ -668,7 +687,7 @@ def run_scenario(name: str, timeout: float) -> bool:
         kill_on = sc.get(f"kill_on_run{run_no}", sc.get("kill_on") if run_no == 1 else None)
         if kill_on:
             cmd += ["--kill-on", kill_on, "--kill-delay-ms", str(sc.get("kill_delay_ms", 0))]
-        rc = subprocess.call(cmd)
+        rc = call_qemu(cmd, allow_retry=kill_on is None)
         text = run_log.read_bytes().decode("utf-8", errors="replace")
         expected_rc = sc.get(f"exit_code_run{run_no}", sc["exit_code"])
         if rc != expected_rc:
