@@ -103,6 +103,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         57 => consent_driver(param as usize),
         58 => editor_driver(),
         59 => arquivos_driver(),
+        60 => portal_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1348,6 +1349,132 @@ fn arquivos_driver() -> ! {
     }
 
     nexo_sys::log("utest: arquivos ok — navegou por clique e delegou a abertura");
+    nexo_sys::exit(0)
+}
+
+/// Modo 60: portal de arquivos. O driver faz DOIS papeis: o app (que so tem o canal do
+/// portal e pede "escolhe") e o usuario (que clica na lista do portal). O app recebe apenas o
+/// CONTEUDO do arquivo escolhido — nunca o fs, nunca o caminho. Handles: 0 wm, 1 pipe, 2 fs.
+fn portal_driver() -> ! {
+    let s1: nexo_sys::Handle = 0;
+    let pipe: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 4096];
+    let mut hs = [0u32; 1];
+
+    // conteudo conhecido + ordem das entradas de /docs (ja criado pelo modo 59 ou agora)
+    let mut names = [[0u8; 24]; 6];
+    let mut lens = [0usize; 6];
+    let mut count = 0usize;
+    {
+        let mut c = FsClient {
+            ch: 2,
+            req: [0; 4096],
+            reply: [0; 4096],
+        };
+        {
+            let mut fs = InstFs { c: &mut c };
+            use nexo_inst::AppFs;
+            fs.mkdir("/docs").unwrap_or_else(|_| nexo_sys::exit(1550));
+            fs.write_file("/docs/a.txt", b"portal-conteudo")
+                .unwrap_or_else(|_| nexo_sys::exit(1551));
+        }
+        let (st, _, dl) = c.call(6, 0, 0, 0, b"/docs");
+        if st != 0 {
+            nexo_sys::exit(1552);
+        }
+        let entries: [u8; 4096] = c.reply;
+        let mut pos = 12usize;
+        let end = 12 + dl;
+        while pos + 6 <= end && count < 6 {
+            let nl = entries[pos + 5] as usize;
+            if pos + 6 + nl > end {
+                break;
+            }
+            lens[count] = nl.min(24);
+            names[count][..lens[count]].copy_from_slice(&entries[pos + 6..pos + 6 + lens[count]]);
+            count += 1;
+            pos += 6 + nl;
+        }
+    }
+    let mut r_a = usize::MAX;
+    for r in 0..count {
+        if &names[r][..lens[r]] == b"a.txt" {
+            r_a = r;
+        }
+    }
+    if r_a == usize::MAX {
+        nexo_sys::exit(1553);
+    }
+
+    // sessao + entrada sintetica + fiacao do portal
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1554));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1555));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(1556);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1557),
+    }
+    if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
+        nexo_sys::exit(1558);
+    }
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1559));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1560));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(1561);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(1562),
+    }
+    if nexo_sys::channel_send(pipe, b"serve /docs", &[2]) != Status::Ok {
+        nexo_sys::exit(1563);
+    }
+    // o "app": um par de canais; o portal fica com uma ponta
+    let (app, portal_end) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1564));
+    if nexo_sys::channel_send(pipe, b"cliente", &[portal_end]) != Status::Ok {
+        nexo_sys::exit(1565);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pronto" => {}
+        _ => nexo_sys::exit(1566),
+    }
+
+    // papel de app: pede um arquivo
+    if nexo_sys::channel_send(app, b"escolhe", &[]) != Status::Ok {
+        nexo_sys::exit(1567);
+    }
+
+    // papel de usuario: espera a lista aparecer e clica em a.txt
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1568));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1569);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1570));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1571));
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1572));
+    let stride = outp.w;
+    let (gx, gy) = glyph_diff_pixel(b'a', b' ').unwrap_or_else(|| nexo_sys::exit(1573));
+    wm_wait_px(ob, stride, gx, (r_a as i32) * 8 + gy, (255, 255, 255), 1574);
+    wm_click(inj, 4, (r_a as i32) * 8 + 4);
+
+    // papel de app: recebe SO o conteudo
+    match nexo_sys::channel_recv(app, &mut buf, &mut hs) {
+        Ok((n, 0)) if &buf[..n] == b"portal-conteudo" => {}
+        _ => nexo_sys::exit(1575),
+    }
+
+    nexo_sys::log("utest: portal ok — o app recebeu o conteudo; o fs ficou no portal");
     nexo_sys::exit(0)
 }
 
