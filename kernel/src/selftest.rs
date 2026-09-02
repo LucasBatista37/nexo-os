@@ -72,6 +72,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_nvme_fs", test_user_nvme_fs),
     ("user_ahci_fs", test_user_ahci_fs),
     ("user_backup", test_user_backup),
+    ("user_slots", test_user_slots_confirm),
     ("user_services", test_user_services),
     ("user_syscall_fuzz", test_user_syscall_fuzz),
     ("pci", test_pci),
@@ -3209,6 +3210,57 @@ fn test_user_c_hello() -> TestResult {
 /// Backup entre dois discos FISICOS: o volume principal (virtio-blk) e espelhado no volume de
 /// backup (AHCI) por duas instancias do fs; um "desastre" no principal (arquivo apagado +
 /// arquivo adulterado) e revertido restaurando do backup.
+/// Health check pós-boot do layout A/B (ADR-0010): o `upd`, com o canal `nexo.block` do DISCO
+/// DE BOOT real (servido pelo `ahcidev` restrito ao SATA integrado 00:1f.2, onde o QEMU anexa
+/// a imagem), localiza `\nexo\slots.bin` (GPT → FAT), marca o slot arrancado como saudável e o
+/// driver (modo 67) confere pelo "estado" — que RELÊ o setor do disco — s=1 e tentativas
+/// repostas. É a contraparte do desconto de tentativas do loader (rollback automático:
+/// `tools/test-rollback`).
+fn test_user_slots_confirm() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    // O disco de boot fica no SATA integrado do q35, sempre em 00:1f.2 (bdf 0xfa).
+    if !crate::pci::devices()
+        .iter()
+        .any(|d| d.bdf == 0x00fa && d.class == 0x01 && d.subclass == 0x06)
+    {
+        return Err(String::from("SATA integrado (00:1f.2) ausente"));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let (ctrl_a, ctrl_b) = ChannelEnd::create_pair();
+    let g = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(0x00fa))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let drv = crate::process::spawn_named("ahcidev", 0, alloc::vec![g, channel_handle(a)])
+        .map_err(String::from)?;
+    let upd = crate::process::spawn_named(
+        "upd",
+        0,
+        alloc::vec![channel_handle(ctrl_b), channel_handle(b)],
+    )
+    .map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 67, alloc::vec![channel_handle(ctrl_a)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let uc = crate::process::wait_and_reap(&upd);
+    let dc = crate::process::wait_and_reap(&drv);
+    drop((drv, upd, client));
+    sched::reap();
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(uc == 0, "upd saiu com {uc}");
+    check!(dc == 0, "ahcidev saiu com {dc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    let frames = settled_free_frames(frames0, 8);
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
 fn test_user_backup() -> TestResult {
     use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
     if !has_virtio_blk() {

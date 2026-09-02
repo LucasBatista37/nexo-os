@@ -366,6 +366,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-upd"
+version = "0.0.1"
+dependencies = [
+ "nexo-boot-abi",
+ "nexo-fat",
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-utest"
 version = "0.0.1"
 dependencies = [

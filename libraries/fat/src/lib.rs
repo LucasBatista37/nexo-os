@@ -503,6 +503,13 @@ impl<D: SectorDevice> Fat<D> {
         Ok(cur)
     }
 
+    /// LBA **absoluta no dispositivo** do primeiro setor de dados do arquivo. Para reescrita
+    /// in-place de arquivos de tamanho fixo de até um setor (o estado dos slots A/B): quem
+    /// escreve fala direto com o dispositivo de bloco — este leitor continua somente leitura.
+    pub fn first_sector_lba(&self, file: &Entry) -> Result<u64, FatError> {
+        self.cluster_lba(file.cluster)
+    }
+
     /// Lê `buf.len()` bytes de `file` a partir de `offset`; devolve quantos leu.
     pub fn read(&mut self, file: &Entry, offset: u64, buf: &mut [u8]) -> Result<usize, FatError> {
         if file.is_dir() {

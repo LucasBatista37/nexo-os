@@ -110,6 +110,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         64 => shm_quota_client(),
         65 => backup_driver(),
         66 => wm_flip_client(),
+        67 => slots_confirm_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1805,6 +1806,46 @@ fn wm_flip_client() -> ! {
     }
     nexo_sys::log(
         "utest: wm flip ok — frame publicado intacto; compor troca de buffer sob seqlock",
+    );
+    nexo_sys::exit(0)
+}
+
+/// Modo 67: health check pos-boot do layout A/B. Pede "confirma" ao `upd` — que marca o slot
+/// arrancado como saudavel no `\nexo\slots.bin` do disco de boot REAL — e confere pelo
+/// "estado" (que RELE o setor do disco) que o slot ficou com sucesso=1 e tentativas repostas.
+fn slots_confirm_driver() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let mut buf = [0u8; 64];
+    let mut hs = [0u32; 1];
+    if nexo_sys::channel_send(ch, b"confirma", &[]) != Status::Ok {
+        nexo_sys::exit(1640);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1641));
+    if n != 4 || &buf[..3] != b"ok " {
+        nexo_rt::log!(
+            "utest: slots: confirma respondeu '{}'",
+            core::str::from_utf8(&buf[..n]).unwrap_or("?")
+        );
+        nexo_sys::exit(1642);
+    }
+    let slot = buf[3];
+    if nexo_sys::channel_send(ch, b"estado", &[]) != Status::Ok {
+        nexo_sys::exit(1643);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1644));
+    // formato: "sel X sS tT" — o slot confirmado, saudavel, com as tentativas repostas
+    if n != 11 || buf[4] != slot || buf[7] != b'1' || buf[10] != b'3' {
+        nexo_rt::log!(
+            "utest: slots: estado respondeu '{}'",
+            core::str::from_utf8(&buf[..n]).unwrap_or("?")
+        );
+        nexo_sys::exit(1645);
+    }
+    nexo_rt::log!(
+        "utest: slots ok — health check confirmou o slot {} no disco (s1 t3)",
+        slot as char
     );
     nexo_sys::exit(0)
 }

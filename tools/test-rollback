@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""test-rollback — prova o rollback automático por tentativas do layout A/B (ADR-0010).
+
+Numa CÓPIA da imagem, marca o slot A como atualização PENDENTE (prioridade maior, 1 tentativa,
+sem sucesso) — como um update-manager faria após instalar em A — e arranca duas vezes:
+
+  boot 1: o loader escolhe A (pendente, prioridade maior), DESCONTA a única tentativa e grava o
+          estado; o sistema arranca (`selftest=0 exit` — sem a suíte, porque o auto-teste
+          `user_slots` é um health check de verdade e confirmaria o slot) e ninguém confirma —
+          exatamente uma atualização que arranca mas não fica saudável;
+  boot 2: A está inelegível (sem sucesso, sem tentativas) — o loader volta ao slot B sozinho.
+
+No fim, relê o slots.bin da imagem e confere o estado persistido (A: s0 t0; last_selected = B).
+
+Uso: tools/test-rollback [--timeout 420]
+"""
+import argparse
+import shutil
+import struct
+import subprocess
+import sys
+import zlib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BUILD = ROOT / "build"
+ESP = "@@{}".format(2048 * 512)
+
+
+def pack_state(a, b, last):
+    body = struct.pack("<8sI4B4B4B", b"NEXOSLAB", 1, *a, 0, *b, 0, last, 0, 0, 0)
+    return (body + struct.pack("<I", zlib.crc32(body))).ljust(512, b"\0")
+
+
+def unpack_state(raw):
+    magic, ver = struct.unpack_from("<8sI", raw)
+    assert magic == b"NEXOSLAB" and ver == 1, "slots.bin invalido"
+    assert struct.unpack_from("<I", raw, 24)[0] == zlib.crc32(raw[:24]), "CRC invalido"
+    a = struct.unpack_from("<3B", raw, 12)
+    b = struct.unpack_from("<3B", raw, 16)
+    return a, b, raw[20]
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--timeout", type=int, default=420)
+    args = ap.parse_args()
+
+    src = BUILD / "nexo.img"
+    if not src.exists():
+        print("test-rollback: build/nexo.img nao existe (rode tools/build-image)", file=sys.stderr)
+        return 2
+    mcopy = shutil.which("mcopy")
+    if not mcopy:
+        print("test-rollback: mtools ausente", file=sys.stderr)
+        return 2
+    img = BUILD / "rb-test.img"
+    shutil.copy2(src, img)
+
+    # A pendente (prioridade 3, 1 tentativa, sem sucesso); B confirmado (o slot antigo).
+    state = BUILD / "rb-slots.bin"
+    state.write_bytes(pack_state((3, 1, 0), (1, 3, 1), 0))
+    subprocess.run([mcopy, "-i", f"{img}{ESP}", "-o", str(state), "::/nexo/slots.bin"], check=True)
+    # Boots SEM a suíte: o auto-teste `user_slots` é um health check de verdade e confirmaria o
+    # slot pendente (o caminho feliz da atualização); o rollback exige boots que NÃO confirmam.
+    cfg = BUILD / "rb-boot.cfg"
+    cfg.write_text("selftest=0 exit\n")
+    subprocess.run([mcopy, "-i", f"{img}{ESP}", "-o", str(cfg), "::/nexo/boot.cfg"], check=True)
+
+    logs = []
+    for i in (1, 2):
+        log = BUILD / "logs" / f"rollback-{i}.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([str(ROOT / "tools" / "run-qemu"), "--image", str(img), "--test",
+                        "--timeout", str(args.timeout), "--log", str(log)])
+        logs.append(log.read_text(errors="replace") if log.exists() else "")
+
+    boot1 = ("slot A (pendente, prioridade 3, tentativas 0)" in logs[0]
+             and "NEXO: boot completo" in logs[0])
+    boot2 = ("slot B (confirmado" in logs[1] and "NEXO: boot completo" in logs[1])
+
+    # estado persistido: A esgotado e sem sucesso; o ultimo escolhido foi B (indice 1)
+    subprocess.run([mcopy, "-i", f"{img}{ESP}", "-n", "-o", "::/nexo/slots.bin", str(state)],
+                   check=True)
+    a, b, last = unpack_state(state.read_bytes())
+    persisted = a == (3, 0, 0) and b[2] == 1 and last == 1
+
+    pstate = "ok" if persisted else f"FALHOU A={a} B={b} last={last}"
+    print(f"test-rollback: boot1(A pendente, tentativa consumida)={'ok' if boot1 else 'FALHOU'} "
+          f"boot2(rollback para B)={'ok' if boot2 else 'FALHOU'} "
+          f"estado-persistido={pstate}")
+    return 0 if boot1 and boot2 and persisted else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
