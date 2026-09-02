@@ -596,7 +596,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] criar trust root offline e cerimônia de chaves;
 - [ ] implementar pacotes e imagens assinadas;
 - [ ] implementar proteção contra rollback;
-- [ ] implementar layout A/B;
+- [x] implementar layout A/B — *o ESP carrega **duas cópias completas** do sistema (`\nexo\a\` e `\nexo\b\`: kernel + initrd) e o estado `\nexo\slots.bin` (512 B: prioridade/tentativas/sucesso por slot + CRC32 — `nexo_boot_abi::slots`, espelhado byte a byte pelo `build-image`; spec §1.1 do boot-abi). O loader escolhe o slot elegível de maior prioridade, desconta tentativa de slot pendente ANTES de carregar (travamento consome a tentativa) e **cai para o outro slot** se o kernel falhar estruturalmente; sem `slots.bin`, vale o layout clássico (imagens antigas). Prova: `tools/test-ab` corrompe o kernel do A numa cópia da imagem e o boot cai para o B com a suíte inteira verde (92/92); os testes de esp/vfs aceitam qualquer slot com ELF íntegro. Testes de host prendem CRC/roundtrip/escolha. Atualização atômica para o slot inativo + health check pós-boot vêm a seguir*;
 - [ ] implementar atualização atômica e health check pós-boot;
 - [ ] implementar rollback automático;
 - [ ] criar ambiente de recuperação independente;

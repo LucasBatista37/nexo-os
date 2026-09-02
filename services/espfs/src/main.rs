@@ -127,9 +127,12 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         .lookup(b"/EFI/BOOT/BOOTX64.EFI")
         .map(|e| e.size)
         .unwrap_or(0);
-    let kernel = fs.lookup(b"/nexo/kernel.elf").map(|e| e.size).unwrap_or(0);
+    let kernel = fs
+        .lookup(b"/nexo/a/kernel.elf")
+        .map(|e| e.size)
+        .unwrap_or(0);
     log!(
-        "espfs: ESP {:?} em LBA {}..{}: /EFI/BOOT/BOOTX64.EFI {} bytes, /nexo/kernel.elf {} bytes",
+        "espfs: ESP {:?} em LBA {}..{}: /EFI/BOOT/BOOTX64.EFI {} bytes, /nexo/a/kernel.elf {} bytes",
         fs.kind(),
         part.first_lba,
         part.last_lba,

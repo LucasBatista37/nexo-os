@@ -3011,14 +3011,23 @@ fn esp_checks(esp: Option<nexo_sys::Handle>, hs: &mut [u32; 1]) {
     if st != 0 || boot_size == 0 {
         nexo_sys::exit(194);
     }
-    let (st, kernel_size, _) = call(1, 0, 0, b"/nexo/kernel.elf", &mut ereq, &mut ereply, hs);
-    if st != 0 || kernel_size == 0 {
-        nexo_sys::exit(195);
+    // Layout A/B: basta UM slot com kernel ELF integro (o outro pode estar corrompido —
+    // e exatamente o cenario do teste de fallback do loader, tools/test-ab).
+    let mut kernel_size = 0u64;
+    for path in [&b"/nexo/a/kernel.elf"[..], &b"/nexo/b/kernel.elf"[..]] {
+        let (st, size, _) = call(1, 0, 0, path, &mut ereq, &mut ereply, hs);
+        if st != 0 || size == 0 {
+            continue;
+        }
+        let (st, r, n) = call(2, 0, 4, path, &mut ereq, &mut ereply, hs);
+        if st == 0 && r == 4 && n == 4 && &ereply[12..16] == b"\x7fELF" {
+            kernel_size = size;
+            break;
+        }
     }
-    let (st, r, n) = call(2, 0, 4, b"/nexo/kernel.elf", &mut ereq, &mut ereply, hs);
-    if st != 0 || r != 4 || n != 4 || &ereply[12..16] != b"\x7fELF" {
-        nexo_rt::log!("utest: esp: cabecalho do kernel: status {} {} bytes", st, r);
-        nexo_sys::exit(196);
+    if kernel_size == 0 {
+        nexo_rt::log!("utest: esp: nenhum slot com kernel ELF integro");
+        nexo_sys::exit(195);
     }
     let (st, r, _) = call(
         2,
@@ -3058,16 +3067,32 @@ fn vfs_client() -> ! {
         nexo_sys::exit(211);
     }
     // /boot: stat + leitura do cabecalho ELF por inode; escrita recusada (13)
-    let (kino, n) = a.ok(0, 0, 0, 0, b"/boot/nexo/kernel.elf", 212);
-    let ksize = u64::from_le_bytes(a.data(n)[1..9].try_into().unwrap());
-    if a.data(n)[0] != 1 || ksize == 0 {
-        nexo_sys::exit(213);
+    // Layout A/B: aceita o primeiro slot com kernel ELF integro (o outro pode estar
+    // corrompido — o cenario do teste de fallback do loader, tools/test-ab).
+    let mut kernel = None;
+    for path in [
+        &b"/boot/nexo/a/kernel.elf"[..],
+        &b"/boot/nexo/b/kernel.elf"[..],
+    ] {
+        let (st, kino, n) = a.call(0, 0, 0, 0, path);
+        if st != 0 || n < 9 {
+            continue;
+        }
+        let ksize = u64::from_le_bytes(a.data(n)[1..9].try_into().unwrap());
+        if a.data(n)[0] != 1 || ksize == 0 {
+            continue;
+        }
+        let kino = kino as u32;
+        let (st, r, n) = a.call(4, kino, 0, 4, &[]);
+        if st == 0 && r == 4 && a.data(n) == b"\x7fELF" {
+            kernel = Some((kino, ksize));
+            break;
+        }
     }
-    let kino = kino as u32;
-    let (r, n) = a.ok(4, kino, 0, 4, &[], 214);
-    if r != 4 || a.data(n) != b"\x7fELF" {
-        nexo_sys::exit(215);
-    }
+    let Some((kino, ksize)) = kernel else {
+        nexo_rt::log!("utest: vfs: nenhum slot com kernel ELF integro");
+        nexo_sys::exit(213)
+    };
     let (st, _, _) = a.call(5, kino, 0, 0, b"x");
     if st != 13 {
         nexo_rt::log!("utest: vfs: escrita no /boot devolveu {}", st);
@@ -3127,7 +3152,7 @@ fn vfs_client() -> ! {
     if st != 3 {
         nexo_sys::exit(234);
     }
-    let (st, _, _) = b.call(0, 0, 0, 0, b"/boot/nexo/kernel.elf");
+    let (st, _, _) = b.call(0, 0, 0, 0, b"/boot/nexo/a/kernel.elf");
     if st != 3 {
         nexo_sys::exit(235);
     }

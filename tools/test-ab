@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""test-ab — prova o fallback estrutural do layout A/B (ADR-0010).
+
+Copia build/nexo.img, corrompe o kernel do slot A (bytes que não são um ELF) e arranca a
+cópia: o loader deve reprovar o slot A ("kernel invalido"), cair para o slot B e o sistema
+deve passar a suíte completa. A imagem canônica não é tocada.
+
+Uso: tools/test-ab [--timeout 420]
+"""
+import argparse
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+BUILD = ROOT / "build"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--timeout", type=int, default=420)
+    a = ap.parse_args()
+
+    src = BUILD / "nexo.img"
+    if not src.exists():
+        print("test-ab: build/nexo.img nao existe (rode tools/build-image)", file=sys.stderr)
+        return 2
+    img = BUILD / "ab-test.img"
+    shutil.copy2(src, img)
+
+    # O ESP começa no LBA 2048 (layout do build-image); corrompe o kernel do slot A
+    # dentro da FAT via mtools, preservando GPT e o resto da imagem.
+    mcopy = shutil.which("mcopy")
+    if not mcopy:
+        print("test-ab: mtools ausente", file=sys.stderr)
+        return 2
+    lixo = BUILD / "ab-lixo.bin"
+    lixo.write_bytes(b"\xff" * 4096)  # legivel, mas nao e um ELF
+    esp = f"{img}@@{2048 * 512}"
+    subprocess.run([mcopy, "-i", esp, "-o", str(lixo), "::/nexo/a/kernel.elf"], check=True)
+
+    log = BUILD / "logs" / "ab-fallback.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run([str(ROOT / "tools" / "run-qemu"), "--image", str(img), "--test",
+                        "--timeout", str(a.timeout), "--log", str(log)])
+    text = log.read_text(errors="replace") if log.exists() else ""
+    fell_back = "slot A: kernel invalido" in text and "slot B (" in text
+    passed = "[RESULT] PASS" in text
+    print(f"test-ab: fallback={'ok' if fell_back else 'NAO OCORREU'} "
+          f"suite={'PASS' if passed else 'FALHOU'} (qemu exit {r.returncode}, log {log})")
+    return 0 if fell_back and passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

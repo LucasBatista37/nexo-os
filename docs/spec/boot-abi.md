@@ -11,6 +11,22 @@
 | `\nexo\kernel.elf` | kernel ELF64 estático (`ET_EXEC`, `EM_X86_64`), segmentos `PT_LOAD` alinhados a 4 KiB, sem segmento W+X, `p_vaddr ≥ 0xffff_ffff_8000_0000` |
 | `\nexo\boot.cfg` | texto UTF-8; a primeira linha não vazia e não iniciada por `#` é a linha de comando (≤ 256 bytes) |
 | `\nexo\initrd` | (opcional, v2) initramfs `NEXOIRD1` (`kernel/lib/initrd`): membros nomeados, cada um um ELF64 estático de usuário (`services/*`) |
+| `\nexo\slots.bin` | (opcional) estado dos **slots A/B** (ADR-0010), 512 bytes — ver §1.1 |
+| `\nexo\a\…`, `\nexo\b\…` | (com `slots.bin`) uma cópia completa de `kernel.elf` + `initrd` por slot; `\nexo\boot.cfg` continua único |
+
+### 1.1 Layout A/B (`\nexo\slots.bin`)
+
+Formato binário (`nexo_boot_abi::slots`, little-endian, 512 bytes — um setor, reescrito
+in-place): magic `"NEXOSLAB"` (8 B), versão `u32` = 1, dois registros de slot de 4 B
+(`prioridade`, `tentativas_restantes`, `sucesso`, pad) para A e B, `last_selected` (1 B) + pad,
+e CRC32/IEEE dos primeiros 24 bytes em `[24..28)`; o restante é zero.
+
+Semântica do loader: um slot é **elegível** se `sucesso == 1` ou `tentativas_restantes > 0`; o
+loader escolhe o elegível de maior prioridade (empate → A), desconta uma tentativa de slot
+pendente **antes** de carregar (um travamento consome a tentativa) e cai para o outro slot se o
+kernel do escolhido não for um ELF válido. Sem `slots.bin` (ou inválido), vale o layout
+clássico da tabela acima. A confirmação pós-boot (health check que grava `sucesso = 1`) é do
+sistema, não do loader.
 
 ## 2. Estado da máquina na entrada do kernel
 

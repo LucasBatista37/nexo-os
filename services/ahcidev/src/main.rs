@@ -32,8 +32,8 @@ const P_FBU: u64 = 0x0c;
 const P_IS: u64 = 0x10;
 const P_CMD: u64 = 0x18;
 const P_TFD: u64 = 0x20;
-const P_SIG: u64 = 0x24;
 const P_SSTS: u64 = 0x28;
+const P_SCTL: u64 = 0x2c;
 const P_SERR: u64 = 0x30;
 const P_CI: u64 = 0x38;
 
@@ -163,7 +163,11 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let abar = nexo_sys::mmio_map(DEV, b5.base, b5.size).unwrap_or_else(|_| fail(85, "mmio_map"));
     let m = Mmio(abar);
 
-    // habilita o modo AHCI e escolhe a primeira porta com disco SATA presente
+    // Habilita o modo AHCI e escolhe a primeira porta com dispositivo SATA presente.
+    // O bring-up da porta é NOSSO (spin-up + COMRESET): não se pode depender do firmware
+    // ter conectado o controlador — com `bootindex`, o OVMF só inicializa o dispositivo de
+    // boot, e uma porta nunca tocada fica sem detecção (e sem assinatura, que só aparece
+    // após o primeiro FIS D2H; por isso a validação do dispositivo fica com o IDENTIFY).
     m.w32(R_GHC, m.r32(R_GHC) | (1 << 31)); // AE
     let pi = m.r32(R_PI);
     let cap = m.r32(R_CAP);
@@ -173,9 +177,23 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             continue;
         }
         let base = PORT_BASE + p * PORT_SIZE;
-        let ssts = m.r32(base + P_SSTS);
-        let sig = m.r32(base + P_SIG);
-        if ssts & 0xf == 3 && sig == 0x0000_0101 {
+        // para a porta e liga alimentação/spin-up antes do reset do enlace
+        m.w32(base + P_CMD, m.r32(base + P_CMD) & !(1 | (1 << 4)));
+        m.w32(base + P_CMD, m.r32(base + P_CMD) | (1 << 1) | (1 << 2)); // SUD | POD
+        // COMRESET: DET=1 por >= 1 ms, depois solta e espera o enlace (DET=3)
+        m.w32(base + P_SCTL, (m.r32(base + P_SCTL) & !0xf) | 1);
+        nexo_sys::sleep_ns(2_000_000);
+        m.w32(base + P_SCTL, m.r32(base + P_SCTL) & !0xf);
+        let mut det = 0;
+        for _ in 0..100 {
+            det = m.r32(base + P_SSTS) & 0xf;
+            if det == 3 {
+                break;
+            }
+            nexo_sys::sleep_ns(1_000_000);
+        }
+        m.w32(base + P_SERR, 0xffff_ffff);
+        if det == 3 {
             port = Some(base);
             break;
         }

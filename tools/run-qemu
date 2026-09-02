@@ -53,10 +53,10 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
         vars_img = BUILD / "efivars.fd"
         shutil.copy2(vars_src, vars_img)
         cmd += ["-drive", f"if=pflash,format=raw,file={vars_img}"]
-    cmd += [
-        "-drive", f"format=raw,file={image}",
-        "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
-    ]
+    if disk is None:
+        # Sem discos de dados: a imagem no SATA integrado, unico dispositivo de boot.
+        cmd += ["-drive", f"format=raw,file={image}"]
+    cmd += ["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
     if disk is not None:
         cmd += [
             "-drive", f"if=none,id=nexodata,format=raw,file={disk}",
@@ -84,6 +84,16 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
             "-device", "ich9-ahci,id=nexoahci",
             "-drive", f"if=none,id=nexoahcid,format=raw,file={ahci_disk}",
             "-device", "ide-hd,drive=nexoahcid,bus=nexoahci.0",
+        ]
+    if disk is not None:
+        cmd += [
+            # Disco de boot GRAVAVEL com bootindex=0, por ultimo (BDF maior — nao desloca nenhum
+            # dispositivo existente): o OVMF arranca por ELE e, por ser virtio, nao inicializa os
+            # controladores AHCI (o handover do OVMF deixa a porta num estado que o ahcidev MVP
+            # nao reconhece). O loader grava \nexo\slots.bin (estado A/B) no volume de boot; o
+            # anexo 'nexoboot' (somente leitura) continua servindo o espfs.
+            "-drive", f"if=none,id=nexomain,format=raw,file.locking=off,file={image}",
+            "-device", "virtio-blk-pci,drive=nexomain,serial=nexomain,disable-legacy=on,bootindex=0",
         ]
     if console_socket is not None:
         cmd += [

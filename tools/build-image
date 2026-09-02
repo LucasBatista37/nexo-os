@@ -6,8 +6,10 @@ Uso: tools/build-image [--cmdline "..."] [--out build/nexo.img] [--debug] [--no-
 import argparse
 import os
 import shutil
+import struct
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -54,27 +56,39 @@ def make_esp(esp_img: Path, loader: Path, kernel: Path, cmdline: str, initrd: Pa
     # -C cria a imagem; -F FAT32; -N serial fixo (reprodutibilidade); -T total de setores.
     run([mformat, "-i", str(esp_img), "-C", "-F", "-T", str(sectors), "-h", "64", "-s", "32",
          "-N", "4E45584F", "-v", "NEXO", "::"])
-    run([mmd, "-i", esp_img, "::/EFI", "::/EFI/BOOT", "::/nexo"])
+    run([mmd, "-i", esp_img, "::/EFI", "::/EFI/BOOT", "::/nexo", "::/nexo/a", "::/nexo/b"])
     # Área de preparação com mtime fixo: os timestamps FAT vêm de SOURCE_DATE_EPOCH
     # (mtools) e nunca do relógio ou do mtime dos binários recém-compilados.
     staging = BUILD / "esp-staging"
     staging.mkdir(exist_ok=True)
     epoch = int(cargo_env()["SOURCE_DATE_EPOCH"])
+    # Layout A/B (ADR-0010): uma cópia completa do sistema por slot + o estado dos slots.
+    # `slots.bin` espelha byte a byte `nexo_boot_abi::slots::State::encode` (testes de host
+    # prendem o CRC32 ao mesmo polinômio do zlib): A prioridade 2, B prioridade 1, ambos
+    # confirmados com 3 tentativas — a imagem canônica arranca por A; B é o para-quedas.
     files = {
         "BOOTX64.EFI": (loader, "::/EFI/BOOT/BOOTX64.EFI"),
-        "kernel.elf": (kernel, "::/nexo/kernel.elf"),
-        "initrd": (initrd, "::/nexo/initrd"),
+        "kernel.elf": (kernel, "::/nexo/a/kernel.elf", "::/nexo/b/kernel.elf"),
+        "initrd": (initrd, "::/nexo/a/initrd", "::/nexo/b/initrd"),
         "boot.cfg": (None, "::/nexo/boot.cfg"),
+        "slots.bin": (None, "::/nexo/slots.bin"),
     }
-    for name, (src, dest) in files.items():
+    for name, (src, *dests) in files.items():
         dst = staging / name
-        if src is None:
+        if name == "boot.cfg":
             dst.write_text("# Nexo OS boot.cfg — primeira linha nao comentada = linha de comando do kernel\n"
                            f"{cmdline}\n")
+        elif name == "slots.bin":
+            state = struct.pack("<8sI4B4B4B", b"NEXOSLAB", 1,
+                                2, 3, 1, 0,   # slot A: prioridade, tentativas, sucesso, pad
+                                1, 3, 1, 0,   # slot B
+                                0, 0, 0, 0)   # last_selected + pad
+            dst.write_bytes((state + struct.pack("<I", zlib.crc32(state))).ljust(512, b"\0"))
         else:
             shutil.copy2(src, dst)
         os.utime(dst, (epoch, epoch))
-        run([mcopy, "-i", esp_img, "-m", dst, dest])
+        for dest in dests:
+            run([mcopy, "-i", esp_img, "-m", dst, dest])
     # Independente da versão do mtools (SOURCE_DATE_EPOCH ou não), todas as
     # entradas de diretório recebem a mesma data fixa.
     n = normalize_fat_timestamps(esp_img)

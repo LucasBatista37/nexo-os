@@ -485,6 +485,191 @@ pub fn cmdline_flag(cmdline: &str, key: &str) -> bool {
 // pilha própria e paginação do kernel ativa; nunca retorna.
 pub type KernelEntry = unsafe extern "sysv64" fn(*const BootInfo) -> !;
 
+/// Estado dos **slots A/B** do sistema (ADR-0010, Plano §Fase 8: "implementar layout A/B").
+///
+/// O ESP carrega duas cópias completas do sistema (`\nexo\a\` e `\nexo\b\`: kernel + initrd) e
+/// um arquivo de estado `\nexo\slots.bin` de exatamente [`slots::BYTES`] bytes (um setor — a
+/// reescrita in-place é atômica na prática). O loader escolhe o slot **elegível** de maior
+/// prioridade (elegível = confirmado com sucesso, ou pendente com tentativas restantes),
+/// desconta uma tentativa de slot pendente ANTES de carregar (um travamento consome a
+/// tentativa) e cai para o outro slot se o kernel do escolhido falhar estruturalmente.
+/// `tools/build-image` gera o estado inicial; o build (python) espelha este layout byte a byte.
+pub mod slots {
+    /// Bytes ASCII "NEXOSLAB" em little-endian, no início do bloco de estado.
+    pub const MAGIC: u64 = 0x4241_4c53_4f58_454e;
+    /// Versão do formato do bloco de estado.
+    pub const VERSION: u32 = 1;
+    /// Tamanho do bloco de estado no disco (um setor; o restante é zero).
+    pub const BYTES: usize = 512;
+    /// Quantos slots existem (A e B).
+    pub const COUNT: usize = 2;
+
+    /// Estado de um slot.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Slot {
+        /// Prioridade de escolha (maior vence entre os elegíveis).
+        pub priority: u8,
+        /// Tentativas de boot restantes para um slot ainda não confirmado.
+        pub tries_remaining: u8,
+        /// 1 = um boot deste slot já foi confirmado saudável (health check pós-boot).
+        pub successful: u8,
+    }
+
+    /// O bloco de estado completo.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct State {
+        /// Estado de cada slot (índice 0 = A, 1 = B).
+        pub slot: [Slot; COUNT],
+        /// Último slot escolhido pelo loader (0 = A, 1 = B) — diagnóstico.
+        pub last_selected: u8,
+    }
+
+    impl State {
+        /// Um slot é **elegível** se já foi confirmado ou ainda tem tentativas.
+        pub fn eligible(&self, i: usize) -> bool {
+            let s = &self.slot[i];
+            s.successful == 1 || s.tries_remaining > 0
+        }
+
+        /// O slot a arrancar: o elegível de maior prioridade (empate → A). `None` se nenhum.
+        pub fn choose(&self) -> Option<usize> {
+            (0..COUNT)
+                .filter(|&i| self.eligible(i))
+                .max_by_key(|&i| (self.slot[i].priority, core::cmp::Reverse(i)))
+        }
+
+        /// Serializa no layout de disco (campos LE + CRC32/IEEE dos primeiros 24 bytes).
+        pub fn encode(&self) -> [u8; BYTES] {
+            let mut b = [0u8; BYTES];
+            b[0..8].copy_from_slice(&MAGIC.to_le_bytes());
+            b[8..12].copy_from_slice(&VERSION.to_le_bytes());
+            for (i, s) in self.slot.iter().enumerate() {
+                let off = 12 + i * 4;
+                b[off] = s.priority;
+                b[off + 1] = s.tries_remaining;
+                b[off + 2] = s.successful;
+            }
+            b[20] = self.last_selected;
+            let crc = crc32(&b[..24]);
+            b[24..28].copy_from_slice(&crc.to_le_bytes());
+            b
+        }
+
+        /// Valida magic/versão/CRC e desserializa; `None` se o bloco é inválido.
+        pub fn decode(b: &[u8]) -> Option<State> {
+            if b.len() < 28 {
+                return None;
+            }
+            if u64::from_le_bytes(b[0..8].try_into().ok()?) != MAGIC {
+                return None;
+            }
+            if u32::from_le_bytes(b[8..12].try_into().ok()?) != VERSION {
+                return None;
+            }
+            if u32::from_le_bytes(b[24..28].try_into().ok()?) != crc32(&b[..24]) {
+                return None;
+            }
+            let s = |off: usize| Slot {
+                priority: b[off],
+                tries_remaining: b[off + 1],
+                successful: b[off + 2],
+            };
+            Some(State {
+                slot: [s(12), s(16)],
+                last_selected: b[20],
+            })
+        }
+    }
+
+    /// CRC32/IEEE (polinômio refletido 0xEDB88320), bit a bit — pequeno e sem tabela.
+    pub fn crc32(data: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &byte in data {
+            crc ^= byte as u32;
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xEDB8_8320 & (crc & 1).wrapping_neg());
+            }
+        }
+        !crc
+    }
+}
+
+#[cfg(test)]
+mod slots_tests {
+    use super::slots::*;
+
+    #[test]
+    fn crc32_known_vector() {
+        // Vetor clássico: CRC32/IEEE de "123456789" = 0xCBF43926 (igual ao zlib.crc32 do
+        // python usado pelo build-image — o que prende os dois lados ao mesmo polinômio).
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        assert_eq!(crc32(b""), 0);
+    }
+
+    #[test]
+    fn roundtrip_and_validation() {
+        let st = State {
+            slot: [
+                Slot {
+                    priority: 2,
+                    tries_remaining: 3,
+                    successful: 1,
+                },
+                Slot {
+                    priority: 1,
+                    tries_remaining: 0,
+                    successful: 1,
+                },
+            ],
+            last_selected: 0,
+        };
+        let b = st.encode();
+        assert_eq!(State::decode(&b), Some(st));
+        // corrupção de um byte qualquer do prefixo protegido é detectada
+        for i in 0..24 {
+            let mut c = b;
+            c[i] ^= 0x55;
+            assert_eq!(State::decode(&c), None, "byte {i} corrompido passou");
+        }
+        assert_eq!(State::decode(&b[..20]), None); // truncado
+    }
+
+    #[test]
+    fn choose_priority_and_fallback() {
+        let mut st = State {
+            slot: [
+                Slot {
+                    priority: 1,
+                    tries_remaining: 0,
+                    successful: 1,
+                },
+                Slot {
+                    priority: 2,
+                    tries_remaining: 3,
+                    successful: 0,
+                },
+            ],
+            last_selected: 0,
+        };
+        // B pendente com prioridade maior vence (é a semântica de "atualização instalada em B")
+        assert_eq!(st.choose(), Some(1));
+        // B esgota as tentativas sem confirmar: volta para A (rollback)
+        st.slot[1].tries_remaining = 0;
+        assert_eq!(st.choose(), Some(0));
+        // empate de prioridade → A
+        st.slot[1] = Slot {
+            priority: 1,
+            tries_remaining: 1,
+            successful: 0,
+        };
+        assert_eq!(st.choose(), Some(0));
+        // nenhum elegível
+        st.slot[0].successful = 0;
+        st.slot[1].tries_remaining = 0;
+        assert_eq!(st.choose(), None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// PRNG determinístico para os testes "fuzz-lite" (sem dependências).

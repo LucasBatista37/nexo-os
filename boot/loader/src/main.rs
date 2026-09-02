@@ -2,7 +2,8 @@
 //!
 //! Sequência (ver docs/spec/boot-abi.md):
 //! 1. inicializa serial e console UEFI;
-//! 2. lê `\nexo\kernel.elf` e `\nexo\boot.cfg` da partição EFI;
+//! 2. lê kernel + initrd pelo layout **A/B** (`\nexo\slots.bin` escolhe o slot; fallback
+//!    estrutural para o outro slot; sem `slots.bin`, `\nexo\kernel.elf` clássico) e `boot.cfg`;
 //! 3. obtém framebuffer (GOP) e RSDP (ACPI);
 //! 4. constrói tabelas de página: physmap em `PHYS_MAP_OFFSET` (2 MiB),
 //!    alias identidade temporário, segmentos do kernel com W^X, pilha com guard page;
@@ -43,6 +44,17 @@ const MT_INITRD: MemoryType = MemoryType::custom(0x8000_0005);
 const KERNEL_PATH: &CStr16 = cstr16!("\\nexo\\kernel.elf");
 const CONFIG_PATH: &CStr16 = cstr16!("\\nexo\\boot.cfg");
 const INIT_PATH: &CStr16 = cstr16!("\\nexo\\initrd");
+/// Layout A/B (ADR-0010): estado dos slots + uma cópia completa do sistema por slot.
+const SLOTS_PATH: &CStr16 = cstr16!("\\nexo\\slots.bin");
+/// Kernel de cada slot (índice 0 = A, 1 = B).
+const SLOT_KERNEL: [&CStr16; 2] = [
+    cstr16!("\\nexo\\a\\kernel.elf"),
+    cstr16!("\\nexo\\b\\kernel.elf"),
+];
+/// Initrd de cada slot.
+const SLOT_INIT: [&CStr16; 2] = [cstr16!("\\nexo\\a\\initrd"), cstr16!("\\nexo\\b\\initrd")];
+/// Nome de exibição de cada slot nos logs.
+const SLOT_NAME: [&str; 2] = ["A", "B"];
 const LOADER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 static SERIAL: SerialPort = SerialPort::new(SerialPort::COM1);
@@ -105,6 +117,76 @@ fn read_file(path: &CStr16) -> uefi::Result<Vec<u8>> {
     }
     buf.truncate(read);
     Ok(buf)
+}
+
+/// Reescreve `path` in-place com `data` (mesmo tamanho — o estado dos slots tem tamanho fixo).
+fn write_file(path: &CStr16, data: &[u8]) -> uefi::Result<()> {
+    use uefi::proto::media::file::{File, FileAttribute, FileMode};
+    let mut sfs = boot::get_image_file_system(boot::image_handle())?;
+    let mut root = sfs.open_volume()?;
+    let handle = root.open(path, FileMode::ReadWrite, FileAttribute::empty())?;
+    let mut file = handle.into_regular_file().ok_or(uefi::Status::NOT_FOUND)?;
+    file.write(data).map_err(|e| e.to_err_without_payload())?;
+    file.flush()
+}
+
+/// Carrega kernel + initrd pelo **layout A/B** (ADR-0010): lê e valida `\nexo\slots.bin`,
+/// escolhe o slot elegível de maior prioridade, desconta uma tentativa de slot pendente ANTES
+/// de carregar (um travamento consome a tentativa; o estado volta ao disco já decrementado) e,
+/// se o kernel do escolhido falhar estruturalmente, cai para o outro slot elegível. Sem
+/// `slots.bin` (imagens antigas), usa o layout clássico `\nexo\kernel.elf` + `\nexo\initrd`.
+fn load_system() -> Result<(Vec<u8>, Vec<u8>), &'static str> {
+    use nexo_boot_abi::slots::State;
+    let Some(mut state) = read_file(SLOTS_PATH).ok().and_then(|b| State::decode(&b)) else {
+        info!("slots.bin ausente/invalido: layout classico");
+        let kernel =
+            read_file(KERNEL_PATH).map_err(|_| "nao foi possivel ler \\nexo\\kernel.elf")?;
+        return Ok((kernel, read_file(INIT_PATH).unwrap_or_default()));
+    };
+    let Some(chosen) = state.choose() else {
+        return Err("nenhum slot elegivel (ambos sem sucesso e sem tentativas)");
+    };
+    for slot in [chosen, 1 - chosen] {
+        if !state.eligible(slot) {
+            continue;
+        }
+        let Ok(kernel) = read_file(SLOT_KERNEL[slot]) else {
+            warn!(
+                "slot {}: kernel ilegivel; tentando o outro",
+                SLOT_NAME[slot]
+            );
+            continue;
+        };
+        if ElfFile::parse(&kernel).is_err() {
+            warn!(
+                "slot {}: kernel invalido; tentando o outro",
+                SLOT_NAME[slot]
+            );
+            continue;
+        }
+        let s = &mut state.slot[slot];
+        let pending = s.successful == 0;
+        if pending {
+            s.tries_remaining -= 1; // > 0 garantido por `eligible`
+        }
+        state.last_selected = slot as u8;
+        // Persiste ANTES de carregar: se este boot travar, a tentativa ja foi consumida.
+        if let Err(e) = write_file(SLOTS_PATH, &state.encode()) {
+            warn!(
+                "slots.bin: falha ao gravar o estado ({:?}; seguindo mesmo assim)",
+                e.status()
+            );
+        }
+        info!(
+            "slot {} ({}, prioridade {}, tentativas {})",
+            SLOT_NAME[slot],
+            if pending { "pendente" } else { "confirmado" },
+            state.slot[slot].priority,
+            state.slot[slot].tries_remaining,
+        );
+        return Ok((kernel, read_file(SLOT_INIT[slot]).unwrap_or_default()));
+    }
+    Err("nenhum slot com kernel valido")
 }
 
 fn framebuffer_info() -> FramebufferInfo {
@@ -329,15 +411,13 @@ fn run() -> Result<(), &'static str> {
         return Err("CPU sem suporte a NX");
     }
 
-    // Arquivos.
-    let kernel_bytes =
-        read_file(KERNEL_PATH).map_err(|_| "nao foi possivel ler \\nexo\\kernel.elf")?;
+    // Arquivos: layout A/B (fallback estrutural entre slots) ou clássico.
+    let (kernel_bytes, init_bytes) = load_system()?;
     info!("kernel.elf: {} bytes", kernel_bytes.len());
     let cfg = read_file(CONFIG_PATH).unwrap_or_default();
     let cmdline = parse_cmdline(&cfg);
     info!("cmdline: \"{cmdline}\"");
     let elf = ElfFile::parse(&kernel_bytes).map_err(|_| "kernel.elf invalido")?;
-    let init_bytes = read_file(INIT_PATH).unwrap_or_default();
     if init_bytes.is_empty() {
         info!("initrd ausente: kernel sem espaco de usuario inicial");
     } else {
