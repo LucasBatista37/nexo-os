@@ -53,10 +53,18 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
         vars_img = BUILD / "efivars.fd"
         shutil.copy2(vars_src, vars_img)
         cmd += ["-drive", f"if=pflash,format=raw,file={vars_img}"]
-    if disk is None:
-        # Sem discos de dados: a imagem no SATA integrado, unico dispositivo de boot.
-        cmd += ["-drive", f"format=raw,file={image}"]
-    cmd += ["-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
+    cmd += [
+        # Disco de boot no SATA integrado, GRAVAVEL, com bootindex=0: o OVMF arranca por ele
+        # (o loader grava \nexo\slots.bin no volume de onde foi carregado) e nao pelo anexo
+        # virtio 'nexoboot' (somente leitura). Nao pode ser virtio: o OVMF deixa as filas do
+        # dispositivo de boot virtio ativas apos ExitBootServices, e quando o blockdev do
+        # sistema o reinicializa o QEMU marca o dispositivo como quebrado ("Guest moved used
+        # index") e o desligamento nunca completa. O ahcidev faz bring-up proprio da porta,
+        # entao o OVMF conectar (ou nao) os controladores AHCI deixou de importar.
+        "-drive", f"if=none,id=nexomain,format=raw,file={image}",
+        "-device", "ide-hd,drive=nexomain,bootindex=0",
+        "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04",
+    ]
     if disk is not None:
         cmd += [
             "-drive", f"if=none,id=nexodata,format=raw,file={disk}",
@@ -84,16 +92,6 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
             "-device", "ich9-ahci,id=nexoahci",
             "-drive", f"if=none,id=nexoahcid,format=raw,file={ahci_disk}",
             "-device", "ide-hd,drive=nexoahcid,bus=nexoahci.0",
-        ]
-    if disk is not None:
-        cmd += [
-            # Disco de boot GRAVAVEL com bootindex=0, por ultimo (BDF maior — nao desloca nenhum
-            # dispositivo existente): o OVMF arranca por ELE e, por ser virtio, nao inicializa os
-            # controladores AHCI (o handover do OVMF deixa a porta num estado que o ahcidev MVP
-            # nao reconhece). O loader grava \nexo\slots.bin (estado A/B) no volume de boot; o
-            # anexo 'nexoboot' (somente leitura) continua servindo o espfs.
-            "-drive", f"if=none,id=nexomain,format=raw,file.locking=off,file={image}",
-            "-device", "virtio-blk-pci,drive=nexomain,serial=nexomain,disable-legacy=on,bootindex=0",
         ]
     if console_socket is not None:
         cmd += [
