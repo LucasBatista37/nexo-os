@@ -105,6 +105,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         59 => arquivos_driver(),
         60 => portal_driver(),
         61 => handoff_sender(),
+        62 => trace_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1489,6 +1490,69 @@ fn handoff_sender() -> ! {
     if nexo_sys::channel_send(0, b"h", &[1]) != Status::Ok {
         nexo_sys::exit(770);
     }
+    nexo_sys::exit(0)
+}
+
+/// Modo 62: trace de syscalls. Liga o trace, executa um numero conhecido de yields, le o anel
+/// e confere que os proprios yields aparecem (pid proprio, nr correto, TSC crescente); despeja
+/// os ultimos eventos em texto no log serial (formato do tools/nexo-trace) e desliga.
+fn trace_client() -> ! {
+    use nexo_sys::abi::SYS_YIELD;
+    let pid = nexo_sys::get_pid();
+    if nexo_sys::trace_enable(true) != Status::Ok {
+        nexo_sys::exit(780);
+    }
+    const N: usize = 50;
+    for _ in 0..N {
+        nexo_sys::yield_now();
+    }
+    static mut EVS: [nexo_sys::TraceEvent; 4096] = [nexo_sys::TraceEvent {
+        tsc: 0,
+        pid: 0,
+        nr: 0,
+        reserved: 0,
+    }; 4096];
+    // SAFETY: unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha).
+    let evs = unsafe { &mut *core::ptr::addr_of_mut!(EVS) };
+    let got = nexo_sys::trace_read(evs).unwrap_or_else(|_| nexo_sys::exit(781));
+    if nexo_sys::trace_enable(false) != Status::Ok {
+        nexo_sys::exit(782);
+    }
+    if got == 0 || nexo_sys::trace_recorded() == 0 {
+        nexo_sys::exit(783);
+    }
+    let mut meus = 0usize;
+    let mut last_tsc = 0u64;
+    let mut monotonico = true;
+    for e in &evs[..got] {
+        if e.pid as u64 == pid && e.nr as u64 == SYS_YIELD {
+            meus += 1;
+            if e.tsc < last_tsc {
+                monotonico = false;
+            }
+            last_tsc = e.tsc;
+        }
+    }
+    if meus < N {
+        nexo_rt::log!(
+            "utest: trace: so {} yields proprios (esperava >= {})",
+            meus,
+            N
+        );
+        nexo_sys::exit(784);
+    }
+    if !monotonico {
+        nexo_sys::exit(785);
+    }
+    // amostra em texto para o visualizador do host (tools/nexo-trace)
+    for e in &evs[got.saturating_sub(5)..got] {
+        nexo_rt::log!("[TRACE] tsc={} pid={} nr={}", e.tsc, e.pid, e.nr);
+    }
+    nexo_rt::log!(
+        "utest: trace ok — {} eventos lidos, {} yields proprios, tsc monotonico",
+        got,
+        meus
+    );
     nexo_sys::exit(0)
 }
 

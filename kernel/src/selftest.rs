@@ -63,6 +63,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_syscall_error", test_user_syscall_error),
     ("user_ipc", test_user_ipc),
     ("ipc_handoff", test_ipc_handoff),
+    ("user_trace", test_user_trace),
     ("user_nvme", test_user_nvme),
     ("user_nvme_fs", test_user_nvme_fs),
     ("user_services", test_user_services),
@@ -2979,6 +2980,23 @@ fn test_user_nvme_fs() -> TestResult {
     let frames = settled_free_frames(frames0, 8);
     check!(
         frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Trace de syscalls: o cliente liga o trace, faz 50 yields e confere no anel os proprios
+/// eventos (pid, nr, TSC monotonico) — a metade "trace" de "criar profiler e visualizador".
+fn test_user_trace() -> TestResult {
+    let frames0 = phys::stats().free;
+    let client = crate::process::spawn_named("utest", 62, Vec::new()).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    drop(client);
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(!crate::trace::enabled(), "trace ficou ligado");
+    let frames = settled_free_frames(frames0, 4);
+    check!(
+        frames + 4 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
     );
     Ok(())

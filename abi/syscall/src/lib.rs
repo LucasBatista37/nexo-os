@@ -103,8 +103,13 @@ pub const SYS_FB_INFO: u64 = 31;
 /// lançador lê o ELF da instalação e o entrega aqui. Mesmo isolamento de qualquer processo (W^X,
 /// espaço próprio, só os handles transferidos). `RDX` = handle do processo.
 pub const SYS_PROCESS_SPAWN_MEM: u64 = 32;
+/// Trace de syscalls: `rdi` = operação (0 desliga, 1 liga, 2 lê para `rsi`/`rdx` = ptr/cap em
+/// ENTRADAS de 16 B — devolve quantas copiou; 3 = total gravado desde o boot). Diagnóstico:
+/// eventos `{tsc: u64, pid: u32, nr: u16, _: u16}`; anel global com os últimos 4096.
+pub const SYS_TRACE: u64 = 33;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 32;
+pub const SYS_MAX: u64 = 33;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -390,6 +395,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_MEMORY_UNMAP => "memory_unmap",
         SYS_FB_INFO => "fb_info",
         SYS_PROCESS_SPAWN_MEM => "process_spawn_mem",
+        SYS_TRACE => "trace",
         _ => "?",
     }
 }

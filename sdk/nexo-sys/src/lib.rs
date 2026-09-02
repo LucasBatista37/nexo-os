@@ -136,6 +136,39 @@ pub fn debug_info(sel: u64) -> u64 {
     unsafe { raw(abi::SYS_DEBUG_INFO, sel, 0, 0).1 }
 }
 
+/// Um evento do trace de syscalls (16 bytes, como o kernel grava).
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct TraceEvent {
+    /// TSC no momento do evento.
+    pub tsc: u64,
+    /// Processo.
+    pub pid: u32,
+    /// Número da syscall.
+    pub nr: u16,
+    /// Reservado.
+    pub reserved: u16,
+}
+
+/// Liga/desliga o trace de syscalls (diagnóstico; anel global com os últimos 4096 eventos).
+pub fn trace_enable(on: bool) -> Status {
+    // SAFETY: sem ponteiros.
+    unsafe { raw(abi::SYS_TRACE, if on { 1 } else { 0 }, 0, 0).0 }
+}
+
+/// Lê até `out.len()` eventos do trace (dos mais antigos disponíveis aos mais novos).
+pub fn trace_read(out: &mut [TraceEvent]) -> Result<usize, Status> {
+    // SAFETY: `out` é memória nossa; o kernel copia no máximo out.len() entradas de 16 B.
+    let (st, v) = unsafe { raw(abi::SYS_TRACE, 2, out.as_mut_ptr() as u64, out.len() as u64) };
+    if st.is_ok() { Ok(v as usize) } else { Err(st) }
+}
+
+/// Total de eventos gravados desde o boot.
+pub fn trace_recorded() -> u64 {
+    // SAFETY: sem ponteiros.
+    unsafe { raw(abi::SYS_TRACE, 3, 0, 0).1 }
+}
+
 /// Handle de objeto do kernel (índice na tabela do processo).
 pub type Handle = u32;
 

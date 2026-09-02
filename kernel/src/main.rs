@@ -31,6 +31,7 @@ mod symbols;
 mod sync;
 mod time;
 mod timer;
+mod trace;
 mod x86;
 
 use nexo_arch_x86_64::qemu;

@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Visualizador do trace de syscalls (Plano §Fase 6: "criar profiler e visualizador de traces").
+
+Le linhas `[TRACE] tsc=<u64> pid=<u32> nr=<u16>` de um log serial (as que o `utest` modo 62
+despeja, ou qualquer app que use `trace_read` e imprima no mesmo formato) e agrega: contagem
+por syscall (nomes lidos de abi/syscall/src/lib.rs, sempre em dia com a ABI), por processo e
+janela de TSC.
+
+Uso: tools/nexo-trace <log> [mais logs...]
+"""
+
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LINHA = re.compile(rb"\[TRACE\] tsc=(\d+) pid=(\d+) nr=(\d+)")
+
+
+def nomes_da_abi() -> dict:
+    src = (ROOT / "abi" / "syscall" / "src" / "lib.rs").read_text(encoding="utf-8")
+    nomes = {}
+    for m in re.finditer(r"pub const SYS_([A-Z0-9_]+): u64 = (\d+);", src):
+        if m.group(1) != "MAX":
+            nomes[int(m.group(2))] = m.group(1).lower()
+    return nomes
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 2
+    nomes = nomes_da_abi()
+    eventos = []
+    for arg in sys.argv[1:]:
+        for m in LINHA.finditer(Path(arg).read_bytes()):
+            eventos.append((int(m.group(1)), int(m.group(2)), int(m.group(3))))
+    if not eventos:
+        print("nexo-trace: nenhum evento [TRACE] nos logs")
+        return 1
+    eventos.sort()
+    por_nr = Counter(nr for _, _, nr in eventos)
+    por_pid = Counter(pid for _, pid, _ in eventos)
+    span = eventos[-1][0] - eventos[0][0]
+    print(f"{len(eventos)} evento(s), {len(por_pid)} processo(s), janela de {span} ciclos TSC")
+    print("\npor syscall:")
+    for nr, c in por_nr.most_common():
+        barra = "#" * max(1, (c * 40) // len(eventos))
+        print(f"  {nomes.get(nr, f'nr={nr}'):>18} {c:>6}  {barra}")
+    print("\npor processo:")
+    for pid, c in por_pid.most_common(10):
+        print(f"  pid {pid:>5} {c:>6}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

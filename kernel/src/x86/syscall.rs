@@ -715,6 +715,9 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
     };
     p.syscalls.fetch_add(1, Ordering::Relaxed);
     let n = f.rax;
+    if crate::trace::enabled() {
+        crate::trace::record(p.pid, n);
+    }
     if n == SYS_EXIT {
         // Nenhum `Arc<Process>` pode ficar vivo nesta pilha: a thread nunca retorna.
         let code = f.rdi as i64;
@@ -762,6 +765,39 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             5 => (Status::Ok, crate::mm::phys::stats().free),
             6 => (Status::Ok, crate::mm::phys::stats().total_usable),
             7 => (Status::Ok, crate::time::wall_epoch()),
+            _ => (Status::InvalidArgs, 0),
+        },
+        SYS_TRACE => match f.rdi {
+            0 => {
+                crate::trace::set_enabled(false);
+                (Status::Ok, 0)
+            }
+            1 => {
+                crate::trace::set_enabled(true);
+                (Status::Ok, 0)
+            }
+            2 => {
+                let cap = (f.rdx as usize).min(crate::trace::ENTRIES);
+                let mut buf = alloc::vec![
+                    crate::trace::Event {
+                        tsc: 0,
+                        pid: 0,
+                        nr: 0,
+                        reserved: 0
+                    };
+                    cap
+                ];
+                let got = crate::trace::snapshot(&mut buf);
+                let bytes = unsafe {
+                    // SAFETY: Event e repr(C) de 16 bytes sem padding invalido; got <= cap.
+                    core::slice::from_raw_parts(buf.as_ptr() as *const u8, got * 16)
+                };
+                match copy_to_user(f.rsi, bytes) {
+                    Ok(()) => (Status::Ok, got as u64),
+                    Err(e) => (e, 0),
+                }
+            }
+            3 => (Status::Ok, crate::trace::recorded()),
             _ => (Status::InvalidArgs, 0),
         },
         SYS_HANDLE_CLOSE => match p.handles.lock().take(f.rdi as u32) {

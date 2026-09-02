@@ -324,6 +324,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 30 — trace de syscalls + visualizador)
+- Kernel: **trace de syscalls** — anel global de 4096 eventos `{tsc, pid, nr}` (16 B, `repr(C)`); desabilitado custa um load relaxado, habilitado um `fetch_add` + stores relaxados. Syscall **aditiva** 33 (`trace`): liga/desliga, leitura não destrutiva (dos mais antigos disponíveis aos mais novos) e total gravado. ABI v1 segue aditiva (`SYS_MAX = 33`; specs atualizadas).
+- `tools/nexo-trace`: **visualizador** — agrega linhas `[TRACE] tsc= pid= nr=` de logs seriais por syscall (nomes lidos de `abi/syscall/src/lib.rs`, sempre em dia com a ABI) e por processo, com janela de TSC.
+- Auto-teste `user_trace` (85º) + modo 62 do `utest`: liga o trace, faz 50 yields, lê o anel e confere os próprios eventos (pid, nr, TSC monotônico); despeja uma amostra no formato do visualizador (validado contra o log real do boot). Pendem o profiler por amostragem e eventos além de syscalls.
+
 ### Adicionado (Fase 6, bloco 29 — índice do repositório validado no boot)
 - `user_install` agora também escreve um `indice.txt` no `/repo` do NexoFS real e o relê pelo parser oficial (`nexo_pkg::RepoIndex`): entrada listada encontrada, ausente não — fecha a pendência declarada no bloco 28 (que ficou sem teste de boot de propósito, durante a janela final do stress de 24 h).
 
