@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Corrigido (release: SHA256SUMS agora é gerado pelo build)
+- O `build/SHA256SUMS` estava **estagnado desde 2026-08-29** — o "gerado por `tools/build-image`" do RELEASE.md nunca tinha sido implementado, e os artefatos da release v0.1-kernel subiram com somas velhas (detectado na conferência pós-upload; anexos substituídos por um conjunto verificado). Agora o `build-image` (apenas no build **canônico**, `build/nexo.img`) regrava o SHA256SUMS dos cinco artefatos de release; builds por cenário não o tocam.
+
 ### Infraestrutura (CI: retry também para travamento de firmware)
 - `tools/test-qemu`: além de morte por sinal do host, agora é falha de **infraestrutura** (com retry) o timeout em que o convidado nem saiu do firmware (log sem `nexo-loader` — OVMF travou antes de entregar o controle; visto intermitentemente no host de desenvolvimento durante o `make ci` do gate F1, com os mesmos cenários passando isolados em seguida).
 

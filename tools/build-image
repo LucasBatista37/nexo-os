@@ -141,6 +141,13 @@ def main() -> None:
     log(f"loader: {loader.stat().st_size} bytes sha256={sha256(loader)}")
     log(f"initrd: {initrd.stat().st_size} bytes sha256={sha256(initrd)} ({', '.join(f'{n}={p.stat().st_size}' for n, p in stripped)})")
     log(f"simbolos: {sym}")
+    if out == BUILD / "nexo.img":
+        # Imagem canonica: (re)gera o SHA256SUMS dos artefatos de release (RELEASE.md) — os
+        # builds por cenario (--out proprio) nao tocam nele.
+        artefatos = ["nexo.img", "kernel.elf", "kernel-stripped.elf", "kernel.sym", "BOOTX64.EFI"]
+        linhas = "".join(f"{sha256(BUILD / n)}  {n}\n" for n in artefatos if (BUILD / n).exists())
+        (BUILD / "SHA256SUMS").write_text(linhas)
+        log(f"SHA256SUMS: {len(linhas.splitlines())} artefato(s)")
 
 
 if __name__ == "__main__":
