@@ -1,15 +1,15 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-01 (commit `ab91d36`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-01 (commit `5892317`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 165 · 🟡 68 · ⬜ 302 · ⛔ 0 → **37% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 166 · 🟡 67 · ⬜ 302 · ⛔ 0 → **37% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
 | Fase | Gate | ✅ | 🟡 | ⬜ | % | Esforço restante estimado | O que falta (resumo) |
 |---|---|---|---|---|---|---|---|
 | Fase 0 — Fundação e preparação (meses 0–6) | ✅ atendido | 13 | 2 | 0 | 93% | 0 (concluída) | gate F0 atendido em clone limpo; release 0.0.1-boot publicada |
-| Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 17 | 2 | 0 | 95% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
+| Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 18 | 1 | 0 | 97% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
 | Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 10 | 7 | 1 | 75% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
 | Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 17 | 3 | 1 | 88% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 14 | 3 | 47% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
@@ -62,7 +62,7 @@ Gate: ✅ atendido. clone limpo + `make ci` verde (2026-08-29); `docs/releases/0
 | 🟡 | concluir currículo básico de arquitetura de computadores | guia em docs/study/; estudo pessoal contínuo |
 | ✅ | publicar release `0.0.1-boot` | tag v0.0.1-boot publicada no GitHub; notas em docs/releases/ |
 
-### Fase 1 — Kernel mínimo confiável (meses 6–18) — 95% (17 ✅, 2 🟡, 0 ⬜)
+### Fase 1 — Kernel mínimo confiável (meses 6–18) — 97% (18 ✅, 1 🟡, 0 ⬜)
 
 Gate: 🟡 quase. 2 h de stress com 4 CPUs sem erros (2026-08-30: 17 M trocas, contador com lock exato, 1,27 M processos); as 24 h estão em execução (`make stress DURATION=86400`)
 
@@ -86,7 +86,7 @@ Gate: 🟡 quase. 2 h de stress com 4 CPUs sem erros (2026-08-30: 17 M trocas, c
 | ✅ | criar testes de concorrência e stress em QEMU | `make stress DURATION=…` e cenário `stress` no CI (15 s) |
 | ✅ | limitar e registrar todo uso de `unsafe` | docs/unsafe-inventory.md |
 | ✅ | adicionar symbolication e dump mínimo de falhas |  |
-| 🟡 | publicar release `0.1-kernel` | gate F1 exige 24 h de stress; ferramenta pronta, execução pendente |
+| ✅ | publicar release `0.1-kernel` | gate F1 **completo**: 24 h de stress SMP (2026-09-01, `docs/progress/2026-09-01-stress-24h.md`) — 102 M trocas de contexto, 7,6 M processos, contador com lock exato, 4/4 CPUs e zero erros em 86 401 amostras; quadros e heap estáveis. Tag `v0.1-kernel` |
 
 ### Fase 2 — Modo usuário, IPC e capabilities (ano 2) — 75% (10 ✅, 7 🟡, 1 ⬜)
 
@@ -370,7 +370,7 @@ Gate: ⬜ não iniciado.
 | 🟡 | panic, dump e symbolication | panic/backtrace/símbolos prontos; dump completo pendente |
 | ⬜ | mitigação de classes de exploração |  |
 | ⬜ | benchmarks de contexto, syscall e IPC |  |
-| 🟡 | stress de 24h e posteriormente 7 dias | `make stress DURATION=86400` disponível; execução ainda não realizada |
+| 🟡 | stress de 24h e posteriormente 7 dias | 24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias pendem |
 | ⬜ | documentação de todas as invariantes `unsafe` |  |
 
 ### 6.2 Drivers

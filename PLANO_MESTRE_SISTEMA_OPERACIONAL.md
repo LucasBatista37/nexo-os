@@ -410,7 +410,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] criar testes de concorrência e stress em QEMU — *`make stress DURATION=…` e cenário `stress` no CI (15 s)*;
 - [x] limitar e registrar todo uso de `unsafe` — *docs/unsafe-inventory.md*;
 - [x] adicionar symbolication e dump mínimo de falhas;
-- [-] publicar release `0.1-kernel` — *gate F1 exige 24 h de stress; ferramenta pronta, execução pendente*.
+- [x] publicar release `0.1-kernel` — *gate F1 **completo**: 24 h de stress SMP (2026-09-01, `docs/progress/2026-09-01-stress-24h.md`) — 102 M trocas de contexto, 7,6 M processos, contador com lock exato, 4/4 CPUs e zero erros em 86 401 amostras; quadros e heap estáveis. Tag `v0.1-kernel`*.
 
 **Gate F1:** 24 horas de stress em QEMU, múltiplas CPUs, memória virtual isolada, exceções tratadas e zero falha não explicada.
 
@@ -685,7 +685,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [-] panic, dump e symbolication — *panic/backtrace/símbolos prontos; dump completo pendente*;
 - [ ] mitigação de classes de exploração;
 - [ ] benchmarks de contexto, syscall e IPC;
-- [-] stress de 24h e posteriormente 7 dias — *`make stress DURATION=86400` disponível; execução ainda não realizada*;
+- [-] stress de 24h e posteriormente 7 dias — *24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias pendem*;
 - [ ] documentação de todas as invariantes `unsafe`.
 
 ### 6.2 Drivers

@@ -324,6 +324,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Infraestrutura (CI: retry também para travamento de firmware)
+- `tools/test-qemu`: além de morte por sinal do host, agora é falha de **infraestrutura** (com retry) o timeout em que o convidado nem saiu do firmware (log sem `nexo-loader` — OVMF travou antes de entregar o controle; visto intermitentemente no host de desenvolvimento durante o `make ci` do gate F1, com os mesmos cenários passando isolados em seguida).
+
+### Release `v0.1-kernel` (gate F1 ✅ — 2026-09-01)
+- **24 horas de stress SMP sem erros** (QEMU TCG, 4 CPUs, em paralelo com um dia inteiro de desenvolvimento no host): 102 046 707 trocas de contexto, 11,3 M preempções, 7 648 552 processos criados, contador com lock **exato** (22 048 880 000/22 048 880 000), 1,69 T operações atômicas, 89,3 M map/unmap de páginas, 4/4 CPUs em todas as 86 401 amostras, `erros=0` em todas, quadros 128 490→128 487 e heap estável. Relatório: `docs/progress/2026-09-01-stress-24h.md`.
+- Marco do plano (§7): kernel x86_64 com memória virtual isolada, SMP, escalonador preemptivo, relógio TSC e pânico com backtrace — estável sob stress prolongado. Tag `v0.1-kernel`.
+
 ### Adicionado (Fase 6, bloco 28 — índice do repositório + nexo-repo)
 - `nexo-pkg`: **`RepoIndex`** — o `indice.txt` do repositório local (`nome versao` por linha, `#` comenta) validado no parse (`no_std`, sem alocação; UTF-8, limites de nome/versão, nome sem `/`), com `entries()`/`find()`. Informativo por desenho: a fonte da verdade é o `.npk`, validado inteiro na instalação.
 - `tools/nexo-repo` (`build`/`check`): gera e confere o índice a partir dos `.npk` de um diretório; impõe a convenção **nome do arquivo = nome do manifesto** e rejeita duplicatas. Testado com pacotes reais do `nexo-pack`.
