@@ -1,0 +1,25 @@
+#!/bin/sh
+# Depuracao remota interativa do kernel: sobe o QEMU pausado (gdbstub :1234) e conecta o
+# depurador disponivel (lldb no macOS, gdb no Linux) ja com os simbolos de build/kernel.elf.
+# Uso: tools/nexo-debug [simbolo-de-breakpoint]   (padrao: kmain; "-" = sem breakpoint)
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BP="${1:-kmain}"
+[ -f "$ROOT/build/kernel.elf" ] || { echo "nexo-debug: rode 'make image' antes"; exit 1; }
+python3 "$ROOT/tools/run-qemu" --gdb --disk "$ROOT/build/nexo-debug-data.img" >/dev/null 2>&1 &
+QPID=$!
+trap 'kill $QPID 2>/dev/null || true' EXIT INT TERM
+sleep 2
+if command -v lldb >/dev/null 2>&1; then
+    if [ "$BP" = "-" ]; then
+        exec lldb -o "target create $ROOT/build/kernel.elf" -o "gdb-remote 1234"
+    fi
+    exec lldb -o "target create $ROOT/build/kernel.elf" -o "gdb-remote 1234" -o "b $BP" -o c
+elif command -v gdb >/dev/null 2>&1; then
+    if [ "$BP" = "-" ]; then
+        exec gdb -ex "file $ROOT/build/kernel.elf" -ex "target remote :1234"
+    fi
+    exec gdb -ex "file $ROOT/build/kernel.elf" -ex "target remote :1234" -ex "break $BP" -ex continue
+else
+    echo "nexo-debug: instale lldb ou gdb"; exit 1
+fi

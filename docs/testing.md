@@ -44,7 +44,13 @@
 
 ## Depuração
 
-`tools/run-qemu --gdb` inicia parado com gdbstub em `:1234`. No `lldb`: `target create build/kernel.elf`, `gdb-remote 1234`, `b nexo_kernel::kmain`, `c`. Os símbolos do kernel estão em `build/kernel.sym` (`llvm-nm -n`).
+`tools/nexo-debug [símbolo]` faz tudo: sobe o QEMU pausado (gdbstub `:1234`) e conecta o
+depurador disponível (lldb no macOS, gdb no Linux) já com os símbolos de `build/kernel.elf` e
+um breakpoint (padrão `kmain`; `-` = nenhum). Manualmente: `tools/run-qemu --gdb` + `lldb`
+(`target create build/kernel.elf`, `gdb-remote 1234`) ou `gdb` (`target remote :1234`). O
+cenário `gdb` do `tools/test-qemu` prova o fluxo a cada CI (breakpoint em `kmain`, hit,
+detach, boot completa com código 33; pula se o host não tem depurador). Símbolos planos:
+`build/kernel.sym`.
 
 ## Regras aprendidas em campo (2026-09-01)
 

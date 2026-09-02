@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 36 — depuração remota GDB/LLDB)
+- `tools/nexo-debug [símbolo]`: depuração interativa do kernel em um comando — QEMU pausado com gdbstub em `:1234` + lldb (macOS) ou gdb (Linux) conectado com os símbolos de `kernel.elf` e breakpoint (padrão `kmain`).
+- Cenário **`gdb`** no `tools/test-qemu` (roda no CI): conecta o depurador disponível, breakpoint em `kmain`, confirma o *hit*, desanexa e verifica que o convidado completa o boot (código 33). Sem depurador no host, o cenário pula declaradamente.
+
 ### Segurança (Fase 8 antecipada, bloco 35 — trace atrás de capability de depuração)
 - Fecha a última prioridade "pequena" do threat model: `SYS_TRACE` (ligar/ler) agora exige a **capability de depuração** (`Object::Debug`, `KIND_DEBUG` = 5) — posse explícita apresentada como handle, o mesmo desenho das concessões de dispositivo. Sem ela: `Denied` (testes negativos de enable e read no `user_trace`). Op 3 (total) segue livre. Endurecimento no mesmo dia da introdução da syscall (ABI experimental; nota de compat no `syscall-abi.md`).
 - `run-qemu`: o disco NVMe default agora é o **par do disco de dados** (`<disk>-nvme.img`) — execuções concorrentes (stress de 7 dias + suíte) não disputam mais o mesmo arquivo (o QEMU tranca imagens; colisão vista em campo ao disparar o stress longo).

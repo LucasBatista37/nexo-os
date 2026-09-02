@@ -777,6 +777,52 @@ def call_qemu(cmd, allow_retry=True, retries=2, log_path=None):
     return rc
 
 
+def run_gdb_scenario(timeout: float) -> bool:
+    """Depuracao remota: QEMU pausado com gdbstub em :1234; um depurador (gdb ou lldb, o que
+    houver) conecta com os simbolos do kernel, poe um breakpoint em kmain, continua, confirma
+    o hit e desanexa — o convidado entao termina o boot normalmente (codigo 33)."""
+    import shutil
+    log("=== cenario 'gdb' (gdbstub do QEMU) ===")
+    gdb = shutil.which("gdb")
+    lldb = shutil.which("lldb")
+    if not gdb and not lldb:
+        log("=== cenario 'gdb': PULADO (sem gdb nem lldb no host) ===")
+        return True
+    logfile = BUILD / "logs" / "gdb.log"
+    logfile.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.Popen([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--gdb",
+                             "--disk", BUILD / "nexo-gdb-data.img",
+                             "--timeout", str(timeout), "--log", logfile],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    time.sleep(2.0)
+    kernel = str(BUILD / "kernel.elf")
+    if gdb:
+        cmd = [gdb, "-batch", "-ex", "set pagination off", "-ex", f"file {kernel}",
+               "-ex", "target remote :1234", "-ex", "break kmain", "-ex", "continue",
+               "-ex", "bt 1", "-ex", "detach"]
+        marcadores = [b"Breakpoint 1", b"kmain"]
+    else:
+        cmd = [lldb, "-b", "-o", f"target create {kernel}", "-o", "gdb-remote 1234",
+               "-o", "b kmain", "-o", "c", "-o", "bt", "-o", "process detach"]
+        marcadores = [b"stop reason = breakpoint", b"kmain"]
+    r = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    saida = r.stdout + r.stderr
+    ok = all(m in saida for m in marcadores)
+    for m in marcadores:
+        if m not in saida:
+            log(f"FALHA: depurador sem marcador {m!r}")
+    rc = proc.wait(timeout=timeout + 60)
+    if rc != 33:
+        log(f"FALHA: codigo de saida {rc}, esperado 33 (o convidado devia terminar apos o detach)")
+        ok = False
+    text = logfile.read_bytes()
+    if b"NEXO: boot completo" not in text:
+        log("FALHA: marcador ausente: /NEXO: boot completo/")
+        ok = False
+    log(f"=== cenario 'gdb': {'PASS' if ok else 'FAIL'} (log: {logfile}) ===")
+    return ok
+
+
 def run_scenario(name: str, timeout: float) -> bool:
     if name == "shell":
         return run_shell_scenario(timeout)
@@ -784,6 +830,8 @@ def run_scenario(name: str, timeout: float) -> bool:
         return run_input_scenario(timeout)
     if name == "net":
         return run_net_scenario(timeout)
+    if name == "gdb":
+        return run_gdb_scenario(timeout)
     sc = SCENARIOS[name]
     logfile = BUILD / "logs" / f"{name}.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
@@ -838,13 +886,13 @@ def run_scenario(name: str, timeout: float) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenario", choices=sorted(list(SCENARIOS) + ["shell", "input", "net"]), default=None)
+    ap.add_argument("--scenario", choices=sorted(list(SCENARIOS) + ["shell", "input", "net", "gdb"]), default=None)
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--no-build", action="store_true", help="nao recompila loader/kernel")
     a = ap.parse_args()
     if not a.no_build:
         run([sys.executable, ROOT / "tools" / "build-image", "--cmdline", "exit"])
-    names = [a.scenario] if a.scenario else list(SCENARIOS) + ["shell", "input", "net"]
+    names = [a.scenario] if a.scenario else list(SCENARIOS) + ["shell", "input", "net", "gdb"]
     results = {n: run_scenario(n, a.timeout) for n in names}
     log("resumo: " + ", ".join(f"{n}={'PASS' if ok else 'FAIL'}" for n, ok in results.items()))
     return 0 if all(results.values()) else 1
