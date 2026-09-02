@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 7 antecipada, bloco 41 — NexoFS sobre AHCI)
+- Auto-teste `user_ahci_fs` (89º): a pilha de armazenamento inteira (fs + cliente persistente `boot.count`) sobre o **terceiro** controlador — NexoFS formatado/montado no disco AHCI via `ahcidev`, sem mudar uma linha de fs nem de cliente. A substituibilidade por protocolo agora está provada em virtio-blk, NVMe e AHCI, tanto no nível cru quanto com o sistema de arquivos completo.
+
 ### Adicionado (Fase 7 antecipada, bloco 40 — driver AHCI)
 - `services/ahcidev`: **driver SATA/AHCI** em ring 3 (QEMU `ich9-ahci`) — ABAR (BAR5) por concessão, modo AHCI habilitado, porta com disco detectada por SSTS/SIG, command list/FIS receive próprios (a porta é parada e reprogramada), comandos ATA **READ/WRITE DMA EXT** (LBA48) com PRDT de página única e **IDENTIFY** real (capacidade LBA48 + serial com os bytes de word trocados, como manda a ATA). MVP síncrono/polling.
 - Servindo o MESMO `nexo.block` v0: o cliente cru do modo 8 agora validou **três controladores** (virtio-blk, NVMe, AHCI) sem mudar uma linha — auto-teste `user_ahci` (88º) com persistência entre boots. `run-qemu` anexa um disco AHCI por padrão (par do disco de dados, `--no-ahci` desativa).
