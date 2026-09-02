@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 29 — índice do repositório validado no boot)
+- `user_install` agora também escreve um `indice.txt` no `/repo` do NexoFS real e o relê pelo parser oficial (`nexo_pkg::RepoIndex`): entrada listada encontrada, ausente não — fecha a pendência declarada no bloco 28 (que ficou sem teste de boot de propósito, durante a janela final do stress de 24 h).
+
 ### Corrigido (release: SHA256SUMS agora é gerado pelo build)
 - O `build/SHA256SUMS` estava **estagnado desde 2026-08-29** — o "gerado por `tools/build-image`" do RELEASE.md nunca tinha sido implementado, e os artefatos da release v0.1-kernel subiram com somas velhas (detectado na conferência pós-upload; anexos substituídos por um conjunto verificado). Agora o `build-image` (apenas no build **canônico**, `build/nexo.img`) regrava o SHA256SUMS dos cinco artefatos de release; builds por cenário não o tocam.
 

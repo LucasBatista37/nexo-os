@@ -2287,6 +2287,20 @@ fn install_client() -> ! {
         if nexo_inst::install_from_repo(&mut fs, "sumido", &mut rbuf2).is_ok() {
             nexo_sys::exit(1225);
         }
+        // indice do repositorio: escrito no NexoFS e lido de volta pelo parser oficial
+        fs.write_file(
+            "/repo/indice.txt",
+            b"# repositorio de teste\nrepo-demo 1.0\n",
+        )
+        .unwrap_or_else(|_| nexo_sys::exit(1226));
+        let mut ibuf = [0u8; 256];
+        let n = fs
+            .read_file("/repo/indice.txt", &mut ibuf)
+            .unwrap_or_else(|_| nexo_sys::exit(1227));
+        let idx = nexo_pkg::RepoIndex::parse(&ibuf[..n]).unwrap_or_else(|_| nexo_sys::exit(1228));
+        if idx.find("repo-demo") != Some("1.0") || idx.find("sumido").is_some() {
+            nexo_sys::exit(1229);
+        }
     }
     nexo_sys::log(
         "utest: install ok — transacional; corrompido/revogado nao instalam; repositorio local instala",
