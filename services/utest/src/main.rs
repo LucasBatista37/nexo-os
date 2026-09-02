@@ -106,6 +106,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         60 => portal_driver(),
         61 => handoff_sender(),
         62 => trace_client(),
+        63 => block_pipelined_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1553,6 +1554,95 @@ fn trace_client() -> ! {
         got,
         meus
     );
+    nexo_sys::exit(0)
+}
+
+/// Modo 63: cliente PIPELINED do nexo.block. Dispara 4 escritas + capacidade + 4 leituras
+/// SEM esperar respostas (o canal enfileira; o driver mantem varios pedidos em voo) e depois
+/// colhe as 9 respostas — que devem chegar exatamente na ordem dos pedidos, com os dados certos.
+fn block_pipelined_client() -> ! {
+    use nexo_proto::block::{
+        CapacityRequest, ReadRequest, WriteRequest, decode_capacity_response, decode_read_response,
+        decode_write_response,
+    };
+    let ch: nexo_sys::Handle = 0;
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 1];
+
+    // capacidade (sincrona) para achar a area reservada
+    let m = CapacityRequest {}.encode_msg(&mut msg).unwrap_or(0);
+    if nexo_sys::channel_send(ch, &msg[..m], &[]) != Status::Ok {
+        nexo_sys::exit(790);
+    }
+    let base = match nexo_sys::channel_recv(ch, &mut msg, &mut hs) {
+        Ok((n, _)) => match decode_capacity_response(&msg[..n]) {
+            Ok(c) => c.sectors.saturating_sub(240),
+            Err(_) => nexo_sys::exit(791),
+        },
+        Err(_) => nexo_sys::exit(792),
+    };
+
+    // fase de disparo: 4 escritas + capacidade + 4 leituras, tudo sem esperar
+    for i in 0..4u64 {
+        let mut w = WriteRequest {
+            sector: base + i * 2,
+            count: 2,
+            data: [0; 3584],
+            data_len: 1024,
+        };
+        for (k, b) in w.data[..1024].iter_mut().enumerate() {
+            *b = (k as u8) ^ (0xa0 + i as u8);
+        }
+        let m = w.encode_msg(&mut msg).unwrap_or(0);
+        if nexo_sys::channel_send(ch, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(793);
+        }
+    }
+    let m = CapacityRequest {}.encode_msg(&mut msg).unwrap_or(0);
+    if nexo_sys::channel_send(ch, &msg[..m], &[]) != Status::Ok {
+        nexo_sys::exit(794);
+    }
+    for i in 0..4u64 {
+        let m = ReadRequest {
+            sector: base + i * 2,
+            count: 2,
+        }
+        .encode_msg(&mut msg)
+        .unwrap_or(0);
+        if nexo_sys::channel_send(ch, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(795);
+        }
+    }
+
+    // colheita: exatamente na ordem dos pedidos
+    for _ in 0..4 {
+        match nexo_sys::channel_recv(ch, &mut msg, &mut hs) {
+            Ok((n, _)) if decode_write_response(&msg[..n]).is_ok() => {}
+            _ => nexo_sys::exit(796),
+        }
+    }
+    match nexo_sys::channel_recv(ch, &mut msg, &mut hs) {
+        Ok((n, _)) if decode_capacity_response(&msg[..n]).is_ok() => {}
+        _ => nexo_sys::exit(797),
+    }
+    for i in 0..4u64 {
+        let (n, _) = match nexo_sys::channel_recv(ch, &mut msg, &mut hs) {
+            Ok(v) => v,
+            Err(_) => nexo_sys::exit(798),
+        };
+        match decode_read_response(&msg[..n]) {
+            Ok(r) if r.data().len() == 1024 => {
+                for (k, &b) in r.data().iter().enumerate() {
+                    if b != (k as u8) ^ (0xa0 + i as u8) {
+                        nexo_rt::log!("utest: pipeline: byte {} da leitura {} divergente", k, i);
+                        nexo_sys::exit(799);
+                    }
+                }
+            }
+            _ => nexo_sys::exit(800),
+        }
+    }
+    nexo_sys::log("utest: nexo.block pipelined ok — 9 respostas em ordem, dados conferem");
     nexo_sys::exit(0)
 }
 

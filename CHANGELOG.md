@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 7 antecipada, bloco 31 — NVMe com múltiplos pedidos em voo)
+- `nvmedev` agora é **assíncrono** no espírito do blockdev: até 4 pedidos em voo (um slot de página PRP1 por pedido; CID = slot), conclusões colhidas por `poll_completion` e respostas entregues **na ordem de chegada** — respostas imediatas (`capacity`/`identity`/erros de validação) entram na mesma fila (`Ready`) para não furar a ordem; bloqueia no canal só sem nada em voo, senão dorme em `irq_wait`.
+- Auto-teste `user_nvme_pipe` (86º) + modo 63 do `utest`: dispara 4 escritas + capacidade + 4 leituras **sem esperar** e colhe as 9 respostas exatamente em ordem, com os padrões conferidos byte a byte; o teste de pipeline do modo 8 também passou a exercitar o NVMe.
+
 ### Adicionado (Fase 6, bloco 30 — trace de syscalls + visualizador)
 - Kernel: **trace de syscalls** — anel global de 4096 eventos `{tsc, pid, nr}` (16 B, `repr(C)`); desabilitado custa um load relaxado, habilitado um `fetch_add` + stores relaxados. Syscall **aditiva** 33 (`trace`): liga/desliga, leitura não destrutiva (dos mais antigos disponíveis aos mais novos) e total gravado. ABI v1 segue aditiva (`SYS_MAX = 33`; specs atualizadas).
 - `tools/nexo-trace`: **visualizador** — agrega linhas `[TRACE] tsc= pid= nr=` de logs seriais por syscall (nomes lidos de `abi/syscall/src/lib.rs`, sempre em dia com a ABI) e por processo, com janela de TSC.

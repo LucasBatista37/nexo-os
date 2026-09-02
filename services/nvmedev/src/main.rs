@@ -89,6 +89,40 @@ impl QueuePair {
         DOORBELLS + (2 * self.qid as u64 + 1) * (4u64 << self.dstrd)
     }
 
+    /// Submete um comando de 64 B com o CID dado, sem esperar a conclusão.
+    fn submit(&mut self, m: &Mmio, sqe: &[u32; 16], cid: u16) {
+        let mut sqe = *sqe;
+        sqe[0] |= (cid as u32) << 16;
+        // SAFETY: página de DMA exclusiva da SQ; slot < QD.
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                sqe.as_ptr() as *const u8,
+                (self.sq.virt + self.tail as u64 * 64) as *mut u8,
+                64,
+            )
+        };
+        self.tail = (self.tail + 1) % QD as u16;
+        m.w32(self.sq_doorbell(), self.tail as u32);
+    }
+
+    /// Colhe UMA conclusão, se houver: devolve `(cid, status)`.
+    fn poll_completion(&mut self, m: &Mmio) -> Option<(u16, u16)> {
+        let base = self.cq.virt + self.head as u64 * 16;
+        // SAFETY: página de DMA exclusiva da CQ; leitura volátil da entrada corrente.
+        let dw3 = unsafe { core::ptr::read_volatile((base + 12) as *const u32) };
+        if (dw3 >> 16) & 1 != self.phase as u32 {
+            return None;
+        }
+        let cid = (dw3 & 0xffff) as u16;
+        let status = (dw3 >> 17) as u16;
+        self.head = (self.head + 1) % QD as u16;
+        if self.head == 0 {
+            self.phase ^= 1;
+        }
+        m.w32(self.cq_doorbell(), self.head as u32);
+        Some((cid, status))
+    }
+
     /// Submete um comando de 64 B e espera a conclusão; devolve (status, dw0). Com `irq`,
     /// dorme em `irq_wait` entre verificações (MSI-X); sem, faz *polling* puro.
     fn command(&mut self, m: &Mmio, sqe: &[u32; 16], mut irq: Option<&mut IrqWait>) -> (u16, u32) {
@@ -325,116 +359,289 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         dstrd,
         cid: 0,
     };
-    let data = dma(); // pagina unica de dados (PRP1) — cobre os 3584 B do nexo.block
+    // Fila assincrona no espirito do blockdev: ate SLOTS pedidos em voo, cada um com a sua
+    // pagina de dados (PRP1); as respostas saem na ORDEM DE CHEGADA dos pedidos (Ready entra
+    // na mesma fila para nao furar a ordem).
+    const SLOTS: usize = 4;
+    let slot_data: [Dma; SLOTS] = [dma(), dma(), dma(), dma()];
     log!(
-        "nvmedev: nvme bdf {:#06x} pronto ({} setores de 512 B, timeout {} ms, serial {}, {})",
+        "nvmedev: nvme bdf {:#06x} pronto ({} setores de 512 B, timeout {} ms, serial {}, {}, ate {} em voo)",
         info.bdf,
         nsze,
         timeout_ms,
         core::str::from_utf8(&serial).unwrap_or("?").trim(),
-        if irq.is_some() { "MSI-X" } else { "polling" }
+        if irq.is_some() { "MSI-X" } else { "polling" },
+        SLOTS
     );
 
-    // serve nexo.block v0 (sincrono: um pedido em voo)
+    enum Pending {
+        Ready {
+            len: usize,
+        },
+        Io {
+            slot: usize,
+            write: bool,
+            bytes: usize,
+        },
+    }
     let mut buf = [0u8; 4096];
     let mut reply = [0u8; 4096];
     let mut hs = [0u32; 1];
     let mut served = 0u64;
+    let mut max_in_flight = 0usize;
+    let mut pending: [Option<Pending>; SLOTS] = [const { None }; SLOTS];
+    let mut order: [usize; SLOTS] = [0; SLOTS];
+    let mut order_len = 0usize;
+    let mut ready_buf = [[0u8; 4096]; SLOTS];
+    let mut slot_free = [true; SLOTS];
+    let mut done: [Option<u16>; SLOTS] = [None; SLOTS];
+    let mut closing = false;
     loop {
-        let n = match nexo_sys::channel_recv(CHAN, &mut buf, &mut hs) {
-            Ok((n, _)) => n,
+        let mut worked = false;
+        // 1. colhe conclusoes (CID = indice do slot)
+        while let Some((cid, st)) = io.poll_completion(&m) {
+            if (cid as usize) < SLOTS {
+                done[cid as usize] = Some(st);
+            }
+            worked = true;
+        }
+        // 2. entrega respostas prontas na ordem de chegada
+        while order_len > 0 {
+            let idx = order[0];
+            let (len, ready, from_ready) = match &pending[idx] {
+                Some(Pending::Ready { len }) => (*len, true, true),
+                Some(Pending::Io { slot, write, bytes }) => match done[*slot] {
+                    Some(st) => {
+                        let len = if st != 0 {
+                            let method = if *write {
+                                block::WriteRequest::METHOD_ID
+                            } else {
+                                block::ReadRequest::METHOD_ID
+                            };
+                            block::encode_error(method, 0x10 | (st & 0xf) as u32, &mut reply)
+                                .unwrap_or(0)
+                        } else if *write {
+                            WriteResponse {}.encode_msg(&mut reply).unwrap_or(0)
+                        } else {
+                            let mut r = ReadResponse {
+                                data: [0; 3584],
+                                data_len: *bytes as u32,
+                            };
+                            // SAFETY: pagina de DMA exclusiva do slot; bytes <= 3584.
+                            unsafe {
+                                core::ptr::copy_nonoverlapping(
+                                    slot_data[*slot].virt as *const u8,
+                                    r.data.as_mut_ptr(),
+                                    *bytes,
+                                )
+                            };
+                            r.encode_msg(&mut reply).unwrap_or(0)
+                        };
+                        done[*slot] = None;
+                        slot_free[*slot] = true;
+                        (len, true, false)
+                    }
+                    None => (0, false, false),
+                },
+                None => (0, false, false),
+            };
+            if !ready {
+                break;
+            }
+            let out: &[u8] = if from_ready {
+                &ready_buf[idx][..len]
+            } else {
+                &reply[..len]
+            };
+            if !closing {
+                let _ = nexo_sys::channel_send(CHAN, out, &[]);
+            }
+            pending[idx] = None;
+            order.copy_within(1..order_len, 0);
+            order_len -= 1;
+            worked = true;
+        }
+        if closing && order_len == 0 {
+            log!(
+                "nvmedev: canal fechado apos {} pedidos (max {} em voo)",
+                served,
+                max_in_flight
+            );
+            nexo_sys::exit(0)
+        }
+        // 3. recebe pedidos: bloqueia so quando nao ha nada em voo nem pendente
+        let has_room = !closing && order_len < SLOTS;
+        let r = if order_len == 0 && !closing {
+            nexo_sys::channel_recv(CHAN, &mut buf, &mut hs).map(Some)
+        } else if has_room {
+            match nexo_sys::channel_try_recv(CHAN, &mut buf, &mut hs) {
+                Ok(v) => Ok(Some(v)),
+                Err(Status::WouldBlock) => Ok(None),
+                Err(e) => Err(e),
+            }
+        } else {
+            Ok(None)
+        };
+        let msg = match r {
+            Ok(v) => v,
             Err(Status::PeerClosed) => {
-                log!("nvmedev: canal fechado apos {} pedidos", served);
-                nexo_sys::exit(0)
+                closing = true;
+                continue;
             }
             Err(_) => fail(92, "recv"),
         };
-        served += 1;
-        let out_len = match block::decode_request(&buf[..n]) {
-            Ok(Request::Capacity(_)) => CapacityResponse { sectors: nsze }
-                .encode_msg(&mut reply)
-                .unwrap_or(0),
-            Ok(Request::Identity(_)) => {
-                let mut r = IdentityResponse {
-                    read_only: 0,
-                    serial: [0; 20],
-                    serial_len: 20,
-                };
-                r.serial.copy_from_slice(&serial);
-                r.encode_msg(&mut reply).unwrap_or(0)
-            }
-            Ok(Request::Read(rq)) => {
-                let count = rq.count as usize;
-                if count == 0 || count > MAX_SECTORS || rq.sector + rq.count as u64 > nsze {
-                    block::encode_error(block::ReadRequest::METHOD_ID, 2, &mut reply).unwrap_or(0)
-                } else {
-                    let mut e = sqe(0x02, 1, data.phys);
-                    e[10] = rq.sector as u32;
-                    e[11] = (rq.sector >> 32) as u32;
-                    e[12] = (count - 1) as u32;
-                    let (st, _) = io.command(&m, &e, irq.as_mut());
-                    if st != 0 {
-                        block::encode_error(
+        if let Some((n, _)) = msg {
+            served += 1;
+            worked = true;
+            let free_idx = (0..SLOTS)
+                .find(|&i| pending[i].is_none() && !order[..order_len].contains(&i))
+                .unwrap_or(0);
+            let push = |p: Pending,
+                        pending: &mut [Option<Pending>; SLOTS],
+                        order: &mut [usize; SLOTS],
+                        order_len: &mut usize| {
+                pending[free_idx] = Some(p);
+                order[*order_len] = free_idx;
+                *order_len += 1;
+            };
+            match block::decode_request(&buf[..n]) {
+                Ok(Request::Capacity(_)) => {
+                    let len = CapacityResponse { sectors: nsze }
+                        .encode_msg(&mut ready_buf[free_idx])
+                        .unwrap_or(0);
+                    push(
+                        Pending::Ready { len },
+                        &mut pending,
+                        &mut order,
+                        &mut order_len,
+                    );
+                }
+                Ok(Request::Identity(_)) => {
+                    let mut r = IdentityResponse {
+                        read_only: 0,
+                        serial: [0; 20],
+                        serial_len: 20,
+                    };
+                    r.serial.copy_from_slice(&serial);
+                    let len = r.encode_msg(&mut ready_buf[free_idx]).unwrap_or(0);
+                    push(
+                        Pending::Ready { len },
+                        &mut pending,
+                        &mut order,
+                        &mut order_len,
+                    );
+                }
+                Ok(Request::Read(rq)) => {
+                    let count = rq.count as usize;
+                    if count == 0 || count > MAX_SECTORS || rq.sector + rq.count as u64 > nsze {
+                        let len = block::encode_error(
                             block::ReadRequest::METHOD_ID,
-                            0x10 | (st & 0xf) as u32,
-                            &mut reply,
+                            2,
+                            &mut ready_buf[free_idx],
                         )
-                        .unwrap_or(0)
+                        .unwrap_or(0);
+                        push(
+                            Pending::Ready { len },
+                            &mut pending,
+                            &mut order,
+                            &mut order_len,
+                        );
                     } else {
-                        let bytes = count * 512;
-                        let mut r = ReadResponse {
-                            data: [0; 3584],
-                            data_len: bytes as u32,
-                        };
-                        // SAFETY: pagina de DMA exclusiva; bytes <= 3584.
+                        let slot = (0..SLOTS)
+                            .find(|&i| slot_free[i])
+                            .unwrap_or_else(|| fail(93, "sem slot livre"));
+                        slot_free[slot] = false;
+                        let mut e = sqe(0x02, 1, slot_data[slot].phys);
+                        e[10] = rq.sector as u32;
+                        e[11] = (rq.sector >> 32) as u32;
+                        e[12] = (count - 1) as u32;
+                        io.submit(&m, &e, slot as u16);
+                        push(
+                            Pending::Io {
+                                slot,
+                                write: false,
+                                bytes: count * 512,
+                            },
+                            &mut pending,
+                            &mut order,
+                            &mut order_len,
+                        );
+                    }
+                }
+                Ok(Request::Write(rq)) => {
+                    let count = rq.count as usize;
+                    let bytes = rq.data().len();
+                    if count == 0
+                        || count > MAX_SECTORS
+                        || bytes != count * 512
+                        || rq.sector + rq.count as u64 > nsze
+                    {
+                        let len = block::encode_error(
+                            block::WriteRequest::METHOD_ID,
+                            2,
+                            &mut ready_buf[free_idx],
+                        )
+                        .unwrap_or(0);
+                        push(
+                            Pending::Ready { len },
+                            &mut pending,
+                            &mut order,
+                            &mut order_len,
+                        );
+                    } else {
+                        let slot = (0..SLOTS)
+                            .find(|&i| slot_free[i])
+                            .unwrap_or_else(|| fail(94, "sem slot livre"));
+                        slot_free[slot] = false;
+                        // SAFETY: pagina de DMA exclusiva do slot; bytes <= 3584.
                         unsafe {
                             core::ptr::copy_nonoverlapping(
-                                data.virt as *const u8,
-                                r.data.as_mut_ptr(),
+                                rq.data().as_ptr(),
+                                slot_data[slot].virt as *mut u8,
                                 bytes,
                             )
                         };
-                        r.encode_msg(&mut reply).unwrap_or(0)
+                        let mut e = sqe(0x01, 1, slot_data[slot].phys);
+                        e[10] = rq.sector as u32;
+                        e[11] = (rq.sector >> 32) as u32;
+                        e[12] = (count - 1) as u32;
+                        io.submit(&m, &e, slot as u16);
+                        push(
+                            Pending::Io {
+                                slot,
+                                write: true,
+                                bytes,
+                            },
+                            &mut pending,
+                            &mut order,
+                            &mut order_len,
+                        );
                     }
                 }
-            }
-            Ok(Request::Write(rq)) => {
-                let count = rq.count as usize;
-                let bytes = rq.data().len();
-                if count == 0
-                    || count > MAX_SECTORS
-                    || bytes != count * 512
-                    || rq.sector + rq.count as u64 > nsze
-                {
-                    block::encode_error(block::WriteRequest::METHOD_ID, 2, &mut reply).unwrap_or(0)
-                } else {
-                    // SAFETY: pagina de DMA exclusiva; bytes <= 3584.
-                    unsafe {
-                        core::ptr::copy_nonoverlapping(
-                            rq.data().as_ptr(),
-                            data.virt as *mut u8,
-                            bytes,
-                        )
-                    };
-                    let mut e = sqe(0x01, 1, data.phys);
-                    e[10] = rq.sector as u32;
-                    e[11] = (rq.sector >> 32) as u32;
-                    e[12] = (count - 1) as u32;
-                    let (st, _) = io.command(&m, &e, irq.as_mut());
-                    if st != 0 {
-                        block::encode_error(
-                            block::WriteRequest::METHOD_ID,
-                            0x10 | (st & 0xf) as u32,
-                            &mut reply,
-                        )
-                        .unwrap_or(0)
-                    } else {
-                        WriteResponse {}.encode_msg(&mut reply).unwrap_or(0)
-                    }
+                Err(_) => {
+                    let len = block::encode_error(0, 1, &mut ready_buf[free_idx]).unwrap_or(0);
+                    push(
+                        Pending::Ready { len },
+                        &mut pending,
+                        &mut order,
+                        &mut order_len,
+                    );
                 }
             }
-            Err(_) => block::encode_error(0, 1, &mut reply).unwrap_or(0),
-        };
-        let _ = nexo_sys::channel_send(CHAN, &reply[..out_len], &[]);
+            let in_flight = order_len;
+            if in_flight > max_in_flight {
+                max_in_flight = in_flight;
+            }
+        }
+        if !worked && order_len > 0 {
+            // ha E/S em voo e nada novo: dorme ate a proxima interrupcao (ou cede a CPU)
+            if let Some(w) = irq.as_mut() {
+                if let Ok(c) = nexo_sys::irq_wait(DEV, w.vector, w.seen) {
+                    w.seen = c;
+                }
+            } else {
+                nexo_sys::yield_now();
+            }
+        }
     }
 }
