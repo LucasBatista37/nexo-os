@@ -2,7 +2,8 @@
 //! decodificação de BARs (tamanho por sondagem) e tabela global.
 
 use alloc::vec::Vec;
-use nexo_arch_x86_64::pci::{Bdf, config_read32, config_write32};
+pub use nexo_arch_x86_64::pci::Bdf;
+use nexo_arch_x86_64::pci::{config_read32, config_write32};
 use nexo_syscall_abi::{PCI_BARS, PciBar, PciInfo};
 
 use crate::sync::IrqLock;

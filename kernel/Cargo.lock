@@ -57,6 +57,7 @@ dependencies = [
  "nexo-symbols",
  "nexo-sync",
  "nexo-syscall-abi",
+ "nexo-virtio",
 ]
 
 [[package]]
@@ -76,4 +77,8 @@ version = "0.0.1"
 
 [[package]]
 name = "nexo-syscall-abi"
+version = "0.0.1"
+
+[[package]]
+name = "nexo-virtio"
 version = "0.0.1"

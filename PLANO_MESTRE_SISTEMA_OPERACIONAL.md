@@ -605,7 +605,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [ ] implementar Secure Boot depois da cadeia assinada interna;
 - [ ] criar backup e restauração de dados de usuário;
 - [ ] criar reset preservando arquivos quando possível;
-- [ ] implementar crash dumps protegidos e consentimento de envio;
+- [-] implementar crash dumps protegidos e consentimento de envio — *o **dump** existe: no pânico, o kernel grava mensagem/local/backtrace **simbolizado** numa sub-área reservada do disco de dados (setores `cap-16..cap-8`), por um caminho de emergência que não aloca nem trava (BARs mapeados e páginas de DMA pré-alocadas no boot; mini virtio-blk síncrono — os BARs do q35 ficam acima de 4 GiB, fora do physmap, lição do bloco). Extração/limpeza: `tools/nexo-disk crashdump [--clear]`; o cenário `panic` valida o conteúdo no CI. O dump nunca sai da máquina — **consentimento de envio** pende (junto com telemetria, ADR-0011)*;
 - [ ] montar fuzzing contínuo;
 - [ ] executar revisão independente de segurança;
 - [ ] realizar exercícios de chave comprometida e repositório malicioso;

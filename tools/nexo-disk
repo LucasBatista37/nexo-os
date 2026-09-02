@@ -181,13 +181,43 @@ def cmd_check(v: Volume) -> int:
     return 0
 
 
+def cmd_crashdump(image: str, clear: bool) -> int:
+    """Le o crash dump do kernel na sub-area reservada (setores cap-16 .. cap-8):
+    cabecalho NEXODUMP + versao u32 + len u32 + texto."""
+    import os
+    size = os.path.getsize(image)
+    cap = size // 512
+    off = (cap - 16) * 512
+    with open(image, "r+b" if clear else "rb") as f:
+        f.seek(off)
+        blob = f.read(8 * 512)
+        if blob[:8] != b"NEXODUMP":
+            print("crashdump: nenhum dump presente")
+            return 1
+        ver = int.from_bytes(blob[8:12], "little")
+        ln = int.from_bytes(blob[12:16], "little")
+        if ln > len(blob) - 16:
+            print("crashdump: cabecalho corrompido")
+            return 1
+        print(f"crashdump v{ver} ({ln} bytes):")
+        sys.stdout.write(blob[16:16 + ln].decode("utf-8", "replace"))
+        if clear:
+            f.seek(off)
+            f.write(b"\x00" * (8 * 512))
+            print("crashdump: area limpa")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--offset", type=int, default=0, help="deslocamento do volume na imagem (bytes)")
     ap.add_argument("image")
-    ap.add_argument("cmd", choices=["info", "ls", "cat", "check"])
+    ap.add_argument("cmd", choices=["info", "ls", "cat", "check", "crashdump"])
+    ap.add_argument("--clear", action="store_true", help="crashdump: zera a area apos ler")
     ap.add_argument("path", nargs="?", default="/")
     a = ap.parse_args()
+    if a.cmd == "crashdump":
+        return cmd_crashdump(a.image, a.clear)
     try:
         v = Volume(a.image, a.offset)
         if a.cmd == "info":

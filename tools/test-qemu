@@ -196,6 +196,8 @@ SCENARIOS = {
             r"#\d+\s+0x[0-9a-f]{16} <.*kmain.*\+0x[0-9a-f]+>",
         ],
         "forbid": [r"\[RESULT\] FAIL", r"NEXO: boot completo"],
+        # o panico grava um crash dump na sub-area reservada do disco de dados
+        "host_check": [(["crashdump"], r"panic deliberado solicitado por test=panic")],
     },
     "fault": {
         "cmdline": "test=fault selftest=0",

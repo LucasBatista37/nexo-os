@@ -35,6 +35,7 @@ fn panic(info: &PanicInfo) -> ! {
     kprint!("thread   : {}\n", crate::sched::current_name());
     backtrace(cpu::read_rbp(), None);
     kprint!("======================================================\n");
+    crate::crashdump::save(info, cpu::read_rbp());
     crate::console::status("KERNEL PANIC");
     halt_or_exit()
 }
@@ -49,6 +50,11 @@ pub fn halt_or_exit() -> ! {
 
 /// Limites da pilha que contém `addr`, se conhecida.
 fn stack_bounds(addr: u64) -> Option<(u64, u64)> {
+    stack_bounds_pub(addr)
+}
+
+/// Versão pública de [`stack_bounds`] (usada pelo crash dump).
+pub fn stack_bounds_pub(addr: u64) -> Option<(u64, u64)> {
     if (KERNEL_STACK_BASE..KERNEL_STACK_TOP).contains(&addr) {
         return Some((KERNEL_STACK_BASE, KERNEL_STACK_TOP));
     }

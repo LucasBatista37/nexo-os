@@ -23,6 +23,7 @@ nexo-acpi = { path = "lib/acpi" }
 nexo-elf = { path = "lib/elf" }
 nexo-initrd = { path = "lib/initrd" }
 nexo-syscall-abi = { path = "../abi/syscall" }
+nexo-virtio = { path = "../libraries/virtio" }
 nexo-font = { path = "../libraries/font" }
 nexo-arch-x86_64 = { path = "../arch/x86_64" }
 

@@ -16,6 +16,7 @@ mod acpi;
 mod boot;
 mod cell;
 mod console;
+mod crashdump;
 mod initrd;
 mod iommu;
 mod ipc;
@@ -80,6 +81,7 @@ fn kmain(bi: &'static BootInfo) -> ! {
     timer::init();
     initrd::init();
     pci::init();
+    crashdump::init();
     iommu::init(acpi::dmar_present());
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());
 
