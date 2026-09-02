@@ -1681,6 +1681,43 @@ fn shm_quota_client() -> ! {
     nexo_sys::exit(0)
 }
 
+/// Fala o `nexo.svc` tipado com um servico de eco: `serve{chan}` no controle, `echo{text}` no
+/// canal do cliente; devolve `true` se a resposta foi `echo: <text>`.
+fn svc_echo_round(ctl: nexo_sys::Handle, text: &[u8]) -> bool {
+    use nexo_proto::svc::{EchoRequest, ServeRequest, decode_echo_response};
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+    let (cli, cli_child) = match nexo_sys::channel_create() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let m = ServeRequest { chan: cli_child }
+        .encode_msg(&mut out)
+        .unwrap_or(0);
+    if nexo_sys::channel_send(ctl, &out[..m], &[cli_child]) != Status::Ok {
+        return false;
+    }
+    let mut rq = EchoRequest {
+        text: [0; 64],
+        text_len: text.len().min(64) as u32,
+    };
+    rq.text[..text.len().min(64)].copy_from_slice(&text[..text.len().min(64)]);
+    let m = rq.encode_msg(&mut out).unwrap_or(0);
+    if nexo_sys::channel_send(cli, &out[..m], &[]) != Status::Ok {
+        return false;
+    }
+    let ok = match nexo_sys::channel_recv(cli, &mut buf, &mut hs) {
+        Ok((n, _)) => match decode_echo_response(&buf[..n]) {
+            Ok(r) => r.text().starts_with(b"echo: ") && r.text()[6..] == text[..text.len().min(64)],
+            Err(_) => false,
+        },
+        Err(_) => false,
+    };
+    let _ = nexo_sys::handle_close(cli);
+    ok
+}
+
 fn config_driver() -> ! {
     let s1: nexo_sys::Handle = 0;
     let pipe: nexo_sys::Handle = 1;
@@ -2157,21 +2194,8 @@ fn launcher_client(elf_len: usize) -> ! {
     nexo_inst::install(&mut fs, &pkg[..n]).unwrap_or_else(|_| nexo_sys::exit(1261));
     let (child, ctl) = launch_installed(&mut fs, "eco-app", elf_buf);
     let ctl = ctl.unwrap_or_else(|| nexo_sys::exit(1262));
-    let (cli, cli_child) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1263));
-    if nexo_sys::channel_send(ctl, b"serve", &[cli_child]) != Status::Ok {
+    if !svc_echo_round(ctl, b"instalado") {
         nexo_sys::exit(1264);
-    }
-    if nexo_sys::channel_send(cli, b"instalado", &[]) != Status::Ok {
-        nexo_sys::exit(1265);
-    }
-    let mut buf = [0u8; 128];
-    let mut hs = [0u32; 1];
-    let n = match nexo_sys::channel_recv(cli, &mut buf, &mut hs) {
-        Ok((n, _)) => n,
-        _ => nexo_sys::exit(1266),
-    };
-    if &buf[..n] != b"echo: instalado" {
-        nexo_sys::exit(1267);
     }
     let _ = nexo_sys::handle_close(ctl);
     if nexo_sys::process_wait(child) != Ok(0) {
@@ -2209,21 +2233,8 @@ fn spawn_mem_client(elf_len: usize) -> ! {
     let child =
         nexo_sys::process_spawn_mem(elf, 3, &[ctl_child]).unwrap_or_else(|_| nexo_sys::exit(1232));
 
-    let (cli, cli_child) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(1233));
-    if nexo_sys::channel_send(ctl, b"serve", &[cli_child]) != Status::Ok {
+    if !svc_echo_round(ctl, b"ola do spawn_mem") {
         nexo_sys::exit(1234);
-    }
-    if nexo_sys::channel_send(cli, b"ola do spawn_mem", &[]) != Status::Ok {
-        nexo_sys::exit(1235);
-    }
-    let mut buf = [0u8; 128];
-    let mut hs = [0u32; 1];
-    let n = match nexo_sys::channel_recv(cli, &mut buf, &mut hs) {
-        Ok((n, _)) => n,
-        _ => nexo_sys::exit(1236),
-    };
-    if &buf[..n] != b"echo: ola do spawn_mem" {
-        nexo_sys::exit(1237);
     }
     // fecha o controle: o echo sai limpo com 0
     if nexo_sys::handle_close(ctl) != Status::Ok {

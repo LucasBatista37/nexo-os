@@ -87,6 +87,7 @@ dependencies = [
 name = "nexo-echo"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
 ]
@@ -95,6 +96,7 @@ dependencies = [
 name = "nexo-echo-client"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
 ]
@@ -307,6 +309,7 @@ dependencies = [
 name = "nexo-svcmgr"
 version = "0.0.1"
 dependencies = [
+ "nexo-proto",
  "nexo-rt",
  "nexo-sys",
 ]

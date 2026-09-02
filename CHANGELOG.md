@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Alterado (Fase 6, bloco 38 — bring-up no protocolo tipado `nexo.svc`)
+- Fecha a limitação anunciada na release 0.2 ("canais do bring-up com mensagens cruas"): `svcmgr`/`echo`/`echo-client` agora falam **`nexo.svc` v1.0** (`idl/svc.idl`): `serve{chan}` (sem resposta, por desenho — o svcmgr não bloqueia num serviço que pode cair), `connect` → canal (erro remoto 2 = "tente de novo", serviço reiniciando) e `echo{text}`. Comportamento, logs e a queda proposital preservados (reinícios do `user_services` intactos).
+- Os testes do lançador (que executam o binário do `echo` instalado) migraram para o helper tipado `svc_echo_round` — a primeira troca de protocolo de um "app da loja" exercitada de ponta a ponta.
+
 ### Segurança (Fase 8 antecipada, bloco 37 — quota de memória compartilhável por processo)
 - `memory_create` agora respeita uma **quota por processo criador**: `SHM_PAGES_MAX_PER_PROCESS` = 4096 páginas (16 MiB), devolvida quando o objeto morre (`Weak` para o criador no `MemoryObject` — sem ciclo de referência); exceder devolve `NoMemory`. Fecha o vetor de DoS local por exaustão de quadros via objetos compartilháveis (threat model §2/§3 atualizado com os tetos compostos de IPC).
 - Auto-teste `shm_quota` (87º) + modo 64 do `utest`: 16 objetos de 256 páginas cabem, o 17º falha com `NoMemory`, e fechar tudo **devolve** a quota (criação volta a funcionar); sem vazamento de quadros.

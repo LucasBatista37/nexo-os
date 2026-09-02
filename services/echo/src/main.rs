@@ -1,10 +1,11 @@
-//! `echo` — serviço de eco. Handle 0 = canal de controle com o `svcmgr`:
-//! cada mensagem `serve` traz um canal de cliente; o serviço lê um pedido e
-//! responde `echo: <pedido>`. Depois de `RDI` pedidos atendidos, cai de
+//! `echo` — serviço de eco, agora no protocolo tipado `nexo.svc` v1.0. Handle 0 = canal de
+//! controle com o `svcmgr`: cada `serve{chan}` traz um canal de cliente; o serviço atende um
+//! `echo{text}` e responde `echo: <text>`. Depois de `RDI` pedidos atendidos, cai de
 //! propósito (acesso a página não mapeada) para exercitar o reinício.
 #![no_std]
 #![no_main]
 
+use nexo_proto::svc::{self, EchoResponse, Request};
 use nexo_rt::log;
 use nexo_sys::abi::Status;
 
@@ -12,7 +13,8 @@ use nexo_sys::abi::Status;
 pub extern "C" fn _start(crash_after: u64) -> ! {
     let control: nexo_sys::Handle = 0;
     let mut served = 0u64;
-    let mut buf = [0u8; 128];
+    let mut buf = [0u8; 256];
+    let mut out = [0u8; 256];
     let mut hs = [0u32; 2];
     log!(
         "echo: pid {} pronto (cai apos {} pedidos)",
@@ -28,27 +30,35 @@ pub extern "C" fn _start(crash_after: u64) -> ! {
             }
             Err(_) => nexo_sys::exit(20),
         };
-        if &buf[..n] != b"serve" || nh != 1 {
+        let Ok(Request::Serve(rq)) = svc::decode_request_with_handles(&buf[..n], &hs[..nh]) else {
             continue;
-        }
-        let client = hs[0];
-        let mut req = [0u8; 64];
+        };
+        let client = rq.chan;
         let mut none = [0u32; 1];
-        if let Ok((m, _)) = nexo_sys::channel_recv(client, &mut req, &mut none) {
+        if let Ok((m, _)) = nexo_sys::channel_recv(client, &mut buf, &mut none) {
             if served >= crash_after {
                 log!("echo: caindo de proposito no pedido {}", served + 1);
                 // SAFETY: deliberadamente inválido — o kernel encerra este processo.
                 let v = unsafe { core::ptr::read_volatile(0x10 as *const u64) };
                 nexo_sys::exit(21 + (v & 1) as i64)
             }
-            let mut reply = nexo_rt::Buf::<96>::new();
-            use core::fmt::Write as _;
-            let _ = write!(
-                reply,
-                "echo: {}",
-                core::str::from_utf8(&req[..m]).unwrap_or("?")
-            );
-            let _ = nexo_sys::channel_send(client, reply.as_bytes(), &[]);
+            let reply_len = match svc::decode_request_with_handles(&buf[..m], &[]) {
+                Ok(Request::Echo(erq)) => {
+                    let mut r = EchoResponse {
+                        text: [0; 96],
+                        text_len: 0,
+                    };
+                    let pfx = b"echo: ";
+                    let t = erq.text();
+                    let tl = t.len().min(96 - pfx.len());
+                    r.text[..pfx.len()].copy_from_slice(pfx);
+                    r.text[pfx.len()..pfx.len() + tl].copy_from_slice(&t[..tl]);
+                    r.text_len = (pfx.len() + tl) as u32;
+                    r.encode_msg(&mut out).unwrap_or(0)
+                }
+                _ => svc::encode_error(svc::EchoRequest::METHOD_ID, 1, &mut out).unwrap_or(0),
+            };
+            let _ = nexo_sys::channel_send(client, &out[..reply_len], &[]);
             served += 1;
         }
         nexo_sys::handle_close(client);

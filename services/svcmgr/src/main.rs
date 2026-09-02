@@ -5,9 +5,10 @@
 #![no_std]
 #![no_main]
 
+use nexo_proto::svc::{self, ConnectResponse, Request, ServeRequest};
 use nexo_rt::log;
 use nexo_sys::Handle;
-use nexo_sys::abi::{RIGHTS_CHANNEL_DEFAULT, Status};
+use nexo_sys::abi::Status;
 
 const MAX_RESTARTS: i64 = 3;
 /// O serviço cai depois de atender este número de pedidos.
@@ -51,11 +52,17 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         Ok(h) => h,
         Err(_) => nexo_sys::exit(42),
     };
-    let mut buf = [0u8; 64];
+    let mut buf = [0u8; 256];
+    let mut out = [0u8; 256];
     let mut hs = [0u32; 2];
     loop {
         match nexo_sys::channel_recv(client_ctl, &mut buf, &mut hs) {
-            Ok((n, _)) if &buf[..n] == b"connect" => {
+            Ok((n, nh))
+                if matches!(
+                    svc::decode_request_with_handles(&buf[..n], &hs[..nh]),
+                    Ok(Request::Connect(_))
+                ) =>
+            {
                 // Serviço vivo? Se caiu, reinicia (política: até MAX_RESTARTS).
                 if let Ok((pid, true)) = nexo_sys::process_info(echo.process) {
                     let code = nexo_sys::process_wait(echo.process).unwrap_or(-99);
@@ -87,13 +94,22 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     Ok(p) => p,
                     Err(_) => nexo_sys::exit(45),
                 };
-                if nexo_sys::channel_send(echo.control, b"serve", &[for_service]) != Status::Ok {
-                    // Serviço morreu entre a checagem e o envio: o cliente tenta de novo.
+                let m = ServeRequest { chan: for_service }
+                    .encode_msg(&mut out)
+                    .unwrap_or(0);
+                if nexo_sys::channel_send(echo.control, &out[..m], &[for_service]) != Status::Ok {
+                    // Serviço morreu entre a checagem e o envio: o cliente tenta de novo
+                    // (erro remoto 2 do nexo.svc).
                     nexo_sys::handle_close(for_client);
-                    let _ = nexo_sys::channel_send(client_ctl, b"retry", &[]);
+                    let m =
+                        svc::encode_error(svc::ConnectRequest::METHOD_ID, 2, &mut out).unwrap_or(0);
+                    let _ = nexo_sys::channel_send(client_ctl, &out[..m], &[]);
                     continue;
                 }
-                if nexo_sys::channel_send(client_ctl, b"ok", &[for_client]) != Status::Ok {
+                let m = ConnectResponse { chan: for_client }
+                    .encode_msg(&mut out)
+                    .unwrap_or(0);
+                if nexo_sys::channel_send(client_ctl, &out[..m], &[for_client]) != Status::Ok {
                     nexo_sys::exit(46);
                 }
             }
@@ -121,6 +137,5 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     if client_code != 0 {
         nexo_sys::exit(48);
     }
-    let _ = RIGHTS_CHANNEL_DEFAULT;
     nexo_sys::exit(restarts)
 }
