@@ -33,6 +33,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-backup"
+version = "0.0.1"
+dependencies = [
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-blockdev"
 version = "0.0.1"
 dependencies = [

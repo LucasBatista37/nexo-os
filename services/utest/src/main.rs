@@ -108,6 +108,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         62 => trace_client(),
         63 => block_pipelined_client(),
         64 => shm_quota_client(),
+        65 => backup_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1716,6 +1717,79 @@ fn svc_echo_round(ctl: nexo_sys::Handle, text: &[u8]) -> bool {
     };
     let _ = nexo_sys::handle_close(cli);
     ok
+}
+
+/// Modo 65: backup e restauracao entre DOIS discos fisicos. Cria arquivos no volume principal,
+/// espelha para o volume de backup (outro disco), APAGA um original e corrompe outro, restaura
+/// do backup e confere que o conteudo original voltou. Handles: 0 pipe do backup, 1 fs origem.
+fn backup_driver() -> ! {
+    use nexo_inst::AppFs;
+    let pipe: nexo_sys::Handle = 0;
+    let mut c = FsClient {
+        ch: 1,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let mut fs = InstFs { c: &mut c };
+    fs.mkdir("/bk-teste")
+        .unwrap_or_else(|_| nexo_sys::exit(1580));
+    fs.write_file("/bk-teste/a.txt", b"conteudo-a-original")
+        .unwrap_or_else(|_| nexo_sys::exit(1581));
+    fs.write_file("/bk-teste/b.txt", b"conteudo-b-original")
+        .unwrap_or_else(|_| nexo_sys::exit(1582));
+
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    // empresta o fs de origem ao backup; ele volta junto com o "ok"
+    if nexo_sys::channel_send(pipe, b"espelha /bk-teste", &[1]) != Status::Ok {
+        nexo_sys::exit(1583);
+    }
+    let src = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, 1)) if &buf[..n] == b"ok 2" => hs[0],
+        _ => nexo_sys::exit(1584),
+    };
+    let mut c2 = FsClient {
+        ch: src,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let mut fs = InstFs { c: &mut c2 };
+
+    // desastre no volume principal: um arquivo apagado, outro adulterado
+    fs.unlink("/bk-teste/a.txt")
+        .unwrap_or_else(|_| nexo_sys::exit(1585));
+    fs.write_file("/bk-teste/b.txt", b"CORROMPIDO")
+        .unwrap_or_else(|_| nexo_sys::exit(1586));
+
+    if nexo_sys::channel_send(pipe, b"restaura /bk-teste", &[src]) != Status::Ok {
+        nexo_sys::exit(1587);
+    }
+    let src = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, 1)) if &buf[..n] == b"ok 2" => hs[0],
+        _ => nexo_sys::exit(1588),
+    };
+    let mut c3 = FsClient {
+        ch: src,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    let mut fs = InstFs { c: &mut c3 };
+
+    let mut back = [0u8; 64];
+    let n = fs
+        .read_file("/bk-teste/a.txt", &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1589));
+    if &back[..n] != b"conteudo-a-original" {
+        nexo_sys::exit(1590);
+    }
+    let n = fs
+        .read_file("/bk-teste/b.txt", &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1591));
+    if &back[..n] != b"conteudo-b-original" {
+        nexo_sys::exit(1592);
+    }
+    nexo_sys::log("utest: backup ok — espelhado em outro disco, desastre revertido");
+    nexo_sys::exit(0)
 }
 
 fn config_driver() -> ! {
