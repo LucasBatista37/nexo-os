@@ -54,10 +54,17 @@ pub struct MemoryObject {
     pub frames: Vec<nexo_mm::PhysAddr>,
     /// Tamanho em bytes (páginas × 4096).
     pub len: u64,
+    /// Criador (para devolver a quota de páginas quando o objeto morrer); `Weak` para não
+    /// formar ciclo Processo → tabela → objeto → Processo.
+    pub owner: alloc::sync::Weak<crate::process::Process>,
 }
 
 impl Drop for MemoryObject {
     fn drop(&mut self) {
+        if let Some(p) = self.owner.upgrade() {
+            let pages = self.len / nexo_mm::PAGE_SIZE;
+            p.shm_pages.fetch_sub(pages, Ordering::AcqRel);
+        }
         for f in self.frames.drain(..) {
             let _ = crate::mm::phys::free_frame(f);
         }

@@ -186,6 +186,8 @@ pub struct Process {
     pub exited: AtomicBool,
     /// Syscalls atendidas.
     pub syscalls: AtomicU64,
+    /// Páginas de memória compartilhável criadas e ainda vivas (quota; ver ABI).
+    pub shm_pages: AtomicU64,
     /// Motivo, se encerrado pelo kernel.
     pub kill_reason: IrqLock<Option<&'static str>>,
     /// Handles do processo.
@@ -311,6 +313,7 @@ pub fn spawn_elf_with_handles(
         exit_code: AtomicI64::new(0),
         exited: AtomicBool::new(false),
         syscalls: AtomicU64::new(0),
+        shm_pages: AtomicU64::new(0),
         kill_reason: IrqLock::new(None),
         handles: IrqLock::new(crate::ipc::HandleTable::new()),
         exit_waiters: IrqLock::new(Vec::new()),

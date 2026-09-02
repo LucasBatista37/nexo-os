@@ -116,6 +116,9 @@ pub const SYS_MAX: u64 = 33;
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
 pub const MEMORY_MAX_PAGES: u64 = 256;
+/// Quota de páginas de memória compartilhável por processo CRIADOR (16 MiB): `memory_create`
+/// devolve `NoMemory` ao excedê-la; a cota volta quando o objeto morre (threat model §2/§3).
+pub const SHM_PAGES_MAX_PER_PROCESS: u64 = 4096;
 /// Tipo de objeto: memória compartilhável.
 pub const KIND_MEMORY: u32 = 4;
 /// Capability de depuração: exigida para ligar/ler o trace de syscalls ([`SYS_TRACE`]).

@@ -107,6 +107,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         61 => handoff_sender(),
         62 => trace_client(),
         63 => block_pipelined_client(),
+        64 => shm_quota_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1651,6 +1652,32 @@ fn block_pipelined_client() -> ! {
         }
     }
     nexo_sys::log("utest: nexo.block pipelined ok — 9 respostas em ordem, dados conferem");
+    nexo_sys::exit(0)
+}
+
+/// Modo 64: quota de memoria compartilhavel por processo. Cria objetos de 256 paginas ate a
+/// quota (4096 paginas = 16 objetos), confere que o 17o falha com NoMemory, fecha tudo e
+/// confere que a quota VOLTA (criar de novo funciona).
+fn shm_quota_client() -> ! {
+    use nexo_sys::abi::{MEMORY_MAX_PAGES, SHM_PAGES_MAX_PER_PROCESS};
+    let cabem = (SHM_PAGES_MAX_PER_PROCESS / MEMORY_MAX_PAGES) as usize; // 16
+    let mut handles = [0u32; 32];
+    for h in handles.iter_mut().take(cabem) {
+        *h = nexo_sys::memory_create(MEMORY_MAX_PAGES).unwrap_or_else(|_| nexo_sys::exit(810));
+    }
+    match nexo_sys::memory_create(MEMORY_MAX_PAGES) {
+        Err(Status::NoMemory) => {}
+        _ => nexo_sys::exit(811), // acima da quota tinha de falhar
+    }
+    for &h in handles.iter().take(cabem) {
+        if nexo_sys::handle_close(h) != Status::Ok {
+            nexo_sys::exit(812);
+        }
+    }
+    // quota devolvida: cria e fecha de novo
+    let h = nexo_sys::memory_create(MEMORY_MAX_PAGES).unwrap_or_else(|_| nexo_sys::exit(813));
+    let _ = nexo_sys::handle_close(h);
+    nexo_sys::log("utest: quota de memoria ok — 16 MiB por processo, devolvida ao fechar");
     nexo_sys::exit(0)
 }
 

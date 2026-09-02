@@ -100,3 +100,5 @@ Todo ponteiro de usuário é validado antes do acesso: faixa `[ptr, ptr+len)` ab
 - Pilha de usuário: 256 KiB (era 64 KiB; serviços com buffers de bloco na pilha estouravam). `init` inicia `svcmgr`; `svcmgr` supervisiona `echo` (reinício até 3 vezes) e atende pedidos de conexão de `echo-client` entregando um canal por pedido.
 
 > Endurecimento de 2026-09-01 (mesmo dia da introdução da 33, ABI experimental): ligar e ler o trace passaram a exigir a capability de **depuração** (`KIND_DEBUG` = 5) — o anel é global e, sem o gate, qualquer app veria o padrão de syscalls dos outros (threat model §9).
+
+> Quota (2026-09-01): `memory_create` respeita `SHM_PAGES_MAX_PER_PROCESS` (4096 páginas = 16 MiB por processo criador; devolvida quando o objeto morre) e devolve `NoMemory` ao excedê-la.

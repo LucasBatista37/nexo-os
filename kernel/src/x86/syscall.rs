@@ -167,15 +167,22 @@ fn sys_memory_create(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     if pages == 0 || pages > nexo_syscall_abi::MEMORY_MAX_PAGES {
         return (Status::InvalidArgs, 0);
     }
+    // quota por processo criador (devolvida no Drop do objeto)
+    let prev = p.shm_pages.fetch_add(pages, Ordering::AcqRel);
+    if prev + pages > nexo_syscall_abi::SHM_PAGES_MAX_PER_PROCESS {
+        p.shm_pages.fetch_sub(pages, Ordering::AcqRel);
+        return (Status::NoMemory, 0);
+    }
     let mut frames = Vec::with_capacity(pages as usize);
     for _ in 0..pages {
         match crate::mm::phys::allocate_zeroed_frame() {
             Some(fr) => frames.push(fr),
             None => {
-                // libera o que já alocamos
+                // libera o que já alocamos (e a quota)
                 for fr in frames.drain(..) {
                     let _ = crate::mm::phys::free_frame(fr);
                 }
+                p.shm_pages.fetch_sub(pages, Ordering::AcqRel);
                 return (Status::NoMemory, 0);
             }
         }
@@ -183,6 +190,11 @@ fn sys_memory_create(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let obj = alloc::sync::Arc::new(MemoryObject {
         frames,
         len: pages * PAGE_SIZE,
+        owner: alloc::sync::Arc::downgrade(&crate::process::current().unwrap_or_else(|| {
+            // impossivel: estamos numa syscall deste processo
+            p.shm_pages.fetch_sub(pages, Ordering::AcqRel);
+            crate::process::exit_current(-1, Some("sem processo em memory_create"))
+        })),
     });
     let handle = Handle {
         object: Object::Memory(obj),

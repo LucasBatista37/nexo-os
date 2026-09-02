@@ -64,6 +64,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_ipc", test_user_ipc),
     ("ipc_handoff", test_ipc_handoff),
     ("user_trace", test_user_trace),
+    ("shm_quota", test_shm_quota),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
     ("user_nvme_fs", test_user_nvme_fs),
@@ -3048,6 +3049,22 @@ fn test_user_trace() -> TestResult {
     Ok(())
 }
 
+/// Quota de memoria compartilhavel por processo: estoura em NoMemory na 17a criacao de 256
+/// paginas e volta quando os objetos fecham (threat model §2/§3 — DoS local).
+fn test_shm_quota() -> TestResult {
+    let frames0 = phys::stats().free;
+    let client = crate::process::spawn_named("utest", 64, Vec::new()).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    drop(client);
+    check!(cc == 0, "cliente saiu com {cc}");
+    let frames = settled_free_frames(frames0, 8);
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
 fn test_user_spawn_mem() -> TestResult {
     use crate::ipc::{ChannelEnd, Handle, MemoryObject, Object, Rights};
     let ends0 = crate::ipc::live_channel_ends();
@@ -3068,6 +3085,7 @@ fn test_user_spawn_mem() -> TestResult {
         object: Object::Memory(Arc::new(MemoryObject {
             frames,
             len: pages * nexo_mm::PAGE_SIZE,
+            owner: alloc::sync::Weak::new(),
         })),
         rights: Rights(nexo_syscall_abi::RIGHTS_MEMORY_DEFAULT),
     };
@@ -3115,6 +3133,7 @@ fn test_user_launcher() -> TestResult {
         object: Object::Memory(Arc::new(MemoryObject {
             frames,
             len: pages * nexo_mm::PAGE_SIZE,
+            owner: alloc::sync::Weak::new(),
         })),
         rights: Rights(nexo_syscall_abi::RIGHTS_MEMORY_DEFAULT),
     };
@@ -3177,6 +3196,7 @@ fn test_user_launch_gui() -> TestResult {
         object: Object::Memory(Arc::new(MemoryObject {
             frames,
             len: pages * nexo_mm::PAGE_SIZE,
+            owner: alloc::sync::Weak::new(),
         })),
         rights: Rights(nexo_syscall_abi::RIGHTS_MEMORY_DEFAULT),
     };
@@ -3245,6 +3265,7 @@ fn test_user_consent() -> TestResult {
         object: Object::Memory(Arc::new(MemoryObject {
             frames,
             len: pages * nexo_mm::PAGE_SIZE,
+            owner: alloc::sync::Weak::new(),
         })),
         rights: Rights(nexo_syscall_abi::RIGHTS_MEMORY_DEFAULT),
     };

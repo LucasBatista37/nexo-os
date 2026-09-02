@@ -39,8 +39,10 @@ hostil e validam no parse.
   bug em que o coletor fechava handles em trânsito foi achado pelo CI em SMP carregado e está
   coberto por regressão (`ipc_handoff`); contagem de pontas conferida em todos os testes
   (vazamento = falha).
-- **Lacunas**: sem quotas por processo de canais/mensagens (DoS por exaustão de memória do
-  kernel é possível dentro do limite global de fila; mitigação parcial: `CHANNEL_QUEUE_MAX`).
+- **Lacunas**: mensagens/canais sem quota por processo, mas com teto composto finito
+  (`HANDLES_MAX` × `CHANNEL_QUEUE_MAX` × `MSG_MAX`); **memória compartilhável tem quota por
+  criador desde 2026-09-01** (bloco 37): 4096 páginas (16 MiB) por processo, devolvida quando
+  o objeto morre (`shm_quota`, teste com estouro e devolução).
 
 ## 3. Memória compartilhada e DMA
 
@@ -158,4 +160,4 @@ estáticos; `nexo-pkg`/`nexo-inst`/`nexo-img`/`nexo-cal`/`nexo-textgrid` são
 
 1. IOMMU quando disponível (§3 — maior gap estrutural; documentado desde ADR-0015).
 2. Assinatura de pacotes assim que a decisão de cripto sair (§7).
-3. Quotas de IPC e de disco (§2/§6 — contra DoS local).
+3. Quota de disco (§6) e refinamento das de IPC (§2 — a de memória compartilhável existe).

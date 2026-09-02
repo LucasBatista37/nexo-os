@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Segurança (Fase 8 antecipada, bloco 37 — quota de memória compartilhável por processo)
+- `memory_create` agora respeita uma **quota por processo criador**: `SHM_PAGES_MAX_PER_PROCESS` = 4096 páginas (16 MiB), devolvida quando o objeto morre (`Weak` para o criador no `MemoryObject` — sem ciclo de referência); exceder devolve `NoMemory`. Fecha o vetor de DoS local por exaustão de quadros via objetos compartilháveis (threat model §2/§3 atualizado com os tetos compostos de IPC).
+- Auto-teste `shm_quota` (87º) + modo 64 do `utest`: 16 objetos de 256 páginas cabem, o 17º falha com `NoMemory`, e fechar tudo **devolve** a quota (criação volta a funcionar); sem vazamento de quadros.
+
 ### Adicionado (Fase 6, bloco 36 — depuração remota GDB/LLDB)
 - `tools/nexo-debug [símbolo]`: depuração interativa do kernel em um comando — QEMU pausado com gdbstub em `:1234` + lldb (macOS) ou gdb (Linux) conectado com os símbolos de `kernel.elf` e breakpoint (padrão `kmain`).
 - Cenário **`gdb`** no `tools/test-qemu` (roda no CI): conecta o depurador disponível, breakpoint em `kmain`, confirma o *hit*, desanexa e verifica que o convidado completa o boot (código 33). Sem depurador no host, o cenário pula declaradamente.
