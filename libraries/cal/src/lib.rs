@@ -81,6 +81,13 @@ pub fn civil_from_epoch(secs: u64) -> Civil {
     }
 }
 
+/// Como [`civil_from_epoch`], aplicando um deslocamento de fuso em MINUTOS (leste positivo;
+/// ex.: -180 para UTC−3). O deslocamento é política de quem chama — o kernel só fornece UTC.
+pub fn civil_from_epoch_tz(secs: u64, offset_min: i32) -> Civil {
+    let shifted = (secs as i64).saturating_add(offset_min as i64 * 60).max(0);
+    civil_from_epoch(shifted as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +107,19 @@ mod tests {
             assert_eq!((c.year, c.month, c.day, c.weekday), (y, m, d, wd));
             assert_eq!(days_from_civil(y, m, d) * 86400, epoch as i64);
         }
+    }
+
+    #[test]
+    fn timezone_offset_shifts_the_day() {
+        // 2026-09-01 00:30 UTC: em UTC-3 ainda e 31/08; em UTC+9 ja passa das 9h30
+        let epoch = 1788220800 + 30 * 60;
+        assert_eq!(civil_from_epoch_tz(epoch, 0).day, 1);
+        let sp = civil_from_epoch_tz(epoch, -180);
+        assert_eq!((sp.month, sp.day, sp.weekday), (8, 31, 0)); // segunda 31/08
+        let jp = civil_from_epoch_tz(epoch, 9 * 60);
+        assert_eq!((jp.month, jp.day), (9, 1));
+        // saturacao: nunca antes de 1970
+        assert_eq!(civil_from_epoch_tz(60, -1440).year, 1970);
     }
 
     #[test]

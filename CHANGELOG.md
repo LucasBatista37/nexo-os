@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 7 antecipada, bloco 32 — fusos horários na nexo-cal)
+- `nexo-cal`: `civil_from_epoch_tz(secs, offset_min)` — data civil com deslocamento de fuso em minutos (leste positivo; saturado em 1970). O kernel segue fornecendo só UTC (`debug_info` 7), por desenho: fuso é política de quem apresenta. Testes de host cruzam a meia-noite nos dois sentidos (UTC−3 volta para 31/08; UTC+9 avança). Pendem persistência da escolha e UI.
+
 ### Adicionado (Fase 7 antecipada, bloco 31 — NVMe com múltiplos pedidos em voo)
 - `nvmedev` agora é **assíncrono** no espírito do blockdev: até 4 pedidos em voo (um slot de página PRP1 por pedido; CID = slot), conclusões colhidas por `poll_completion` e respostas entregues **na ordem de chegada** — respostas imediatas (`capacity`/`identity`/erros de validação) entram na mesma fila (`Ready`) para não furar a ordem; bloqueia no canal só sem nada em voo, senão dorme em `irq_wait`.
 - Auto-teste `user_nvme_pipe` (86º) + modo 63 do `utest`: dispara 4 escritas + capacidade + 4 leituras **sem esperar** e colhe as 9 respostas exatamente em ordem, com os padrões conferidos byte a byte; o teste de pipeline do modo 8 também passou a exercitar o NVMe.
