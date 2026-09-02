@@ -65,6 +65,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("ipc_handoff", test_ipc_handoff),
     ("user_trace", test_user_trace),
     ("shm_quota", test_shm_quota),
+    ("user_c_hello", test_user_c_hello),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3142,6 +3143,28 @@ fn test_shm_quota() -> TestResult {
     let frames = settled_free_frames(frames0, 8);
     check!(
         frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Primeiro processo em C: o `hello-c` (compilado freestanding com os headers de `abi/c`)
+/// loga pelo kernel e sai 0 — a ABI de syscalls funciona fora de Rust. Guardado pela presenca
+/// do binario no initrd (o demo so e empacotado quando o host tem clang + rust-lld).
+fn test_user_c_hello() -> TestResult {
+    if crate::initrd::find("hello-c").is_none() {
+        return Err(String::from(
+            "hello-c ausente do initrd (host sem clang/rust-lld)",
+        ));
+    }
+    let frames0 = phys::stats().free;
+    let p = crate::process::spawn_named("hello-c", 0, Vec::new()).map_err(String::from)?;
+    let code = crate::process::wait_and_reap(&p);
+    drop(p);
+    check!(code == 0, "hello-c saiu com {code}");
+    let frames = settled_free_frames(frames0, 4);
+    check!(
+        frames + 4 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
     );
     Ok(())

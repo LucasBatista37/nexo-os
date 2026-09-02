@@ -6,6 +6,7 @@ Uso: tools/build-image [--cmdline "..."] [--out build/nexo.img] [--debug] [--no-
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -128,6 +129,12 @@ def main() -> None:
     stripped = []
     for name, path in services.items():
         stripped.append((name, strip_debug(path, BUILD / f"svc-{name}.elf")))
+    # demo em C (opcional): compilado por tools/build-c-demo quando ha clang + rust-lld;
+    # entra no initrd como "hello-c" e o auto-teste correspondente e guardado pela presenca
+    subprocess.run([str(ROOT / "tools" / "build-c-demo")], check=False)
+    hello_c = BUILD / "hello-c.elf"
+    if hello_c.exists():
+        stripped.append(("hello-c", hello_c))
     initrd = BUILD / "initrd"
     from mkinitrd import pack
     pack([(n, str(p)) for n, p in stripped], initrd)

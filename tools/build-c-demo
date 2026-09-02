@@ -1,0 +1,17 @@
+#!/bin/sh
+# Compila examples/c/hello.c (freestanding, sem libc) em build/hello-c.elf usando clang +
+# rust-lld — o mesmo layout dos servicos (estatico, no-PIE, entry _start). Sem toolchain,
+# sai 0 com aviso: o demo e opcional e os testes que dependem dele sao guardados.
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="$ROOT/build/hello-c.elf"
+command -v clang >/dev/null 2>&1 || { echo "[c-demo] pulado: sem clang"; exit 0; }
+SYSROOT="$(rustc --print sysroot 2>/dev/null)" || { echo "[c-demo] pulado: sem rustc"; exit 0; }
+LLD="$(find "$SYSROOT" -name rust-lld -type f 2>/dev/null | head -1)"
+[ -n "$LLD" ] || { echo "[c-demo] pulado: sem rust-lld"; exit 0; }
+mkdir -p "$ROOT/build"
+"$ROOT/tools/nexo-cheaders" >/dev/null
+clang --target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector -fno-builtin \
+      -mno-red-zone -fomit-frame-pointer -O2 -c "$ROOT/examples/c/hello.c" -o "$ROOT/build/hello-c.o"
+"$LLD" -flavor gnu --no-pie -e _start -o "$OUT" "$ROOT/build/hello-c.o"
+echo "[c-demo] $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes)"

@@ -324,6 +324,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 42 — headers C e o primeiro processo em C)
+- `abi/c/nexo.h`: headers C **freestanding** da ABI (wrapper inline da convenção de syscall — rax→status, rdx→valor, rcx/r11 destruídos — e helpers `nexo_exit`/`nexo_log`/`nexo_yield`/`nexo_wall_epoch`); `abi/c/nexo_syscalls.h` é **gerado da fonte Rust** por `tools/nexo-cheaders` (49 definições — números de syscall e códigos de `Status` nunca desatualizam).
+- `examples/c/hello.c` + `tools/build-c-demo`: o primeiro processo em C do sistema — compilado sem libc (clang `--target=x86_64-unknown-none-elf`) e linkado com `rust-lld` no mesmo layout dos serviços (estático, no-PIE, `_start`); 1144 bytes, empacotado no initrd como `hello-c` quando o host tem o toolchain (CI tem).
+- Auto-teste `user_c_hello` (90º): o binário C loga pelo kernel ("ola do C freestanding") e sai 0 — a ABI funciona fora de Rust.
+
 ### Adicionado (Fase 7 antecipada, bloco 41 — NexoFS sobre AHCI)
 - Auto-teste `user_ahci_fs` (89º): a pilha de armazenamento inteira (fs + cliente persistente `boot.count`) sobre o **terceiro** controlador — NexoFS formatado/montado no disco AHCI via `ahcidev`, sem mudar uma linha de fs nem de cliente. A substituibilidade por protocolo agora está provada em virtio-blk, NVMe e AHCI, tanto no nível cru quanto com o sistema de arquivos completo.
 
