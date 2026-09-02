@@ -103,8 +103,10 @@ pub const SYS_FB_INFO: u64 = 31;
 /// lançador lê o ELF da instalação e o entrega aqui. Mesmo isolamento de qualquer processo (W^X,
 /// espaço próprio, só os handles transferidos). `RDX` = handle do processo.
 pub const SYS_PROCESS_SPAWN_MEM: u64 = 32;
-/// Trace de syscalls: `rdi` = operação (0 desliga, 1 liga, 2 lê para `rsi`/`rdx` = ptr/cap em
-/// ENTRADAS de 16 B — devolve quantas copiou; 3 = total gravado desde o boot). Diagnóstico:
+/// Trace de syscalls: `rdi` = operação. 0 desliga / 1 liga (`rsi` = handle de DEPURAÇÃO,
+/// [`KIND_DEBUG`]); 2 lê (`rsi`/`rdx` = ptr/cap em ENTRADAS de 16 B, `r10` = handle de
+/// depuração — devolve quantas copiou); 3 = total gravado (livre). Sem a capability: `Denied`.
+/// Endurecimento de 2026-09-01 sobre a forma experimental do mesmo dia (threat model §9);
 /// eventos `{tsc: u64, pid: u32, nr: u16, _: u16}`; anel global com os últimos 4096.
 pub const SYS_TRACE: u64 = 33;
 
@@ -116,6 +118,10 @@ pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 pub const MEMORY_MAX_PAGES: u64 = 256;
 /// Tipo de objeto: memória compartilhável.
 pub const KIND_MEMORY: u32 = 4;
+/// Capability de depuração: exigida para ligar/ler o trace de syscalls ([`SYS_TRACE`]).
+pub const KIND_DEBUG: u32 = 5;
+/// Direitos padrão de um handle de depuração.
+pub const RIGHTS_DEBUG_DEFAULT: u32 = RIGHT_READ | RIGHT_TRANSFER | RIGHT_DUPLICATE;
 /// Direitos padrão de um objeto de memória.
 pub const RIGHTS_MEMORY_DEFAULT: u32 =
     RIGHT_READ | RIGHT_WRITE | RIGHT_MAP | RIGHT_TRANSFER | RIGHT_DUPLICATE;

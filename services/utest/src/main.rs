@@ -1500,7 +1500,12 @@ fn handoff_sender() -> ! {
 fn trace_client() -> ! {
     use nexo_sys::abi::SYS_YIELD;
     let pid = nexo_sys::get_pid();
-    if nexo_sys::trace_enable(true) != Status::Ok {
+    const DEBUG: nexo_sys::Handle = 0; // capability de depuracao entregue pelo kernel
+    // sem a capability (handle inexistente): NEGADO — o anel e global e nao vaza de graca
+    if nexo_sys::trace_enable(true, 999) != Status::Denied {
+        nexo_sys::exit(786);
+    }
+    if nexo_sys::trace_enable(true, DEBUG) != Status::Ok {
         nexo_sys::exit(780);
     }
     const N: usize = 50;
@@ -1515,8 +1520,11 @@ fn trace_client() -> ! {
     }; 4096];
     // SAFETY: unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha).
     let evs = unsafe { &mut *core::ptr::addr_of_mut!(EVS) };
-    let got = nexo_sys::trace_read(evs).unwrap_or_else(|_| nexo_sys::exit(781));
-    if nexo_sys::trace_enable(false) != Status::Ok {
+    if nexo_sys::trace_read(evs, 999).is_ok() {
+        nexo_sys::exit(787); // leitura sem capability tem de falhar
+    }
+    let got = nexo_sys::trace_read(evs, DEBUG).unwrap_or_else(|_| nexo_sys::exit(781));
+    if nexo_sys::trace_enable(false, DEBUG) != Status::Ok {
         nexo_sys::exit(782);
     }
     if got == 0 || nexo_sys::trace_recorded() == 0 {

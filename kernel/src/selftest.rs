@@ -1321,6 +1321,14 @@ fn channel_handle(end: Arc<crate::ipc::ChannelEnd>) -> crate::ipc::Handle {
     }
 }
 
+/// Capability de depuração (liga/lê o trace de syscalls).
+fn debug_handle() -> crate::ipc::Handle {
+    crate::ipc::Handle {
+        object: crate::ipc::Object::Debug,
+        rights: crate::ipc::Rights(nexo_syscall_abi::RIGHTS_DEBUG_DEFAULT),
+    }
+}
+
 fn device_handle() -> crate::ipc::Handle {
     crate::ipc::Handle {
         object: crate::ipc::Object::Device(Arc::new(crate::ipc::DeviceGrant::all())),
@@ -3026,7 +3034,8 @@ fn test_user_nvme_fs() -> TestResult {
 /// eventos (pid, nr, TSC monotonico) — a metade "trace" de "criar profiler e visualizador".
 fn test_user_trace() -> TestResult {
     let frames0 = phys::stats().free;
-    let client = crate::process::spawn_named("utest", 62, Vec::new()).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 62, alloc::vec![debug_handle()])
+        .map_err(String::from)?;
     let cc = crate::process::wait_and_reap(&client);
     drop(client);
     check!(cc == 0, "cliente saiu com {cc}");

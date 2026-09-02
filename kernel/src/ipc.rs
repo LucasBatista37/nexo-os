@@ -43,6 +43,8 @@ pub enum Object {
     Device(Arc<DeviceGrant>),
     /// Memória compartilhável (frames físicos possuídos por este objeto).
     Memory(Arc<MemoryObject>),
+    /// Capability de depuração (trace de syscalls); sem estado — o valor é possuí-la.
+    Debug,
 }
 
 /// Objeto de memória compartilhável: possui os quadros físicos e os libera quando ninguém mais
@@ -110,6 +112,7 @@ impl Object {
             Object::Process(_) => KIND_PROCESS,
             Object::Device(_) => KIND_DEVICE,
             Object::Memory(_) => KIND_MEMORY,
+            Object::Debug => KIND_DEBUG,
         }
     }
 }

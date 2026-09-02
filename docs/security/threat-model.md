@@ -131,10 +131,10 @@ hostil e validam no parse.
 - **Superfície**: `debug_info` (contadores globais), `SYS_TRACE` (anel global!), logs.
 - **Mitigações**: o trace grava só `{tsc, pid, nr}` — sem argumentos, sem dados; logs de app
   são prefixados por pid.
-- **Lacunas**: o anel de trace é GLOBAL e legível por qualquer app quando ligado — um app vê
-  o PADRÃO de syscalls dos outros (side channel clássico). Aceitável como ferramenta de
-  desenvolvimento; antes de uso real: restringir ligar/ler a um privilégio (mesmo desenho do
-  erro 7 do wm). Registrado como dívida deliberada.
+- **Lacunas**: ~~anel de trace legível por qualquer app~~ **fechada em 2026-09-01** (bloco
+  35): ligar e ler exigem a capability de **depuração** (`Object::Debug`, kind 5 — o mesmo
+  desenho de posse-explícita das concessões de dispositivo), com testes negativos em
+  `user_trace`. O TSC em si segue legível (canais laterais, §1).
 
 ## 10. Cadeia de boot e atualização
 
@@ -158,5 +158,4 @@ estáticos; `nexo-pkg`/`nexo-inst`/`nexo-img`/`nexo-cal`/`nexo-textgrid` são
 
 1. IOMMU quando disponível (§3 — maior gap estrutural; documentado desde ADR-0015).
 2. Assinatura de pacotes assim que a decisão de cripto sair (§7).
-3. Restringir o `SYS_TRACE` a um privilégio (§9 — pequeno).
-4. Quotas de IPC e de disco (§2/§6 — contra DoS local).
+3. Quotas de IPC e de disco (§2/§6 — contra DoS local).

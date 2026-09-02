@@ -114,8 +114,9 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--log", default=None, help="grava a saida serial neste arquivo")
     ap.add_argument("--gdb", action="store_true")
-    ap.add_argument("--nvme-disk", default=str(BUILD / "nvme-data.img"),
-                    help="disco NVMe de dados (criado com 8 MiB se nao existir; --no-nvme desativa)")
+    ap.add_argument("--nvme-disk", default=None,
+                    help="disco NVMe de dados (padrao: par do --disk, '<disk>-nvme.img'; "
+                         "criado com 8 MiB se nao existir; --no-nvme desativa)")
     ap.add_argument("--no-nvme", action="store_true", help="nao anexa o disco NVMe")
     ap.add_argument("--disk", default=str(BUILD / "data.img"),
                     help="disco de dados virtio-blk (raw; criado com 16 MiB se nao existir)")
@@ -150,7 +151,14 @@ def main() -> int:
                 f.truncate(16 * 1024 * 1024)
     nvme_disk = None
     if not a.no_nvme:
-        nvme_disk = Path(a.nvme_disk)
+        if a.nvme_disk:
+            nvme_disk = Path(a.nvme_disk)
+        elif disk is not None:
+            # par do disco de dados: execucoes concorrentes (ex.: stress prolongado + suite)
+            # nao disputam o mesmo arquivo (QEMU tranca as imagens)
+            nvme_disk = disk.with_name(disk.stem + "-nvme.img")
+        else:
+            nvme_disk = BUILD / "nvme-data.img"
         if not nvme_disk.exists():
             nvme_disk.parent.mkdir(parents=True, exist_ok=True)
             with open(nvme_disk, "wb") as f:

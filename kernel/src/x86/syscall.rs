@@ -709,6 +709,17 @@ fn sys_device(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
     }
 }
 
+/// `true` se `h` na tabela de `p` é a capability de depuração (com direito de leitura).
+fn holds_debug(p: &process::Process, h: u32) -> bool {
+    matches!(
+        p.handles.lock().get(h),
+        Ok(Handle {
+            object: Object::Debug,
+            rights,
+        }) if rights.contains(RIGHT_READ)
+    )
+}
+
 fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
     let Some(p) = process::current() else {
         return (Status::Denied, 0);
@@ -768,15 +779,19 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             _ => (Status::InvalidArgs, 0),
         },
         SYS_TRACE => match f.rdi {
-            0 => {
-                crate::trace::set_enabled(false);
-                (Status::Ok, 0)
-            }
-            1 => {
-                crate::trace::set_enabled(true);
+            // Ligar/desligar e ler exigem a capability de DEPURACAO (threat model §9: o anel
+            // e global — sem o gate, qualquer app veria o padrao de syscalls dos outros).
+            0 | 1 => {
+                if !holds_debug(&p, f.rsi as u32) {
+                    return (Status::Denied, 0);
+                }
+                crate::trace::set_enabled(f.rdi == 1);
                 (Status::Ok, 0)
             }
             2 => {
+                if !holds_debug(&p, f.r10 as u32) {
+                    return (Status::Denied, 0);
+                }
                 let cap = (f.rdx as usize).min(crate::trace::ENTRIES);
                 let mut buf = alloc::vec![
                     crate::trace::Event {

@@ -150,16 +150,25 @@ pub struct TraceEvent {
     pub reserved: u16,
 }
 
-/// Liga/desliga o trace de syscalls (diagnóstico; anel global com os últimos 4096 eventos).
-pub fn trace_enable(on: bool) -> Status {
-    // SAFETY: sem ponteiros.
-    unsafe { raw(abi::SYS_TRACE, if on { 1 } else { 0 }, 0, 0).0 }
+/// Liga/desliga o trace de syscalls (exige a capability de depuração — `KIND_DEBUG`).
+pub fn trace_enable(on: bool, debug: Handle) -> Status {
+    // SAFETY: sem ponteiros de usuário além do handle (validado pelo kernel).
+    unsafe { raw(abi::SYS_TRACE, if on { 1 } else { 0 }, debug as u64, 0).0 }
 }
 
-/// Lê até `out.len()` eventos do trace (dos mais antigos disponíveis aos mais novos).
-pub fn trace_read(out: &mut [TraceEvent]) -> Result<usize, Status> {
+/// Lê até `out.len()` eventos do trace (exige a capability de depuração em `debug`).
+pub fn trace_read(out: &mut [TraceEvent], debug: Handle) -> Result<usize, Status> {
     // SAFETY: `out` é memória nossa; o kernel copia no máximo out.len() entradas de 16 B.
-    let (st, v) = unsafe { raw(abi::SYS_TRACE, 2, out.as_mut_ptr() as u64, out.len() as u64) };
+    let (st, v) = unsafe {
+        raw5(
+            abi::SYS_TRACE,
+            2,
+            out.as_mut_ptr() as u64,
+            out.len() as u64,
+            debug as u64,
+            0,
+        )
+    };
     if st.is_ok() { Ok(v as usize) } else { Err(st) }
 }
 
