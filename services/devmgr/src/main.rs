@@ -157,6 +157,53 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             Err(e) => log!("devmgr: espfs falhou: {:?}", e),
         }
     }
+    // Health check pós-boot do A/B (ADR-0010): o armazenamento subiu — o sistema chegou vivo
+    // ao userspace. Sobe o `ahcidev` no SATA integrado do q35 (00:1f.2 — o disco de BOOT,
+    // gravável), entrega o canal ao `upd` e manda confirmar o slot arrancado; sem esta
+    // confirmação as tentativas do loader esgotam e o boot seguinte volta ao outro slot
+    // (rollback automático). Tudo best-effort: sem o SATA ou sem layout A/B, só avisa.
+    if let Some(sata) = devs[..n]
+        .iter()
+        .find(|d| d.bdf == 0x00fa && d.class == 0x01 && d.subclass == 0x06 && d.prog_if == 0x01)
+    {
+        match start_driver("ahcidev", sata) {
+            Ok(blkch) => {
+                let mut confirmed = false;
+                if let Ok((ca, cb)) = nexo_sys::channel_create() {
+                    match nexo_sys::process_spawn("upd", 0, &[cb, blkch]) {
+                        Ok(h) => {
+                            let _ = nexo_sys::handle_close(h);
+                            let mut b = [0u8; 16];
+                            let mut hs2 = [0u32; 1];
+                            if nexo_sys::channel_send(ca, b"confirma", &[]) == Status::Ok
+                                && let Ok((rn, _)) = nexo_sys::channel_recv(ca, &mut b, &mut hs2)
+                                && rn == 4
+                                && b[..3] == *b"ok "
+                            {
+                                log!(
+                                    "devmgr: A/B: slot {} confirmado (health check pos-boot)",
+                                    b[3] as char
+                                );
+                                confirmed = true;
+                            }
+                        }
+                        Err(e) => {
+                            log!("devmgr: A/B: upd falhou: {:?}", e);
+                            let _ = nexo_sys::handle_close(cb);
+                            let _ = nexo_sys::handle_close(blkch);
+                        }
+                    }
+                    let _ = nexo_sys::handle_close(ca);
+                } else {
+                    let _ = nexo_sys::handle_close(blkch);
+                }
+                if !confirmed {
+                    log!("devmgr: A/B: sem confirmacao (imagem sem layout A/B?)");
+                }
+            }
+            Err(e) => log!("devmgr: A/B: ahcidev do disco de boot falhou: {:?}", e),
+        }
+    }
     let _ = nexo_sys::channel_send(CLIENT, b"done", &[]);
     let mut buf = [0u8; 64];
     let mut hs = [0u32; 1];

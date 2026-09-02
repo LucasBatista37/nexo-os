@@ -5,9 +5,9 @@ Numa CÓPIA da imagem, marca o slot A como atualização PENDENTE (prioridade ma
 sem sucesso) — como um update-manager faria após instalar em A — e arranca duas vezes:
 
   boot 1: o loader escolhe A (pendente, prioridade maior), DESCONTA a única tentativa e grava o
-          estado; o sistema arranca (`selftest=0 exit` — sem a suíte, porque o auto-teste
-          `user_slots` é um health check de verdade e confirmaria o slot) e ninguém confirma —
-          exatamente uma atualização que arranca mas não fica saudável;
+          estado; o kernel arranca (ELF válido — o fallback estrutural não dispara) mas o
+          initrd de A está corrompido: o sistema morre sem espaço de usuário e o health check
+          nunca roda — exatamente uma atualização que arranca mas não fica saudável;
   boot 2: A está inelegível (sem sucesso, sem tentativas) — o loader volta ao slot B sozinho.
 
 No fim, relê o slots.bin da imagem e confere o estado persistido (A: s0 t0; last_selected = B).
@@ -61,23 +61,27 @@ def main() -> int:
     state = BUILD / "rb-slots.bin"
     state.write_bytes(pack_state((3, 1, 0), (1, 3, 1), 0))
     subprocess.run([mcopy, "-i", f"{img}{ESP}", "-o", str(state), "::/nexo/slots.bin"], check=True)
-    # Boots SEM a suíte: o auto-teste `user_slots` é um health check de verdade e confirmaria o
-    # slot pendente (o caminho feliz da atualização); o rollback exige boots que NÃO confirmam.
-    cfg = BUILD / "rb-boot.cfg"
-    cfg.write_text("selftest=0 exit\n")
-    subprocess.run([mcopy, "-i", f"{img}{ESP}", "-o", str(cfg), "::/nexo/boot.cfg"], check=True)
+    # Falha GENUÍNA no slot pendente: corrompe o initrd do A. O kernel do A é um ELF válido
+    # (o fallback estrutural do loader não dispara), arranca — e morre sem espaço de usuário:
+    # nem a suíte nem o devmgr sobem, ninguém confirma, e o boot termina só pelo timeout.
+    lixo = BUILD / "rb-lixo.bin"
+    lixo.write_bytes(b"\xff" * 4096)
+    subprocess.run([mcopy, "-i", f"{img}{ESP}", "-o", str(lixo), "::/nexo/a/initrd"], check=True)
 
     logs = []
-    for i in (1, 2):
+    for i, timeout in ((1, 90), (2, args.timeout)):
         log = BUILD / "logs" / f"rollback-{i}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([str(ROOT / "tools" / "run-qemu"), "--image", str(img), "--test",
-                        "--timeout", str(args.timeout), "--log", str(log)])
+                        "--timeout", str(timeout), "--log", str(log)])
         logs.append(log.read_text(errors="replace") if log.exists() else "")
 
+    # boot 1: A pendente perdeu a tentativa; o sistema morreu sem userspace e ninguém confirmou
     boot1 = ("slot A (pendente, prioridade 3, tentativas 0)" in logs[0]
-             and "NEXO: boot completo" in logs[0])
-    boot2 = ("slot B (confirmado" in logs[1] and "NEXO: boot completo" in logs[1])
+             and "confirmado (health check pos-boot)" not in logs[0])
+    # boot 2: rollback — o loader voltou ao B, a suíte inteira passa e o health check confirma B
+    boot2 = ("slot B (confirmado" in logs[1] and "[RESULT] PASS" in logs[1]
+             and "slot B confirmado (health check pos-boot)" in logs[1])
 
     # estado persistido: A esgotado e sem sucesso; o ultimo escolhido foi B (indice 1)
     subprocess.run([mcopy, "-i", f"{img}{ESP}", "-n", "-o", "::/nexo/slots.bin", str(state)],

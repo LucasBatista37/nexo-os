@@ -86,6 +86,7 @@ SCENARIOS = {
             r"rngdev: virtio-rng bdf 0x[0-9a-f]+ pronto \(fila \d+, MSI-X\)",
             r"blockdev: virtio-blk 1af4:10(01|42) bdf 0x[0-9a-f]+ capacidade \d+ setores, fila \d+, MSI-X, somente leitura, serial 'nexoboot'",
             r"devmgr: disco de boot \(somente leitura\) -> espfs",
+            r"devmgr: A/B: slot [AB] confirmado \(health check pos-boot\)",
             r"devmgr: disco de dados 'nexodata' -> fs",
             r"espfs: ESP Fat32 em LBA 2048\.\.\d+: /EFI/BOOT/BOOTX64\.EFI [1-9]\d* bytes, /nexo/a/kernel\.elf [1-9]\d* bytes",
             r"utest: esp ok \(BOOTX64\.EFI [1-9]\d* bytes, kernel\.elf [1-9]\d* bytes\)",
