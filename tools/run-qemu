@@ -40,7 +40,7 @@ FAILURE_EXIT = 35  # (0x11 << 1) | 1
 
 def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk=None, console_socket=None,
              qmp_socket=None, input_keyboard=False, input_tablet=False, net=False, net_hostfwd=0, net_dump=None,
-             nvme_disk=None) -> list:
+             nvme_disk=None, ahci_disk=None) -> list:
     qemu = require("qemu-system-x86_64", "Instale QEMU (macOS: brew install qemu; Debian: apt install qemu-system-x86)")
     ovmf = find_ovmf()
     cmd = [
@@ -78,6 +78,13 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
             "-drive", f"if=none,id=nexonvme,format=raw,file={nvme_disk}",
             "-device", "nvme,drive=nexonvme,serial=nexonvme",
         ]
+    if ahci_disk:
+        cmd += [
+            # SATA/AHCI de dados (Fase 7): o driver ahcidev serve nexo.block sobre ele.
+            "-device", "ich9-ahci,id=nexoahci",
+            "-drive", f"if=none,id=nexoahcid,format=raw,file={ahci_disk}",
+            "-device", "ide-hd,drive=nexoahcid,bus=nexoahci.0",
+        ]
     if console_socket is not None:
         cmd += [
             "-device", "virtio-serial-pci,disable-legacy=on",
@@ -114,6 +121,9 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--log", default=None, help="grava a saida serial neste arquivo")
     ap.add_argument("--gdb", action="store_true")
+    ap.add_argument("--ahci-disk", default=None,
+                    help="disco SATA/AHCI de dados (padrao: par do --disk, '<disk>-ahci.img'; --no-ahci desativa)")
+    ap.add_argument("--no-ahci", action="store_true", help="nao anexa o disco AHCI")
     ap.add_argument("--nvme-disk", default=None,
                     help="disco NVMe de dados (padrao: par do --disk, '<disk>-nvme.img'; "
                          "criado com 8 MiB se nao existir; --no-nvme desativa)")
@@ -163,8 +173,20 @@ def main() -> int:
             nvme_disk.parent.mkdir(parents=True, exist_ok=True)
             with open(nvme_disk, "wb") as f:
                 f.truncate(8 * 1024 * 1024)
+    ahci_disk = None
+    if not a.no_ahci:
+        if a.ahci_disk:
+            ahci_disk = Path(a.ahci_disk)
+        elif disk is not None:
+            ahci_disk = disk.with_name(disk.stem + "-ahci.img")
+        else:
+            ahci_disk = BUILD / "ahci-data.img"
+        if not ahci_disk.exists():
+            ahci_disk.parent.mkdir(parents=True, exist_ok=True)
+            with open(ahci_disk, "wb") as f:
+                f.truncate(8 * 1024 * 1024)
     cmd = qemu_cmd(image, a.test, a.gdb, a.extra, a.smp, disk, a.console_socket, a.qmp_socket, a.input_keyboard, a.input_tablet,
-                   a.net, a.net_hostfwd, a.net_dump, nvme_disk)
+                   a.net, a.net_hostfwd, a.net_dump, nvme_disk, ahci_disk)
     log("$ " + " ".join(cmd))
     if not a.test and not a.log:
         return subprocess.call(cmd)
