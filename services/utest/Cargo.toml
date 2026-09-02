@@ -13,6 +13,7 @@ nexo-proto.workspace = true
 nexo-netstack.workspace = true
 nexo-net.workspace = true
 nexo-gfx.workspace = true
+nexo-wm.workspace = true
 nexo-font.workspace = true
 nexo-cal.workspace = true
 nexo-ui.workspace = true

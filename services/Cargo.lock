@@ -380,6 +380,7 @@ dependencies = [
  "nexo-rt",
  "nexo-sys",
  "nexo-ui",
+ "nexo-wm",
 ]
 
 [[package]]

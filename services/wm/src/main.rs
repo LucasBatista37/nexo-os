@@ -2,19 +2,22 @@
 //! (`nexo.wm`). Várias sessões coexistem: um cliente abre outra sessão com `open`, transferindo a
 //! ponta de um canal novo (até [`MAX_CLIENTS`]). Cada `create_surface` cria um `MemoryObject`
 //! compartilhado (o cliente escreve os pixels, o wm os lê); o wm compõe **todas** as superfícies
-//! de **todas** as sessões com `nexo-wm` numa **saída** (outro `MemoryObject`), devolvida por
-//! `output`. As superfícies pertencem à sessão que as criou (só ela pode commit/move/destroy), e
+//! de **todas** as sessões com `nexo-wm` numa **saída** (outro `MemoryObject`, no layout
+//! `nexo_wm::frame`: cabeçalho com seqlock + dois buffers — a composição vai no buffer de trás
+//! e publica trocando a frente, nunca escrevendo o frame que um leitor pode estar lendo),
+//! devolvida por `output`. As superfícies pertencem à sessão que as criou (só ela pode commit/move/destroy), e
 //! são liberadas quando a sessão desconecta. A apresentação num framebuffer real fica para a
 //! integração com o serviço de vídeo.
 #![no_std]
 #![no_main]
 
+use core::sync::atomic::{AtomicU32, Ordering};
 use nexo_gfx::{Color, PixelFormat, Rect, Surface};
 use nexo_proto::wm::{self, Request};
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
-use nexo_wm::{Damage, Window, composite};
+use nexo_wm::{Damage, Window, composite, frame};
 
 const OUT_W: i32 = 64;
 const OUT_H: i32 = 48;
@@ -46,11 +49,20 @@ struct FbOut {
     format: PixelFormat,
 }
 
-/// As saídas compostas: um `MemoryObject` por display (mesmas dimensões).
+/// As saídas compostas: um `MemoryObject` por display (mesmas dimensões), no layout
+/// [`frame`]: página de cabeçalho (seqlock + índice da frente) + dois buffers de frame.
 struct Outputs {
     mem: [Handle; NUM_DISPLAYS],
     base: [u64; NUM_DISPLAYS],
+    /// Bytes de PIXELS de um buffer (w*h*4, sem o arredondamento a páginas).
     bytes: u64,
+}
+
+/// Campo `u32` do cabeçalho da saída como atômico (o objeto é compartilhado com leitores).
+fn hdr(base: u64, off: usize) -> &'static AtomicU32 {
+    // SAFETY: `base` é o início do mapeamento (página de cabeçalho, USER|RW) e `off` é um dos
+    // offsets de `frame::OFF_*`, alinhado a 4 e dentro da página.
+    unsafe { &*((base as usize + off) as *const AtomicU32) }
 }
 
 /// Notificação em exibição (título truncado) e o modo não-perturbe.
@@ -176,7 +188,11 @@ fn as_slice_mut<'a>(base: u64, len: u64) -> &'a mut [u8] {
 }
 
 /// Recompõe as saídas de **todos** os displays (ordem-Z sobre fundo preto, por display); o
-/// display 0 é apresentado no framebuffer real, se mapeado.
+/// display 0 é apresentado no framebuffer real, se mapeado. **Duplo buffer**: a composição vai
+/// sempre para o buffer de TRÁS (o frame publicado nunca é escrito — um leitor no meio da
+/// leitura não vê rasgo) e publica **trocando** o índice da frente sob o seqlock do cabeçalho.
+/// Como o buffer de trás carrega o conteúdo de DOIS frames atrás, a composição repinta a saída
+/// inteira (dano de tela cheia); dano parcial exigiria acumular o dano dos dois últimos frames.
 fn recompose(
     surfaces: &[Slot; MAX_SURFACES],
     outs: &Outputs,
@@ -185,7 +201,10 @@ fn recompose(
     att: &Attention,
 ) {
     for d in 0..NUM_DISPLAYS {
-        let out_pixels = as_slice_mut(outs.base[d], outs.bytes);
+        let front = hdr(outs.base[d], frame::OFF_FRONT).load(Ordering::Relaxed);
+        let back = 1 - front;
+        let back_off = frame::buf_offset(OUT_W as u32, OUT_H as u32, back);
+        let out_pixels = as_slice_mut(outs.base[d] + back_off, outs.bytes);
         let mut out = Surface::new(
             out_pixels,
             OUT_W as u32,
@@ -233,7 +252,15 @@ fn recompose(
             let txt = core::str::from_utf8(&title[..*tlen as usize]).unwrap_or("?");
             nexo_gfx::text::draw_text(&mut out, txt, r.x + 2, r.y + 1, 1, Color::WHITE, None);
         }
-        // Display 0: apresenta no framebuffer real, se mapeado.
+        // Publica o frame: seq ímpar (troca em andamento) -> frente = trás -> seq par. Um
+        // leitor que viu seq par e o reconfere após ler o buffer tem um frame íntegro.
+        let seq = hdr(outs.base[d], frame::OFF_SEQ);
+        seq.fetch_add(1, Ordering::SeqCst);
+        hdr(outs.base[d], frame::OFF_FRONT).store(back, Ordering::SeqCst);
+        seq.fetch_add(1, Ordering::SeqCst);
+        hdr(outs.base[d], frame::OFF_FRAMES).fetch_add(1, Ordering::SeqCst);
+        // Display 0: apresenta no framebuffer real, se mapeado (copiando do frame recém-
+        // publicado — a cópia para o hardware é inevitável sem page-flip da GPU).
         if d == 0
             && let Some(fb) = fb
         {
@@ -258,9 +285,10 @@ fn free_session_surfaces(surfaces: &mut [Slot; MAX_SURFACES], owner: usize) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(_arg: u64) -> ! {
-    // Saídas compostas: um MemoryObject de OUT_W*OUT_H*4 bytes por display.
+    // Saídas compostas: um MemoryObject por display no layout `frame` (cabeçalho seqlock +
+    // dois buffers de OUT_W*OUT_H*4 bytes — duplo buffer com troca, não cópia).
     let out_bytes = (OUT_W * OUT_H * 4) as u64;
-    let out_pages = out_bytes.div_ceil(4096);
+    let out_pages = frame::object_pages(OUT_W as u32, OUT_H as u32);
     let mut outs = Outputs {
         mem: [0; NUM_DISPLAYS],
         base: [0; NUM_DISPLAYS],
@@ -271,6 +299,10 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             nexo_sys::memory_create(out_pages).unwrap_or_else(|_| fail(50, "memory_create saida"));
         outs.base[d] =
             nexo_sys::memory_map(outs.mem[d]).unwrap_or_else(|_| fail(51, "memory_map saida"));
+        // Cabeçalho: magic + dimensões (seq/front/frames já são 0 — páginas nascem zeradas).
+        hdr(outs.base[d], frame::OFF_W).store(OUT_W as u32, Ordering::Relaxed);
+        hdr(outs.base[d], frame::OFF_H).store(OUT_H as u32, Ordering::Relaxed);
+        hdr(outs.base[d], frame::OFF_MAGIC).store(frame::MAGIC, Ordering::SeqCst);
     }
     let mut surfaces = [EMPTY; MAX_SURFACES];
     let mut sessions: [Option<Handle>; MAX_CLIENTS] = [None; MAX_CLIENTS];

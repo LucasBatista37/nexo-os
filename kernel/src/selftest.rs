@@ -93,6 +93,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wm_maximize", test_user_wm_maximize),
     ("user_wm_shortcut", test_user_wm_shortcut),
     ("user_wm_present", test_user_wm_present),
+    ("user_wm_flip", test_user_wm_flip),
     ("user_wm_tile", test_user_wm_tile),
     ("user_wm_grab", test_user_wm_grab),
     ("user_wm_displays", test_user_wm_displays),
@@ -2235,6 +2236,40 @@ fn test_user_wm_shortcut() -> TestResult {
     check!(
         frames + 8 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Duplo buffer com seqlock de frame na saída composta (`nexo_wm::frame`): o cliente (modo 66)
+/// confere o cabeçalho, que cada recomposição publica **trocando** o buffer da frente (front
+/// alterna, `frames` avança, `seq` par) e a garantia anti-rasgo — compor o frame seguinte não
+/// toca o frame publicado (o buffer da frente antiga continua íntegro após um novo commit).
+fn test_user_wm_flip() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(a),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let hclient = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 66, hclient).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, client));
+    let frames = settled_free_frames(frames0, 8);
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram (superficies/saida nao liberadas): {frames0} -> {frames}"
     );
     Ok(())
 }

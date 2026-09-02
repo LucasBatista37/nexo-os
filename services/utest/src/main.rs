@@ -109,6 +109,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         63 => block_pipelined_client(),
         64 => shm_quota_client(),
         65 => backup_driver(),
+        66 => wm_flip_client(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1722,6 +1723,92 @@ fn svc_echo_round(ctl: nexo_sys::Handle, text: &[u8]) -> bool {
 /// Modo 65: backup e restauracao entre DOIS discos fisicos. Cria arquivos no volume principal,
 /// espelha para o volume de backup (outro disco), APAGA um original e corrompe outro, restaura
 /// do backup e confere que o conteudo original voltou. Handles: 0 pipe do backup, 1 fs origem.
+/// Modo 66: duplo buffer com seqlock de frame na saida composta. Confere o cabecalho do layout
+/// `nexo_wm::frame` (magic/dimensoes), que cada recomposicao PUBLICA trocando o buffer da frente
+/// (front alterna, frames avanca, seq fica par) e a garantia anti-rasgo: compor o frame seguinte
+/// nao toca o frame publicado — o buffer da frente antiga continua integro apos um novo commit.
+fn wm_flip_client() -> ! {
+    use nexo_wm::frame;
+    let ch: nexo_sys::Handle = 0;
+    let mut out = [0u8; 128];
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+
+    // superficie cobrindo a saida inteira; frame 1: vermelho
+    let (id, sbase) = wm_create(ch, 0, 0, 64, 48, 0);
+    wm_fill(sbase, 64, 48, 255, 0, 0);
+    wm_commit(ch, id);
+
+    // saida composta
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1600));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1601);
+    }
+    let (n, nh) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1602));
+    let outp =
+        nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1603));
+    if nh != 1 {
+        nexo_sys::exit(1604);
+    }
+    let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1605));
+
+    // cabecalho: layout reconhecido, dimensoes coerentes, seq par (nenhuma troca em andamento)
+    if wm_hdr(ob, frame::OFF_MAGIC) != frame::MAGIC {
+        nexo_sys::exit(1606);
+    }
+    if wm_hdr(ob, frame::OFF_W) != outp.w as u32 || wm_hdr(ob, frame::OFF_H) != outp.h as u32 {
+        nexo_sys::exit(1607);
+    }
+    if wm_hdr(ob, frame::OFF_SEQ) & 1 != 0 {
+        nexo_sys::exit(1608);
+    }
+    let f1 = wm_hdr(ob, frame::OFF_FRONT);
+    let n1 = wm_hdr(ob, frame::OFF_FRAMES);
+    if n1 == 0 {
+        nexo_sys::exit(1609); // o commit tem que ter publicado ao menos um frame
+    }
+    if wm_px(ob, outp.w, 5, 5) != (255, 0, 0) {
+        nexo_sys::exit(1610);
+    }
+
+    // frame 2: verde — deve TROCAR a frente (nao copiar por cima do frame publicado)
+    wm_fill(sbase, 64, 48, 0, 255, 0);
+    wm_commit(ch, id);
+    if wm_hdr(ob, frame::OFF_FRONT) != 1 - f1 {
+        nexo_sys::exit(1611); // a frente nao alternou: sobrescreveu em vez de trocar
+    }
+    if wm_hdr(ob, frame::OFF_FRAMES) <= n1 {
+        nexo_sys::exit(1612);
+    }
+    if wm_hdr(ob, frame::OFF_SEQ) & 1 != 0 {
+        nexo_sys::exit(1613);
+    }
+    if wm_px(ob, outp.w, 5, 5) != (0, 255, 0) {
+        nexo_sys::exit(1614);
+    }
+
+    // anti-rasgo: o frame publicado ANTERIOR (buffer f1) segue integro — a composicao verde
+    // aconteceu no outro buffer. Amostra os quatro cantos e o centro do buffer antigo.
+    let old = ob + frame::buf_offset(outp.w as u32, outp.h as u32, f1);
+    for (x, y) in [(0, 0), (63, 0), (0, 47), (63, 47), (32, 24)] {
+        // SAFETY: leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes).
+        let px = unsafe {
+            let p = (old as *const u8).add(((y * outp.w + x) * 4) as usize);
+            (p.read(), p.add(1).read(), p.add(2).read())
+        };
+        if px != (255, 0, 0) {
+            nexo_sys::exit(1615);
+        }
+    }
+    nexo_sys::log(
+        "utest: wm flip ok — frame publicado intacto; compor troca de buffer sob seqlock",
+    );
+    nexo_sys::exit(0)
+}
+
 fn backup_driver() -> ! {
     use nexo_inst::AppFs;
     let pipe: nexo_sys::Handle = 0;
@@ -6864,11 +6951,38 @@ fn wm_fill(base: u64, w: i32, h: i32, r: u8, g: u8, b: u8) {
 }
 
 /// Le um pixel (r,g,b) da saida composta mapeada.
+/// Le um campo `u32` do cabecalho da saida composta (layout `nexo_wm::frame`).
+fn wm_hdr(base: u64, off: usize) -> u32 {
+    // SAFETY: `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos
+    // offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina.
+    unsafe { core::ptr::read_volatile((base as usize + off) as *const u32) }
+}
+
+/// Le o pixel (x,y) do frame PUBLICADO da saida composta, pelo protocolo do seqlock: espera
+/// `seq` par, le do buffer da frente e reconfere `seq` — nunca observa um frame rasgado.
 fn wm_px(base: u64, stride: i32, x: i32, y: i32) -> (u8, u8, u8) {
-    // SAFETY: leitura dentro da saida mapeada (w*h*4 bytes).
-    unsafe {
-        let p = (base as *const u8).add(((y * stride + x) * 4) as usize);
-        (p.read(), p.add(1).read(), p.add(2).read())
+    use nexo_wm::frame;
+    let (w, h) = (wm_hdr(base, frame::OFF_W), wm_hdr(base, frame::OFF_H));
+    loop {
+        let s1 = wm_hdr(base, frame::OFF_SEQ);
+        if s1 & 1 == 1 {
+            core::hint::spin_loop();
+            continue;
+        }
+        let front = wm_hdr(base, frame::OFF_FRONT);
+        let off = frame::buf_offset(w, h, front) + ((y * stride + x) * 4) as u64;
+        // SAFETY: leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes).
+        let px = unsafe {
+            let p = (base as *const u8).add(off as usize);
+            (
+                p.read_volatile(),
+                p.add(1).read_volatile(),
+                p.add(2).read_volatile(),
+            )
+        };
+        if wm_hdr(base, frame::OFF_SEQ) == s1 {
+            return px;
+        }
     }
 }
 

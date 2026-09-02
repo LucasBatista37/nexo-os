@@ -176,6 +176,48 @@ impl Damage {
     }
 }
 
+/// Layout do objeto de saída com **duplo buffer + seqlock de frame** (Plano §Fase 5:
+/// "double/triple buffering"). O `MemoryObject` da saída composta é: uma página de cabeçalho
+/// seguida de DOIS buffers de frame. O compositor compõe sempre no buffer de trás e publica
+/// **trocando** o índice da frente sob um seqlock (`seq` ímpar = troca em andamento); um leitor
+/// que siga o protocolo (ler `seq` par, ler o buffer da frente, conferir `seq` inalterado) nunca
+/// observa um frame rasgado — a composição jamais escreve no frame publicado. Este módulo é só a
+/// especificação do layout (offsets e aritmética, testável no host); os acessos atômicos ficam
+/// nos processos que mapeiam o objeto.
+pub mod frame {
+    /// "NFRM" em little-endian: identifica o layout no início do cabeçalho.
+    pub const MAGIC: u32 = 0x4D52_464E;
+    /// Offsets dos campos do cabeçalho (todos `u32` little-endian).
+    pub const OFF_MAGIC: usize = 0;
+    /// Seqlock: par = frame publicado estável; ímpar = troca de frente em andamento.
+    pub const OFF_SEQ: usize = 4;
+    /// Índice (0/1) do buffer da frente — o frame publicado.
+    pub const OFF_FRONT: usize = 8;
+    /// Contador de frames publicados (diagnóstico/espera de novo frame).
+    pub const OFF_FRAMES: usize = 12;
+    /// Largura da saída em pixels (o stride dos buffers é a própria largura).
+    pub const OFF_W: usize = 16;
+    /// Altura da saída em pixels.
+    pub const OFF_H: usize = 20;
+    /// O cabeçalho ocupa uma página inteira (os buffers começam alinhados a página).
+    pub const HDR_BYTES: u64 = 4096;
+
+    /// Bytes de UM buffer de frame (pixels *x8888), arredondado a páginas inteiras.
+    pub const fn buf_bytes(w: u32, h: u32) -> u64 {
+        (w as u64 * h as u64 * 4).div_ceil(4096) * 4096
+    }
+
+    /// Páginas do objeto de saída completo: cabeçalho + dois buffers.
+    pub const fn object_pages(w: u32, h: u32) -> u64 {
+        1 + 2 * (buf_bytes(w, h) / 4096)
+    }
+
+    /// Offset do buffer `i` (0 ou 1) dentro do objeto.
+    pub const fn buf_offset(w: u32, h: u32, i: u32) -> u64 {
+        HDR_BYTES + i as u64 * buf_bytes(w, h)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -373,5 +415,20 @@ mod tests {
         assert!(b.contains(0, 0) && b.w >= MAX_DAMAGE as i32);
         d.clear();
         assert!(d.is_empty());
+    }
+
+    #[test]
+    fn frame_layout_math() {
+        // 64x48 RGBX = 12288 bytes = exatamente 3 páginas por buffer
+        assert_eq!(frame::buf_bytes(64, 48), 12288);
+        assert_eq!(frame::object_pages(64, 48), 7);
+        assert_eq!(frame::buf_offset(64, 48, 0), 4096);
+        assert_eq!(frame::buf_offset(64, 48, 1), 4096 + 12288);
+        // tamanho não múltiplo de página arredonda para cima
+        assert_eq!(frame::buf_bytes(10, 10), 4096);
+        assert_eq!(frame::object_pages(10, 10), 3);
+        // os buffers nunca se sobrepõem nem invadem o cabeçalho
+        assert!(frame::buf_offset(64, 48, 0) >= frame::HDR_BYTES);
+        assert!(frame::buf_offset(64, 48, 1) >= frame::buf_offset(64, 48, 0) + 64 * 48 * 4);
     }
 }
