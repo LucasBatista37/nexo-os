@@ -83,6 +83,7 @@ core::arch::global_asm!(
     "#
 );
 
+// SAFETY: implementada no global_asm! acima; só o ENDEREÇO é usado (LSTAR).
 unsafe extern "C" {
     fn nexo_syscall_entry();
 }

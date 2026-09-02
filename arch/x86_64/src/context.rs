@@ -36,6 +36,7 @@ core::arch::global_asm!(
     "#
 );
 
+// SAFETY: implementada no global_asm! acima com esta exata assinatura.
 unsafe extern "C" {
     /// Troca de `*prev_sp` (salvo) para `next_sp`.
     pub fn nexo_switch_context(prev_sp: *mut u64, next_sp: u64);

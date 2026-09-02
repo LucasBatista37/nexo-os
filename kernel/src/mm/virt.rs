@@ -32,6 +32,7 @@ fn kernel_mapper() -> Mapper<PhysMap> {
     unsafe { Mapper::new(root, PhysMap) }
 }
 
+// SAFETY: símbolos do script de linker; só os ENDEREÇOS são usados (nunca os valores).
 unsafe extern "C" {
     static __text_start: u8;
     static __text_end: u8;

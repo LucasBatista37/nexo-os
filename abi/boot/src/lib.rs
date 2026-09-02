@@ -481,6 +481,8 @@ pub fn cmdline_flag(cmdline: &str, key: &str) -> bool {
 
 /// Assinatura da função de entrada do kernel (System V AMD64: argumento em `RDI`).
 #[cfg(target_arch = "x86_64")]
+// SAFETY (contrato): chamar exatamente uma vez, com um `BootInfo` válido e mapeado,
+// pilha própria e paginação do kernel ativa; nunca retorna.
 pub type KernelEntry = unsafe extern "sysv64" fn(*const BootInfo) -> !;
 
 #[cfg(test)]

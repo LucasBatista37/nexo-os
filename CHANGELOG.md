@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 8 antecipada, bloco 33 — threat model + auditoria mecânica de `unsafe`)
+- `docs/security/threat-model.md`: **threat model por subsistema** (kernel/syscalls, IPC — com o bug do coletor como estudo de caso —, memória/DMA, drivers, compositor+entrada, armazenamento, pacotes, rede, observabilidade, boot/atualização): ativos, adversário, superfície, mitigações **com os testes que as provam** e lacunas honestas. Prioridades decorrentes viram blocos (as pequenas: `output` do wm e `SYS_TRACE` como privilégio).
+- `tools/nexo-unsafe-audit` **no `make lint`**: todo uso de `unsafe` (bloco/fn/impl/extern) exige `SAFETY:`/`# Safety` adjacente — 424 usos na árvore, 17 sítios sem justificativa corrigidos ao ligar o gate, 0 restantes. Inventário atualizado (`docs/unsafe-inventory.md`).
+
 ### Adicionado (Fase 7 antecipada, bloco 32 — fusos horários na nexo-cal)
 - `nexo-cal`: `civil_from_epoch_tz(secs, offset_min)` — data civil com deslocamento de fuso em minutos (leste positivo; saturado em 1970). O kernel segue fornecendo só UTC (`debug_info` 7), por desenho: fuso é política de quem apresenta. Testes de host cruzam a meia-noite nos dois sentidos (UTC−3 volta para 31/08; UTC+9 avança). Pendem persistência da escolha e UI.
 

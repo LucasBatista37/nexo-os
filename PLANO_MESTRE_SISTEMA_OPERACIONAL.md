@@ -588,8 +588,8 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 **Resultado:** sistema distribuível com cadeia de confiança e recuperação confiável.
 
-- [ ] revisar threat model por subsistema;
-- [ ] auditar syscalls e `unsafe` crítico;
+- [x] revisar threat model por subsistema — *`docs/security/threat-model.md` (revisão 2026-09-01): dez subsistemas com ativos/adversário/superfície/mitigações-com-testes/lacunas honestas (IOMMU como maior gap estrutural, assinatura de pacotes atrás da decisão de cripto, `output` do compositor e `SYS_TRACE` a privilegiar, quotas) e prioridades decorrentes — as pequenas viram blocos*;
+- [-] auditar syscalls e `unsafe` crítico — *auditoria **mecânica e contínua**: `tools/nexo-unsafe-audit` no `make lint` exige justificativa `SAFETY:`/`# Safety` adjacente em TODO uso (424 usos, 0 sem justificativa na revisão de 2026-09-01; 17 sítios corrigidos ao ligar o gate); syscalls revisadas no threat model §1. Auditoria externa/humana pende*;
 - [ ] implementar usuários, credenciais e bloqueio seguro;
 - [ ] implementar criptografia de disco;
 - [ ] integrar TPM quando disponível;

@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Auditoria mecânica da política de `unsafe` (ADR-0001): todo uso de `unsafe` precisa de um
+comentário `SAFETY:` imediatamente acima (até 4 linhas, permitindo comentários multilinha).
+
+Cobertos: blocos `unsafe {`, `unsafe fn`, `unsafe impl`, `unsafe extern`. Isentos: o atributo
+`#[unsafe(...)]` da edição 2024 (ex.: `no_mangle`), `unsafe_op_in_unsafe_fn`,
+`forbid(unsafe_code)` e menções em comentários/strings de documentação.
+
+Uso: tools/nexo-unsafe-audit          # audita a árvore toda; sai 1 se houver violação
+     tools/nexo-unsafe-audit --list   # também lista todos os usos justificados (inventário)
+"""
+
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DIRS = ["kernel", "arch", "boot", "libraries", "sdk", "services", "abi"]
+USO = re.compile(r"\bunsafe\s*(\{|fn\b|impl\b|extern\b)")
+ISENTO = re.compile(r"#\[unsafe\(|unsafe_op_in_unsafe_fn|forbid\(unsafe_code\)|deny\(unsafe")
+JANELA = 8  # linhas acima onde o SAFETY: pode estar (atributos no meio são pulados)
+
+
+def audita(caminho: Path, listar: bool):
+    violacoes = []
+    usos = 0
+    linhas = caminho.read_text(encoding="utf-8").splitlines()
+    for i, linha in enumerate(linhas):
+        codigo = linha.split("//", 1)[0]
+        if not USO.search(codigo) or ISENTO.search(linha):
+            continue
+        usos += 1
+        ok = "SAFETY" in linha
+        for k in range(1, JANELA + 1):
+            if ok or i - k < 0:
+                break
+            acima = linhas[i - k].strip()
+            if "SAFETY" in acima or ("safety" in acima.lower() and acima.startswith("//")):
+                ok = True
+            elif acima.endswith("="):
+                continue  # cabeça de `let ... =` cujo valor é o próprio bloco unsafe
+            elif not (acima.startswith("//") or acima.startswith("#[") or acima.startswith("#![")):
+                break  # linha de código no meio: a justificativa não cobre este uso
+        if not ok:
+            violacoes.append((i + 1, linha.strip()[:90]))
+        elif listar:
+            print(f"  ok  {caminho.relative_to(ROOT)}:{i + 1}")
+    return usos, violacoes
+
+
+def main() -> int:
+    listar = "--list" in sys.argv
+    total, ruins = 0, 0
+    for d in DIRS:
+        for arq in sorted((ROOT / d).rglob("*.rs")):
+            if "target" in arq.parts or "generated" in arq.parts:
+                continue
+            usos, violacoes = audita(arq, listar)
+            total += usos
+            for ln, txt in violacoes:
+                ruins += 1
+                print(f"SEM SAFETY: {arq.relative_to(ROOT)}:{ln}: {txt}")
+    print(f"nexo-unsafe-audit: {total} uso(s) de unsafe, {ruins} sem justificativa")
+    return 1 if ruins else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

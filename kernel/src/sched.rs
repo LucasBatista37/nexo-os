@@ -86,7 +86,10 @@ unsafe impl Sync for Thread {}
 unsafe impl Send for Thread {}
 
 impl Thread {
-    /// Acesso ao estado mutável. Chamador detém `SCHED`.
+    /// Acesso ao estado mutável.
+    ///
+    /// # Safety
+    /// O chamador detém `SCHED` (exclusão mútua externa ao empréstimo).
     #[allow(clippy::mut_from_ref)]
     unsafe fn inner(&self) -> &mut Inner {
         // SAFETY: contrato da função.

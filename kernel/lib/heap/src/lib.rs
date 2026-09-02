@@ -216,6 +216,9 @@ impl Heap {
     }
 
     /// Insere um bloco livre mantendo a ordem por endereço e coalescendo vizinhos.
+    ///
+    /// # Safety
+    /// `start..start+size` deve ser memória do heap fora de uso (sem aliases vivos).
     unsafe fn insert_free(&mut self, start: usize, size: usize) {
         let mut prev: Option<NonNull<FreeNode>> = None;
         let mut cur = self.head;

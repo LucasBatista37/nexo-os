@@ -40,3 +40,13 @@ Atualize junto com o código.
 
 - Nenhum `unsafe` fora de `arch/`, `mm/`, `heap`, `sync`, loader e `kernel/src/{x86,task,console,panic,klog}`.
 - Próxima release: adicionar lint de contagem por arquivo no CI e revisar `transmute` do handler (substituir por `Once<TrapHandler>`).
+
+## Revisão 2026-09-01 (auditoria mecânica)
+
+`tools/nexo-unsafe-audit` passou a rodar no `make lint`: todo uso de `unsafe` exige
+`SAFETY:`/`# Safety` adjacente (janela de 8 linhas; atributos e cabeças de `let ... =` não
+interrompem). Estado: **424 usos, 0 sem justificativa**. Por área: kernel 130,
+arch/x86_64 124, sdk/nexo-sys 42, boot/loader 15, libraries/virtio 10, apps/serviços o
+restante (mapeamentos de memória compartilhada e buffers estáticos). As bibliotecas de
+formato (`nexo-pkg`, `nexo-img`, `nexo-cal`, `nexo-textgrid`, `nexo-inst`) não usam `unsafe`.
+Threat model correspondente: `docs/security/threat-model.md`.

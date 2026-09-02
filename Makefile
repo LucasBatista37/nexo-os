@@ -44,6 +44,7 @@ lint:
 	cd kernel && cargo clippy --release -- -D warnings
 	cd boot/loader && cargo clippy --release -- -D warnings
 	cd services && cargo clippy --workspace --release -- -D warnings
+	tools/nexo-unsafe-audit
 
 fmt:
 	cargo fmt --all

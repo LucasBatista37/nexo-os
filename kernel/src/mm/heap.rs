@@ -22,6 +22,7 @@ struct KernelHeap {
 // SAFETY: todas as operações são serializadas pelo spinlock com interrupções
 // desabilitadas; o crescimento só toca páginas exclusivas do heap.
 unsafe impl GlobalAlloc for KernelHeap {
+    // SAFETY (contrato GlobalAlloc): layout válido; devolve nulo em falta de memória.
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         cpu::without_interrupts(|| {
             let mut h = self.heap.lock();
@@ -43,6 +44,7 @@ unsafe impl GlobalAlloc for KernelHeap {
         })
     }
 
+    // SAFETY (contrato GlobalAlloc): `ptr` veio de `alloc` com o mesmo layout.
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         cpu::without_interrupts(|| {
             // SAFETY: `ptr` veio de `alloc` deste heap (contrato de GlobalAlloc).

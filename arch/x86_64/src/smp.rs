@@ -113,6 +113,7 @@ nexo_trampoline_end:
     "#
 );
 
+// SAFETY: símbolos do global_asm! do trampolim; só endereços/tamanhos são usados.
 unsafe extern "C" {
     static nexo_trampoline_start: u8;
     static nexo_trampoline_end: u8;

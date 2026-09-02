@@ -3950,8 +3950,8 @@ fn shmem_producer() -> ! {
     // espera a resposta escrita pelo consumidor no offset 64
     let start = nexo_sys::time_now();
     loop {
-        // SAFETY: leitura da mesma pagina mapeada.
         let mut reply = [0u8; 5];
+        // SAFETY: leitura da mesma pagina mapeada.
         unsafe {
             core::ptr::copy_nonoverlapping((base + 64) as *const u8, reply.as_mut_ptr(), 5);
         }
@@ -6748,8 +6748,8 @@ fn shmem_consumer() -> ! {
         _ => nexo_sys::exit(420),
     };
     let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| nexo_sys::exit(421));
-    // SAFETY: base foi mapeada por memory_map; confere o marcador do produtor.
     let mut marker = [0u8; 8];
+    // SAFETY: base foi mapeada por memory_map; confere o marcador do produtor.
     unsafe {
         core::ptr::copy_nonoverlapping(base as *const u8, marker.as_mut_ptr(), 8);
     }

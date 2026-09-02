@@ -788,10 +788,9 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
                     cap
                 ];
                 let got = crate::trace::snapshot(&mut buf);
-                let bytes = unsafe {
-                    // SAFETY: Event e repr(C) de 16 bytes sem padding invalido; got <= cap.
-                    core::slice::from_raw_parts(buf.as_ptr() as *const u8, got * 16)
-                };
+                // SAFETY: Event e repr(C) de 16 bytes sem padding invalido; got <= cap.
+                let bytes =
+                    unsafe { core::slice::from_raw_parts(buf.as_ptr() as *const u8, got * 16) };
                 match copy_to_user(f.rsi, bytes) {
                     Ok(()) => (Status::Ok, got as u64),
                     Err(e) => (e, 0),

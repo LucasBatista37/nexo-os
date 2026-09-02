@@ -11,6 +11,9 @@ const PIC2_DATA: u16 = 0xa1;
 pub const DEFAULT_OFFSET: u8 = 0x20;
 
 /// Espera curta entre comandos (porta de diagnóstico 0x80).
+///
+/// # Safety
+/// Escreve na porta 0x80 (no-op de temporização): sem outros efeitos.
 #[inline]
 unsafe fn io_wait() {
     // SAFETY: escrever na porta 0x80 é um no-op de temporização.

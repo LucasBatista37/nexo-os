@@ -141,6 +141,7 @@ core::arch::global_asm!(
     "#
 );
 
+// SAFETY: tabela gerada pelo global_asm! acima com exatamente 256 entradas.
 unsafe extern "C" {
     static nexo_trap_stub_table: [u64; 256];
 }
