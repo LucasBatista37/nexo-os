@@ -79,9 +79,9 @@ hostil e validam no parse.
   clique numa janela que o app não controla (`services/lanc`); o portal de arquivos entrega
   conteúdo, nunca capacidade. Tudo coberto por autotestes (`user_wm_*`, `user_consent`,
   `user_portal`).
-- **Lacunas**: a saída composta compartilhada é legível por quem tem o handle da saída (hoje:
-  quem abre sessão pode pedir `output` — **qualquer sessão vê a tela inteira**; aceitável em
-  desenvolvimento, precisa virar privilégio do shell antes de qualquer uso real); sem
+- **Lacunas**: ~~a saída composta legível por qualquer sessão~~ **fechada em 2026-09-01**
+  (bloco 34): `output` é privilégio do shell (erro 7; teste negativo em `user_wm_shell`) e o
+  shell exporta a tela ao SEU orquestrador pelo pipe (`"saida"`) quando preciso. Resta: sem
   indicador visual de captura de tela/entrada.
 
 ## 6. Armazenamento (NexoFS, fs, vfs)
@@ -158,6 +158,5 @@ estáticos; `nexo-pkg`/`nexo-inst`/`nexo-img`/`nexo-cal`/`nexo-textgrid` são
 
 1. IOMMU quando disponível (§3 — maior gap estrutural; documentado desde ADR-0015).
 2. Assinatura de pacotes assim que a decisão de cripto sair (§7).
-3. `output` do compositor como privilégio do shell (§5 — pequeno e fecha um vazamento real).
-4. Restringir o `SYS_TRACE` a um privilégio (§9 — pequeno).
-5. Quotas de IPC e de disco (§2/§6 — contra DoS local).
+3. Restringir o `SYS_TRACE` a um privilégio (§9 — pequeno).
+4. Quotas de IPC e de disco (§2/§6 — contra DoS local).

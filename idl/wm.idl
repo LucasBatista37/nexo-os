@@ -56,6 +56,7 @@ method 4 destroy {
 }
 
 # Handle do MemoryObject da saida composta (para o teste/servidor de video inspecionar).
+# PRIVILEGIO DO SHELL (sessao 0; erro 7 para as demais): a saida composta e a tela inteira.
 method 5 output {
     request {
         display: u8,

@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Segurança (Fase 8 antecipada, bloco 34 — saída composta é privilégio do shell)
+- Fecha a prioridade nº 3 do threat model: `output` do compositor agora é **privilégio do shell** (sessão 0; erro 7 para as demais — a saída composta é a tela inteira). Teste negativo no `user_wm_shell`; IDL anotada.
+- O shell (`shellui`) ganhou `"saida"` no protocolo do pipe: exporta a tela ao **seu orquestrador** (resposta do wm + handle encaminhados) — os testes de shell passaram a pedir a tela por esse caminho, que é o desenho certo: quem não é shell só vê a tela se o shell der.
+
 ### Adicionado (Fase 8 antecipada, bloco 33 — threat model + auditoria mecânica de `unsafe`)
 - `docs/security/threat-model.md`: **threat model por subsistema** (kernel/syscalls, IPC — com o bug do coletor como estudo de caso —, memória/DMA, drivers, compositor+entrada, armazenamento, pacotes, rede, observabilidade, boot/atualização): ativos, adversário, superfície, mitigações **com os testes que as provam** e lacunas honestas. Prioridades decorrentes viram blocos (as pequenas: `output` do wm e `SYS_TRACE` como privilégio).
 - `tools/nexo-unsafe-audit` **no `make lint`**: todo uso de `unsafe` (bloco/fn/impl/extern) exige `SAFETY:`/`# Safety` adjacente — 424 usos na árvore, 17 sítios sem justificativa corrigidos ao ligar o gate, 0 restantes. Inventário atualizado (`docs/unsafe-inventory.md`).

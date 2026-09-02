@@ -1209,6 +1209,12 @@ fn serve(
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::Output(rq) => {
+            // A saida composta e a TELA INTEIRA: so o shell (sessao 0) pode le-la
+            // (threat model §5 — sessao comum ve apenas as proprias janelas).
+            if owner != 0 {
+                reply_err(ch, wm::OutputRequest::METHOD_ID, E_NOT_SHELL, out);
+                return;
+            }
             if rq.display as usize >= NUM_DISPLAYS {
                 reply_err(ch, wm::OutputRequest::METHOD_ID, E_INVALID, out);
                 return;

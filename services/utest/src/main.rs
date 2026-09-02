@@ -4353,14 +4353,15 @@ fn shellcenter_driver() -> ! {
     }
 
     // painel visivel: fundo, bullets das 2 notificacoes, 3a linha vazia
-    let m = nexo_proto::wm::OutputRequest { display: 0 }
-        .encode_msg(&mut out)
-        .unwrap_or_else(|_| nexo_sys::exit(1150));
-    if nexo_sys::channel_send(s, &out[..m], &[]) != Status::Ok {
+    // a saida composta e privilegio do shell: o driver pede ao shellui pelo pipe
+    if nexo_sys::channel_send(pipe, b"saida", &[]) != Status::Ok {
         nexo_sys::exit(1151);
     }
-    let (n, _) =
-        nexo_sys::channel_recv(s, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1152));
+    let (n, nh) =
+        nexo_sys::channel_recv(pipe, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1152));
+    if nh != 1 {
+        nexo_sys::exit(1150);
+    }
     let outp =
         nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1153));
     let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1154));
@@ -4441,14 +4442,15 @@ fn shellui_driver() -> ! {
     }
 
     // pixels da barra: fundo (tema escuro, surface) e a celula 0 (acento)
-    let m = nexo_proto::wm::OutputRequest { display: 0 }
-        .encode_msg(&mut out)
-        .unwrap_or_else(|_| nexo_sys::exit(1117));
-    if nexo_sys::channel_send(s, &out[..m], &[]) != Status::Ok {
+    // a saida composta e privilegio do shell: o driver pede ao shellui pelo pipe
+    if nexo_sys::channel_send(pipe, b"saida", &[]) != Status::Ok {
         nexo_sys::exit(1118);
     }
-    let (n, _) =
-        nexo_sys::channel_recv(s, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1119));
+    let (n, nh) =
+        nexo_sys::channel_recv(pipe, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1119));
+    if nh != 1 {
+        nexo_sys::exit(1117);
+    }
     let outp =
         nexo_proto::wm::decode_output_response(&buf[..n]).unwrap_or_else(|_| nexo_sys::exit(1120));
     let ob = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| nexo_sys::exit(1121));
@@ -4866,7 +4868,20 @@ fn wm_shell() -> ! {
         Ok((n, _)) if nexo_proto::wm::decode_activate_response(&buf[..n]).is_err() => {}
         _ => nexo_sys::exit(1030),
     }
-    nexo_sys::log("utest: wm shell ok — shell enumera e ativa janelas; sessao comum e negada");
+    // e a saida composta (a tela inteira) tambem e privilegio do shell
+    let m = nexo_proto::wm::OutputRequest { display: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(1031));
+    if nexo_sys::channel_send(s2, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(1032);
+    }
+    match nexo_sys::channel_recv(s2, &mut buf, &mut hs) {
+        Ok((n, 0)) if nexo_proto::wm::decode_output_response(&buf[..n]).is_err() => {}
+        _ => nexo_sys::exit(1033),
+    }
+    nexo_sys::log(
+        "utest: wm shell ok — shell enumera e ativa janelas; sessao comum e negada (info e saida)",
+    );
     nexo_sys::exit(0)
 }
 

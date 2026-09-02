@@ -382,6 +382,26 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                             fail(78, "send sessao");
                         }
                     }
+                    b"saida" => {
+                        // o shell e o dono da tela; exporta a saida composta ao SEU
+                        // orquestrador (resposta do wm + handle encaminhados como estao)
+                        let m = wm::OutputRequest { display: 0 }
+                            .encode_msg(&mut out)
+                            .unwrap_or_else(|_| fail(90, "enc output"));
+                        if nexo_sys::channel_send(WM, &out[..m], &[]) != Status::Ok {
+                            fail(91, "send output");
+                        }
+                        let mut hs2 = [0u32; 1];
+                        let mut b2 = [0u8; 128];
+                        match nexo_sys::channel_recv(WM, &mut b2, &mut hs2) {
+                            Ok((n, 1)) => {
+                                if nexo_sys::channel_send(PIPE, &b2[..n], &[hs2[0]]) != Status::Ok {
+                                    fail(92, "send saida");
+                                }
+                            }
+                            _ => fail(93, "recv output"),
+                        }
+                    }
                     b"sync" => {
                         redraw(&mut bar, &theme, &mut buf, &mut hs, &mut pending);
                         let _ = nexo_sys::channel_send(PIPE, b"ok", &[]);
