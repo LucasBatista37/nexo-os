@@ -334,9 +334,9 @@ def run_shell_scenario(timeout: float) -> bool:
     ok, rc = False, 0
     for attempt in range(3):
         ok, rc = run_shell_scenario_once(timeout)
-        if ok or rc not in HOST_SIGNAL_RCS:
+        if ok or not infra_failure(rc, BUILD / "logs" / "shell.log"):
             return ok
-        log(f"QEMU morreu por sinal do host (rc={rc}) no shell; nova tentativa ({attempt + 2}/3)")
+        log(f"falha de infraestrutura do QEMU (rc={rc}) no shell; nova tentativa ({attempt + 2}/3)")
     return ok
 
 
@@ -497,9 +497,9 @@ def run_input_phase(timeout: float, variant: int, expect: list) -> bool:
     ok, rc = False, 0
     for attempt in range(3):
         ok, rc = run_input_phase_once(timeout, variant, expect)
-        if ok or rc not in HOST_SIGNAL_RCS:
+        if ok or not infra_failure(rc, BUILD / "logs" / f"input-{variant}.log"):
             return ok
-        log(f"QEMU morreu por sinal do host (rc={rc}) na fase {variant}; nova tentativa ({attempt + 2}/3)")
+        log(f"falha de infraestrutura do QEMU (rc={rc}) na fase {variant}; nova tentativa ({attempt + 2}/3)")
     return ok
 
 
@@ -683,7 +683,7 @@ def run_net_scenario(timeout: float) -> bool:
     rc = call_qemu([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
                     "--disk", BUILD / "nexo-net-data.img", "--net", "--net-hostfwd", str(fwd_port),
                     "--net-dump", BUILD / "logs" / "net.pcap",
-                    "--timeout", str(timeout), "--log", logfile])
+                    "--timeout", str(timeout), "--log", logfile], log_path=logfile)
     text = logfile.read_bytes().decode("utf-8", errors="replace")
     ok = True
     if rc != 33:
@@ -750,15 +750,29 @@ def run_net_scenario(timeout: float) -> bool:
 HOST_SIGNAL_RCS = {245, 246, 250}
 
 
-def call_qemu(cmd, allow_retry=True, retries=2):
+def infra_failure(rc: int, log_path=None) -> bool:
+    """Falha de INFRAESTRUTURA (nao do convidado): QEMU morto por sinal do host, ou timeout
+    com o convidado ainda preso no firmware (o log nem tem o nexo-loader — OVMF travou antes
+    de entregar o controle; visto intermitentemente no host de desenvolvimento)."""
+    if rc in HOST_SIGNAL_RCS:
+        return True
+    if rc == 124 and log_path is not None:
+        try:
+            return b"nexo-loader" not in Path(log_path).read_bytes()
+        except OSError:
+            return False
+    return False
+
+
+def call_qemu(cmd, allow_retry=True, retries=2, log_path=None):
     """subprocess.call com nova tentativa quando o QEMU morre por sinal do host. O disco do
     cenario pode ficar com escritas parciais da tentativa abortada — equivalente a um corte de
     energia, que o sistema precisa aguentar de qualquer forma (e o powercut prova)."""
     rc = subprocess.call(cmd)
     for attempt in range(retries):
-        if not allow_retry or rc not in HOST_SIGNAL_RCS:
+        if not allow_retry or not infra_failure(rc, log_path):
             return rc
-        log(f"QEMU morreu por sinal do host (rc={rc}); nova tentativa ({attempt + 2}/{retries + 1})")
+        log(f"falha de infraestrutura do QEMU (rc={rc}); nova tentativa ({attempt + 2}/{retries + 1})")
         rc = subprocess.call(cmd)
     return rc
 
@@ -795,7 +809,7 @@ def run_scenario(name: str, timeout: float) -> bool:
         kill_on = sc.get(f"kill_on_run{run_no}", sc.get("kill_on") if run_no == 1 else None)
         if kill_on:
             cmd += ["--kill-on", kill_on, "--kill-delay-ms", str(sc.get("kill_delay_ms", 0))]
-        rc = call_qemu(cmd, allow_retry=kill_on is None)
+        rc = call_qemu(cmd, allow_retry=kill_on is None, log_path=run_log)
         text = run_log.read_bytes().decode("utf-8", errors="replace")
         expected_rc = sc.get(f"exit_code_run{run_no}", sc["exit_code"])
         if rc != expected_rc:
