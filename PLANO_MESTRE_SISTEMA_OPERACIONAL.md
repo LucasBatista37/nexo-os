@@ -435,7 +435,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] criar shell de diagnóstico no espaço de usuário — *`services/shell` sobre a console VirtIO e o VFS; cenário `shell` interativo*;
 - [-] testar isolamento e negação de capabilities — *isolamento de memória/instruções e negação por direitos (Denied) testados; fuzzing pendente*;
 - [x] fuzzar decodificador de IPC e syscalls — *fuzz-lite determinístico dos parsers e dos decodificadores NXIP no host; fuzz de syscalls aleatório com sementes registradas, agendado toda semana no CI (`make fuzz`, workflow `fuzz`); cobertura guiada (cargo-fuzz) pendente*;
-- [ ] publicar release `0.2-userspace`.
+- [x] publicar release `0.2-userspace` — *publicada em 2026-09-01 (tag assinada), gate F2 atendido; `docs/releases/0.2-userspace.md`*.
 
 **Gate F2:** três processos isolados executam simultaneamente, um servidor pode reiniciar sem reiniciar o kernel e acessos sem capability falham de forma testada.
 
@@ -463,7 +463,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] implementar escrita, flush e sincronização — *copy-on-write com commit atômico por setor, `sync`; sem cache de blocos ainda*;
 - [x] criar testes de imagem corrompida e corte de energia — *host: corte em cada escrita (com escritas rasgadas) e 400 imagens corrompidas; QEMU: cenário `powercut` (SIGKILL durante escritas, boot seguinte monta e `nexo-disk check` confirma)*;
 - [x] criar ferramenta de inspeção do disco no host — *`tools/nexo-disk` (info/ls/cat/check), usado pelo cenário `storage`*;
-- [ ] publicar release `0.3-storage`.
+- [x] publicar release `0.3-storage` — *publicada em 2026-09-01 (tag assinada), gate F3 atendido (powercut + corte por escrita); `docs/releases/0.3-storage.md`*.
 
 **Gate F3:** criar, ler, alterar e remover arquivos sobre VirtIO block; reiniciar preserva dados; um driver de armazenamento pode falhar sem corromper o kernel; testes simulam desligamentos abruptos.
 

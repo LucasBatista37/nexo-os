@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-01 (commit `e17f749`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-01 (commit `9af664a`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 167 · 🟡 70 · ⬜ 298 · ⛔ 0 → **38% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 169 · 🟡 70 · ⬜ 296 · ⛔ 0 → **38% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -10,8 +10,8 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 |---|---|---|---|---|---|---|---|
 | Fase 0 — Fundação e preparação (meses 0–6) | ✅ atendido | 13 | 2 | 0 | 93% | 0 (concluída) | gate F0 atendido em clone limpo; release 0.0.1-boot publicada |
 | Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 18 | 1 | 0 | 97% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
-| Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 10 | 7 | 1 | 75% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
-| Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 17 | 3 | 1 | 88% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
+| Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 11 | 7 | 0 | 81% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
+| Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 18 | 3 | 0 | 93% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 14 | 3 | 47% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 10 | 13 | 2 | 66% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
 | Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 7 | 12 | 6 | 52% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
@@ -88,7 +88,7 @@ Gate: 🟡 quase. 2 h de stress com 4 CPUs sem erros (2026-08-30: 17 M trocas, c
 | ✅ | adicionar symbolication e dump mínimo de falhas |  |
 | ✅ | publicar release `0.1-kernel` | gate F1 **completo**: 24 h de stress SMP (2026-09-01, `docs/progress/2026-09-01-stress-24h.md`) — 102 M trocas de contexto, 7,6 M processos, contador com lock exato, 4/4 CPUs e zero erros em 86 401 amostras; quadros e heap estáveis. Tag `v0.1-kernel` |
 
-### Fase 2 — Modo usuário, IPC e capabilities (ano 2) — 75% (10 ✅, 7 🟡, 1 ⬜)
+### Fase 2 — Modo usuário, IPC e capabilities (ano 2) — 81% (11 ✅, 7 🟡, 0 ⬜)
 
 Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado
 
@@ -111,9 +111,9 @@ Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem re
 | ✅ | criar shell de diagnóstico no espaço de usuário | `services/shell` sobre a console VirtIO e o VFS; cenário `shell` interativo |
 | 🟡 | testar isolamento e negação de capabilities | isolamento de memória/instruções e negação por direitos (Denied) testados; fuzzing pendente |
 | ✅ | fuzzar decodificador de IPC e syscalls | fuzz-lite determinístico dos parsers e dos decodificadores NXIP no host; fuzz de syscalls aleatório com sementes registradas, agendado toda semana no CI (`make fuzz`, workflow `fuzz`); cobertura guiada (cargo-fuzz) pendente |
-| ⬜ | publicar release `0.2-userspace` |  |
+| ✅ | publicar release `0.2-userspace` | publicada em 2026-09-01 (tag assinada), gate F2 atendido; `docs/releases/0.2-userspace.md` |
 
-### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) — 88% (17 ✅, 3 🟡, 1 ⬜)
+### Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) — 93% (18 ✅, 3 🟡, 0 ⬜)
 
 Gate: 🟡 critérios atendidos; release pendente. arquivos criados/alterados/removidos sobre VirtIO-block persistem entre boots (NexoFS v0, `test-qemu --scenario storage`, 2026-08-30); driver de bloco morto sem afetar o kernel (`user_block_crash`); cortes de energia simulados no host em cada escrita — faltam VFS/namespace, cache de blocos, FAT do ESP, IOMMU, VirtIO input/rng/console e cortes no QEMU real
 
@@ -139,7 +139,7 @@ Gate: 🟡 critérios atendidos; release pendente. arquivos criados/alterados/re
 | ✅ | implementar escrita, flush e sincronização | copy-on-write com commit atômico por setor, `sync`; sem cache de blocos ainda |
 | ✅ | criar testes de imagem corrompida e corte de energia | host: corte em cada escrita (com escritas rasgadas) e 400 imagens corrompidas; QEMU: cenário `powercut` (SIGKILL durante escritas, boot seguinte monta e `nexo-disk check` confirma) |
 | ✅ | criar ferramenta de inspeção do disco no host | `tools/nexo-disk` (info/ls/cat/check), usado pelo cenário `storage` |
-| ⬜ | publicar release `0.3-storage` |  |
+| ✅ | publicar release `0.3-storage` | publicada em 2026-09-01 (tag assinada), gate F3 atendido (powercut + corte por escrita); `docs/releases/0.3-storage.md` |
 
 ### Fase 4 — Rede e serviços básicos (anos 3–4) — 47% (2 ✅, 14 🟡, 3 ⬜)
 

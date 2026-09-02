@@ -324,6 +324,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Releases `v0.2-userspace` e `v0.3-storage` (2026-09-01, tags assinadas)
+- **`v0.2-userspace`** (gate F2): processos isolados, IPC por handles/canais com direitos, init + svcmgr com reinício de serviço, ABI v0→v1 documentada, IDL/protocolos tipados, shell de diagnóstico, fuzzing contínuo. Publicada na sequência da `v0.1-kernel`; limitações do rascunho atualizadas (memória compartilhada e espera múltipla existem desde a Fase 5).
+- **`v0.3-storage`** (gate F3): blockdev VirtIO + NexoFS v0 (commits atômicos por setor) + fs/vfs/espfs; reiniciar preserva dados; queda de driver não corrompe o kernel; **cortes de energia simulados** (cenário `powercut` + corte injetado em cada escrita nos testes de host). Extra pós-gate: a mesma pilha rodando sobre NVMe.
+- A partir da 0.2 as tags são **assinadas** (SSH, política do RELEASE.md). Evidência do stress de 24 h anexada à release `v0.1-kernel` (log gzip).
+- `Makefile`: margem do stress prolongado agora é **proporcional** (+900 s + 1% da duração) — 7 dias de TCG sob carga atrasam mais do que uma folga fixa cobre.
+
 ### Segurança (Fase 8 antecipada, bloco 34 — saída composta é privilégio do shell)
 - Fecha a prioridade nº 3 do threat model: `output` do compositor agora é **privilégio do shell** (sessão 0; erro 7 para as demais — a saída composta é a tela inteira). Teste negativo no `user_wm_shell`; IDL anotada.
 - O shell (`shellui`) ganhou `"saida"` no protocolo do pipe: exporta a tela ao **seu orquestrador** (resposta do wm + handle encaminhados) — os testes de shell passaram a pedir a tela por esse caminho, que é o desenho certo: quem não é shell só vê a tela se o shell der.
