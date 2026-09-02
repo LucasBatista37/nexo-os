@@ -35,9 +35,18 @@ def main() -> int:
     if not mcopy:
         print("test-ab: mtools ausente", file=sys.stderr)
         return 2
+    esp = f"{img}@@{2048 * 512}"
+    # A suíte alterna os slots ao rodar (o `user_update` aplica de verdade), então a imagem
+    # canônica pode estar em qualquer fase do ciclo: reseta o estado para o canônico
+    # (A ativo confirmado, B reserva) antes de corromper o A.
+    import struct
+    import zlib
+    body = struct.pack("<8sI4B4B4B", b"NEXOSLAB", 1, 2, 3, 1, 0, 1, 3, 1, 0, 0, 0, 0, 0)
+    state = BUILD / "ab-slots.bin"
+    state.write_bytes((body + struct.pack("<I", zlib.crc32(body))).ljust(512, b"\0"))
+    subprocess.run([mcopy, "-i", esp, "-o", str(state), "::/nexo/slots.bin"], check=True)
     lixo = BUILD / "ab-lixo.bin"
     lixo.write_bytes(b"\xff" * 4096)  # legivel, mas nao e um ELF
-    esp = f"{img}@@{2048 * 512}"
     subprocess.run([mcopy, "-i", esp, "-o", str(lixo), "::/nexo/a/kernel.elf"], check=True)
 
     log = BUILD / "logs" / "ab-fallback.log"

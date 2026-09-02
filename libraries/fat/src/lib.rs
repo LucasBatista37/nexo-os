@@ -28,6 +28,13 @@ pub trait SectorDevice {
     fn read_sector(&mut self, lba: u64, buf: &mut [u8; SECTOR]) -> Result<(), IoError>;
 }
 
+/// Dispositivo de setores com escrita — habilita as operações de [reescrita](Fat::rewrite_file)
+/// (a atualização A/B grava a imagem nova no slot inativo por dentro do FAT).
+pub trait SectorDeviceRw: SectorDevice {
+    /// Escreve um setor.
+    fn write_sector(&mut self, lba: u64, buf: &[u8; SECTOR]) -> Result<(), IoError>;
+}
+
 /// Erros do leitor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FatError {
@@ -251,6 +258,12 @@ impl<D: SectorDevice> Fat<D> {
         self.dev
     }
 
+    /// Acesso direto ao dispositivo (E/S crua fora do volume — ex.: o setor do estado A/B,
+    /// que é reescrito in-place sem passar pela estrutura FAT).
+    pub fn device_mut(&mut self) -> &mut D {
+        &mut self.dev
+    }
+
     fn cluster_lba(&self, cluster: u32) -> Result<u64, FatError> {
         if cluster < 2 || cluster - 2 >= self.total_clusters {
             return Err(FatError::Corrupted("numero de cluster"));
@@ -258,8 +271,8 @@ impl<D: SectorDevice> Fat<D> {
         Ok(self.data_start + ((cluster - 2) * self.sectors_per_cluster) as u64)
     }
 
-    /// Próximo cluster da cadeia (`None` = fim).
-    pub fn next_cluster(&mut self, cluster: u32) -> Result<Option<u32>, FatError> {
+    /// Valor CRU da entrada `cluster` na FAT (0 = livre; sem interpretação de fim de cadeia).
+    fn fat_raw(&mut self, cluster: u32) -> Result<u32, FatError> {
         let mut s = [0u8; SECTOR];
         let v = match self.kind {
             FatKind::Fat32 => {
@@ -303,6 +316,12 @@ impl<D: SectorDevice> Fat<D> {
                 }
             }
         };
+        Ok(v)
+    }
+
+    /// Próximo cluster da cadeia (`None` = fim).
+    pub fn next_cluster(&mut self, cluster: u32) -> Result<Option<u32>, FatError> {
+        let v = self.fat_raw(cluster)?;
         let end = match self.kind {
             FatKind::Fat32 => v >= 0x0fff_fff8,
             FatKind::Fat16 => v >= 0xfff8,
@@ -553,6 +572,294 @@ impl<D: SectorDevice> Fat<D> {
             }
         }
         Ok(n)
+    }
+}
+
+/// Escrita mínima para a atualização A/B (ADR-0010): **reescrever o conteúdo de um arquivo
+/// existente** (nome 8.3, sem LFN — os artefatos de slot são `kernel.elf`/`initrd`). Ordem à
+/// prova de cortes, no espírito do NexoFS: os dados e a cadeia NOVOS são gravados primeiro, a
+/// entrada de diretório é o **commit**, e só então a cadeia antiga é liberada. Um corte deixa
+/// ou o arquivo antigo intacto ou o novo completo — nunca um arquivo rasgado (no pior caso,
+/// clusters órfãos, que um fsck recolhe). Todas as cópias da FAT são atualizadas.
+impl<D: SectorDeviceRw> Fat<D> {
+    /// Quantas cópias da FAT o volume tem (derivado da geometria montada).
+    fn fat_copies(&self) -> u32 {
+        ((self.root_dir_start - self.fat_start) / self.fat_sectors as u64) as u32
+    }
+
+    /// Valor de fim de cadeia do tipo do volume.
+    fn eoc(&self) -> u32 {
+        match self.kind {
+            FatKind::Fat32 => 0x0fff_ffff,
+            FatKind::Fat16 => 0xffff,
+            FatKind::Fat12 => 0xfff,
+        }
+    }
+
+    /// Escreve `value` na entrada `cluster` de TODAS as cópias da FAT.
+    fn fat_set(&mut self, cluster: u32, value: u32) -> Result<(), FatError> {
+        if cluster < 2 || cluster - 2 >= self.total_clusters {
+            return Err(FatError::Corrupted("numero de cluster"));
+        }
+        let copies = self.fat_copies() as u64;
+        let mut s = [0u8; SECTOR];
+        match self.kind {
+            FatKind::Fat32 => {
+                let off = cluster as u64 * 4;
+                let (sec, i) = (off / SECTOR as u64, (off % SECTOR as u64) as usize);
+                self.dev.read_sector(self.fat_start + sec, &mut s)?;
+                // os 4 bits altos são reservados e preservados
+                let old = u32_at(&s, i);
+                let v = (old & 0xf000_0000) | (value & 0x0fff_ffff);
+                s[i..i + 4].copy_from_slice(&v.to_le_bytes());
+                for k in 0..copies {
+                    self.dev
+                        .write_sector(self.fat_start + k * self.fat_sectors as u64 + sec, &s)?;
+                }
+            }
+            FatKind::Fat16 => {
+                let off = cluster as u64 * 2;
+                let (sec, i) = (off / SECTOR as u64, (off % SECTOR as u64) as usize);
+                self.dev.read_sector(self.fat_start + sec, &mut s)?;
+                s[i..i + 2].copy_from_slice(&(value as u16).to_le_bytes());
+                for k in 0..copies {
+                    self.dev
+                        .write_sector(self.fat_start + k * self.fat_sectors as u64 + sec, &s)?;
+                }
+            }
+            FatKind::Fat12 => {
+                // entradas de 12 bits: o par de bytes pode atravessar a fronteira de setor
+                let off = cluster as u64 * 3 / 2;
+                let (sec, i) = (off / SECTOR as u64, (off % SECTOR as u64) as usize);
+                self.dev.read_sector(self.fat_start + sec, &mut s)?;
+                let mut t = [0u8; SECTOR];
+                let straddle = i == SECTOR - 1;
+                if straddle {
+                    self.dev.read_sector(self.fat_start + sec + 1, &mut t)?;
+                }
+                let (lo, hi) = if straddle {
+                    (&mut s[i], &mut t[0])
+                } else {
+                    let (a, b) = s.split_at_mut(i + 1);
+                    (&mut a[i], &mut b[0])
+                };
+                if cluster & 1 == 1 {
+                    *lo = (*lo & 0x0f) | (((value & 0xf) as u8) << 4);
+                    *hi = (value >> 4) as u8;
+                } else {
+                    *lo = (value & 0xff) as u8;
+                    *hi = (*hi & 0xf0) | (((value >> 8) & 0xf) as u8);
+                }
+                for k in 0..copies {
+                    let base = self.fat_start + k * self.fat_sectors as u64;
+                    self.dev.write_sector(base + sec, &s)?;
+                    if straddle {
+                        self.dev.write_sector(base + sec + 1, &t)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Acha um cluster livre (valor 0), varrendo circularmente a partir de `hint`.
+    fn alloc_cluster(&mut self, hint: u32) -> Result<u32, FatError> {
+        let first = 2u32;
+        let end = 2 + self.total_clusters;
+        let start = hint.clamp(first, end.saturating_sub(1));
+        for c in (start..end).chain(first..start) {
+            if self.fat_raw(c)? == 0 {
+                return Ok(c);
+            }
+        }
+        Err(FatError::Corrupted("volume cheio"))
+    }
+
+    /// Libera a cadeia a partir de `first` (para em fim de cadeia ou entrada inválida).
+    fn free_chain(&mut self, first: u32) -> Result<(), FatError> {
+        let mut c = first;
+        let mut hops = 0u32;
+        while c >= 2 && c - 2 < self.total_clusters {
+            let next = self.fat_raw(c)?;
+            self.fat_set(c, 0)?;
+            hops += 1;
+            if hops > 1 << 20 {
+                return Err(FatError::Corrupted("cadeia longa demais"));
+            }
+            c = next;
+            let end = match self.kind {
+                FatKind::Fat32 => c >= 0x0fff_fff8,
+                FatKind::Fat16 => c >= 0xfff8,
+                FatKind::Fat12 => c >= 0xff8,
+            };
+            if end || c == 0 {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Converte `name` para o formato 8.3 cru da entrada de diretório (maiúsculas, com padding).
+    fn name_83(name: &[u8]) -> Option<[u8; 11]> {
+        let mut out = [b' '; 11];
+        let dot = name.iter().rposition(|&c| c == b'.');
+        let (base, ext): (&[u8], &[u8]) = match dot {
+            Some(i) => (&name[..i], &name[i + 1..]),
+            None => (name, b""),
+        };
+        if base.is_empty() || base.len() > 8 || ext.len() > 3 {
+            return None;
+        }
+        for (i, &c) in base.iter().enumerate() {
+            out[i] = c.to_ascii_uppercase();
+        }
+        for (i, &c) in ext.iter().enumerate() {
+            out[8 + i] = c.to_ascii_uppercase();
+        }
+        Some(out)
+    }
+
+    /// Localiza a entrada 8.3 `name83` no diretório `cluster` (0 = raiz); devolve
+    /// `(lba, offset_no_setor, cluster_inicial_do_arquivo)`.
+    fn find_entry_pos(
+        &mut self,
+        cluster: u32,
+        name83: &[u8; 11],
+    ) -> Result<(u64, usize, u32), FatError> {
+        let mut s = [0u8; SECTOR];
+        let mut cur = if cluster == 0 && self.kind != FatKind::Fat32 {
+            None
+        } else {
+            Some(if cluster == 0 {
+                self.root_cluster
+            } else {
+                cluster
+            })
+        };
+        let mut fixed_next = if cur.is_none() { Some(0u32) } else { None };
+        let mut sectors_seen = 0u32;
+        loop {
+            let lba = match (cur, fixed_next) {
+                (None, Some(i)) => {
+                    if i >= self.root_dir_sectors {
+                        return Err(FatError::NotFound);
+                    }
+                    fixed_next = Some(i + 1);
+                    self.root_dir_start + i as u64
+                }
+                (Some(c), _) => {
+                    let idx = sectors_seen % self.sectors_per_cluster;
+                    let lba = self.cluster_lba(c)? + idx as u64;
+                    if idx + 1 == self.sectors_per_cluster {
+                        cur = self.next_cluster(c)?;
+                        if cur.is_none() {
+                            fixed_next = Some(u32::MAX);
+                        }
+                    }
+                    lba
+                }
+                (None, None) => return Err(FatError::NotFound),
+            };
+            sectors_seen += 1;
+            if sectors_seen > 65536 {
+                return Err(FatError::Corrupted("diretorio sem fim"));
+            }
+            self.dev.read_sector(lba, &mut s)?;
+            for i in 0..SECTOR / 32 {
+                let e = &s[i * 32..(i + 1) * 32];
+                if e[0] == 0x00 {
+                    return Err(FatError::NotFound);
+                }
+                if e[0] == 0xe5 || e[11] & 0x3f == 0x0f || e[11] & 0x08 != 0 {
+                    continue;
+                }
+                if &e[0..11] == name83 {
+                    let mut cl = u16_at(e, 26) as u32 | ((u16_at(e, 20) as u32) << 16);
+                    if self.kind != FatKind::Fat32 {
+                        cl &= 0xffff;
+                    }
+                    return Ok((lba, i * 32, cl));
+                }
+            }
+        }
+    }
+
+    /// Reescreve o CONTEÚDO do arquivo `path` (que precisa existir, com nome 8.3) com `size`
+    /// bytes fornecidos por `read(offset, buf)` — a fonte pode ser outro arquivo, um canal, etc.
+    /// Ordem à prova de cortes: cadeia+dados novos → entrada de diretório (commit) → cadeia
+    /// antiga liberada.
+    pub fn rewrite_file(
+        &mut self,
+        path: &[u8],
+        size: u64,
+        mut read: impl FnMut(u64, &mut [u8]) -> Result<(), IoError>,
+    ) -> Result<(), FatError> {
+        // diretório pai + nome final
+        let cut = path.iter().rposition(|&c| c == b'/');
+        let (parent, name) = match cut {
+            Some(i) => (&path[..i], &path[i + 1..]),
+            None => (&b""[..], path),
+        };
+        let dir_cluster = if parent.is_empty() || parent == b"/" {
+            0
+        } else {
+            let d = self.lookup(parent)?;
+            if !d.is_dir() {
+                return Err(FatError::NotFound);
+            }
+            d.cluster
+        };
+        let name83 = Self::name_83(name).ok_or(FatError::NotFound)?;
+        let (entry_lba, entry_off, old_first) = self.find_entry_pos(dir_cluster, &name83)?;
+
+        // 1) dados + cadeia novos (a cadeia antiga fica intacta até o commit)
+        let eoc = self.eoc();
+        let mut first = 0u32;
+        let mut prev = 0u32;
+        let mut hint = 2u32;
+        let mut off = 0u64;
+        let mut s = [0u8; SECTOR];
+        while off < size {
+            let c = self.alloc_cluster(hint)?;
+            self.fat_set(c, eoc)?;
+            if prev != 0 {
+                self.fat_set(prev, c)?;
+            } else {
+                first = c;
+            }
+            let base = self.cluster_lba(c)?;
+            for k in 0..self.sectors_per_cluster as u64 {
+                let take = (size.saturating_sub(off)).min(SECTOR as u64) as usize;
+                if take == 0 {
+                    break;
+                }
+                s = [0u8; SECTOR];
+                read(off, &mut s[..take]).map_err(|_| FatError::Io)?;
+                self.dev.write_sector(base + k, &s)?;
+                off += take as u64;
+            }
+            prev = c;
+            hint = c + 1;
+        }
+
+        // 2) commit: a entrada de diretório passa a apontar para a cadeia nova
+        self.dev.read_sector(entry_lba, &mut s)?;
+        let e = &mut s[entry_off..entry_off + 32];
+        e[26..28].copy_from_slice(&(first as u16).to_le_bytes());
+        let hi = if self.kind == FatKind::Fat32 {
+            (first >> 16) as u16
+        } else {
+            0
+        };
+        e[20..22].copy_from_slice(&hi.to_le_bytes());
+        e[28..32].copy_from_slice(&(size as u32).to_le_bytes());
+        self.dev.write_sector(entry_lba, &s)?;
+
+        // 3) a cadeia antiga vira espaço livre
+        if old_first >= 2 {
+            self.free_chain(old_first)?;
+        }
+        Ok(())
     }
 }
 

@@ -318,3 +318,162 @@ fn fat32_from_mtools_if_available() {
     assert_eq!(fs.read(&b, 0, &mut m).unwrap(), 7);
     assert_eq!(&m[..7], b"MZ-fake");
 }
+
+impl SectorDeviceRw for MemDev {
+    fn write_sector(&mut self, lba: u64, buf: &[u8; SECTOR]) -> Result<(), IoError> {
+        let o = lba as usize * SECTOR;
+        if o + SECTOR > self.0.len() {
+            return Err(IoError);
+        }
+        self.0[o..o + SECTOR].copy_from_slice(buf);
+        Ok(())
+    }
+}
+
+#[test]
+fn fat12_rewrite_grow_shrink_nested() {
+    let mut fs = Fat::mount(MemDev(fat12_image()), 0).unwrap();
+    // cresce: 700 -> 1300 bytes (2 -> 3 clusters); os clusters antigos (3 e 4) sao liberados
+    let novo: Vec<u8> = (0..1300u32)
+        .map(|i| (i.wrapping_mul(7) % 251) as u8)
+        .collect();
+    fs.rewrite_file(b"/HELLO.TXT", novo.len() as u64, |off, buf| {
+        let o = off as usize;
+        buf.copy_from_slice(&novo[o..o + buf.len()]);
+        Ok(())
+    })
+    .unwrap();
+    let f = fs.lookup(b"/hello.txt").unwrap();
+    assert_eq!(f.size as usize, novo.len());
+    let mut out = std::vec![0u8; 2000];
+    assert_eq!(fs.read(&f, 0, &mut out).unwrap(), 1300);
+    assert_eq!(&out[..1300], &novo[..]);
+    assert_eq!(fs.fat_raw(3).unwrap(), 0, "cluster antigo 3 nao liberado");
+    assert_eq!(fs.fat_raw(4).unwrap(), 0, "cluster antigo 4 nao liberado");
+    // encolhe para 5 bytes
+    fs.rewrite_file(b"/HELLO.TXT", 5, |_, buf| {
+        buf.copy_from_slice(&b"nexo!"[..buf.len()]);
+        Ok(())
+    })
+    .unwrap();
+    let f = fs.lookup(b"/hello.txt").unwrap();
+    let mut s = [0u8; 8];
+    assert_eq!(fs.read(&f, 0, &mut s).unwrap(), 5);
+    assert_eq!(&s[..5], b"nexo!");
+    // arquivo em subdiretorio
+    fs.rewrite_file(b"/DIR/A.BIN", 600, |off, buf| {
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = ((off as usize + i) % 97) as u8;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let a = fs.lookup(b"/dir/a.bin").unwrap();
+    let mut out = std::vec![0u8; 600];
+    assert_eq!(fs.read(&a, 0, &mut out).unwrap(), 600);
+    assert!(out.iter().enumerate().all(|(i, &b)| b == (i % 97) as u8));
+    // tamanho zero: entrada valida com cluster 0
+    fs.rewrite_file(b"/DIR/A.BIN", 0, |_, _| Ok(())).unwrap();
+    let a = fs.lookup(b"/dir/a.bin").unwrap();
+    assert_eq!(a.size, 0);
+    // inexistente
+    assert!(
+        fs.rewrite_file(b"/NADA.TXT", 1, |_, b| {
+            b[0] = 1;
+            Ok(())
+        })
+        .is_err()
+    );
+}
+
+/// Interop de ESCRITA com o mtools: reescrevemos um arquivo numa imagem FAT32 gerada por
+/// mformat/mcopy e o proprio mcopy extrai e confere o conteudo que NOS gravamos.
+#[test]
+fn fat32_rewrite_mtools_interop() {
+    use std::process::Command;
+    if Command::new("mformat").arg("-h").output().is_err() {
+        std::eprintln!("mformat ausente: teste de escrita FAT32 real pulado");
+        return;
+    }
+    let dir = std::env::temp_dir().join(std::format!("nexo-fatw-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let img = dir.join("esp.img");
+    let sectors: u64 = 66 * 1024 * 1024 / 512;
+    std::fs::File::create(&img)
+        .unwrap()
+        .set_len(sectors * 512)
+        .unwrap();
+    let istr = img.to_str().unwrap();
+    assert!(
+        Command::new("mformat")
+            .args([
+                "-i",
+                istr,
+                "-C",
+                "-F",
+                "-T",
+                &sectors.to_string(),
+                "-h",
+                "64",
+                "-s",
+                "32",
+                "::"
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        Command::new("mmd")
+            .args(["-i", istr, "::/nexo"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let v1: Vec<u8> = (0..300_000u32).map(|i| (i % 253) as u8).collect();
+    let src = dir.join("kernel.elf");
+    std::fs::write(&src, &v1).unwrap();
+    assert!(
+        Command::new("mcopy")
+            .args(["-i", istr, src.to_str().unwrap(), "::/nexo/kernel.elf"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut fs = Fat::mount(MemDev(std::fs::read(&img).unwrap()), 0).unwrap();
+    // "atualizacao": v2 maior e com outro padrao
+    let v2: Vec<u8> = (0..500_000u32)
+        .map(|i| (i.wrapping_mul(31) % 251) as u8)
+        .collect();
+    fs.rewrite_file(b"/nexo/kernel.elf", v2.len() as u64, |off, buf| {
+        let o = off as usize;
+        buf.copy_from_slice(&v2[o..o + buf.len()]);
+        Ok(())
+    })
+    .unwrap();
+    // nossa releitura
+    let k = fs.lookup(b"/nexo/kernel.elf").unwrap();
+    assert_eq!(k.size as usize, v2.len());
+    let mut out = std::vec![0u8; v2.len()];
+    assert_eq!(fs.read(&k, 0, &mut out).unwrap(), v2.len());
+    assert_eq!(out, v2);
+    // o mtools le a imagem que NOS escrevemos
+    std::fs::write(&img, &fs.into_device().0).unwrap();
+    let ext = dir.join("extraido.bin");
+    assert!(
+        Command::new("mcopy")
+            .args([
+                "-i",
+                istr,
+                "-n",
+                "-o",
+                "::/nexo/kernel.elf",
+                ext.to_str().unwrap()
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert_eq!(std::fs::read(&ext).unwrap(), v2);
+    let _ = std::fs::remove_dir_all(&dir);
+}

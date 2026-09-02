@@ -83,11 +83,13 @@ def main() -> int:
     boot2 = ("slot B (confirmado" in logs[1] and "[RESULT] PASS" in logs[1]
              and "slot B confirmado (health check pos-boot)" in logs[1])
 
-    # estado persistido: A esgotado e sem sucesso; o ultimo escolhido foi B (indice 1)
+    # estado persistido: o ultimo escolhido foi B (indice 1) e B esta confirmado. O decremento
+    # do boot 1 esta provado no log ("tentativas 0"); o estado FINAL de A reflete a alternancia
+    # que a suite do boot 2 aplicou por cima (A pendente de novo, com o conteudo REPARADO).
     subprocess.run([mcopy, "-i", f"{img}{ESP}", "-n", "-o", "::/nexo/slots.bin", str(state)],
                    check=True)
     a, b, last = unpack_state(state.read_bytes())
-    persisted = a == (3, 0, 0) and b[2] == 1 and last == 1
+    persisted = a == (3, 3, 0) and b[2] == 1 and last == 1
 
     pstate = "ok" if persisted else f"FALHOU A={a} B={b} last={last}"
     print(f"test-rollback: boot1(A pendente, tentativa consumida)={'ok' if boot1 else 'FALHOU'} "

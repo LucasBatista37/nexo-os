@@ -111,6 +111,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         65 => backup_driver(),
         66 => wm_flip_client(),
         67 => slots_confirm_driver(),
+        68 => update_apply_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1835,8 +1836,9 @@ fn slots_confirm_driver() -> ! {
     }
     let (n, _) =
         nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1644));
-    // formato: "sel X sS tT" — o slot confirmado, saudavel, com as tentativas repostas
-    if n != 11 || buf[4] != slot || buf[7] != b'1' || buf[10] != b'3' {
+    // formato: "sel X A p_ t_ s_ B p_ t_ s_" — confere o slot confirmado (s=1, t=3)
+    let (t_at, s_at) = if slot == b'A' { (12, 15) } else { (23, 26) };
+    if n != 28 || buf[4] != slot || buf[s_at] != b'1' || buf[t_at] != b'3' {
         nexo_rt::log!(
             "utest: slots: estado respondeu '{}'",
             core::str::from_utf8(&buf[..n]).unwrap_or("?")
@@ -1846,6 +1848,64 @@ fn slots_confirm_driver() -> ! {
     nexo_rt::log!(
         "utest: slots ok — health check confirmou o slot {} no disco (s1 t3)",
         slot as char
+    );
+    nexo_sys::exit(0)
+}
+
+/// Modo 68: atualizacao atomica A/B. Pede "aplica" ao `upd` — que copia kernel+initrd do slot
+/// ATIVO para o INATIVO por dentro do FAT (reescrita a prova de cortes) e o marca pendente
+/// (prioridade 3, 3 tentativas, sem sucesso) — e confere: "verifica" compara os dois slots
+/// byte a byte, e "estado" (relido do disco) mostra o inativo pendente.
+fn update_apply_driver() -> ! {
+    let ch: nexo_sys::Handle = 0;
+    let mut buf = [0u8; 64];
+    let mut hs = [0u32; 1];
+    if nexo_sys::channel_send(ch, b"aplica", &[]) != Status::Ok {
+        nexo_sys::exit(1650);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1651));
+    if n != 10 || &buf[..9] != b"aplicado " {
+        nexo_rt::log!(
+            "utest: update: aplica respondeu '{}'",
+            core::str::from_utf8(&buf[..n]).unwrap_or("?")
+        );
+        nexo_sys::exit(1652);
+    }
+    let to = buf[9]; // o slot que recebeu a atualizacao (o inativo)
+    if nexo_sys::channel_send(ch, b"verifica", &[]) != Status::Ok {
+        nexo_sys::exit(1653);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1654));
+    if &buf[..n] != b"igual" {
+        nexo_rt::log!(
+            "utest: update: verifica respondeu '{}'",
+            core::str::from_utf8(&buf[..n]).unwrap_or("?")
+        );
+        nexo_sys::exit(1655);
+    }
+    if nexo_sys::channel_send(ch, b"estado", &[]) != Status::Ok {
+        nexo_sys::exit(1656);
+    }
+    let (n, _) =
+        nexo_sys::channel_recv(ch, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(1657));
+    // o destino tem que estar pendente: p=3, t=3, s=0 (e o ativo continua sendo o outro)
+    let (p_at, t_at, s_at) = if to == b'A' {
+        (9, 12, 15)
+    } else {
+        (20, 23, 26)
+    };
+    if n != 28 || buf[4] == to || buf[p_at] != b'3' || buf[t_at] != b'3' || buf[s_at] != b'0' {
+        nexo_rt::log!(
+            "utest: update: estado respondeu '{}'",
+            core::str::from_utf8(&buf[..n]).unwrap_or("?")
+        );
+        nexo_sys::exit(1658);
+    }
+    nexo_rt::log!(
+        "utest: update ok — slot {} atualizado por dentro do FAT, identico ao ativo, pendente p3 t3",
+        to as char
     );
     nexo_sys::exit(0)
 }
