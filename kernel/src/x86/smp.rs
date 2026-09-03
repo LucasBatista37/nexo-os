@@ -28,6 +28,7 @@ extern "sysv64" fn ap_entry(arg: usize) -> ! {
         cpu_ref.activate();
         super::traps::load_idt();
         cpu::enable_write_protect();
+        cpu::enable_sse();
     }
     let lapic = super::apic::lapic();
     lapic.enable(vectors::SPURIOUS, vectors::APIC_ERROR);

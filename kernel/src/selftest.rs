@@ -66,6 +66,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_trace", test_user_trace),
     ("shm_quota", test_shm_quota),
     ("user_c_hello", test_user_c_hello),
+    ("user_sse", test_user_sse),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3191,6 +3192,32 @@ fn test_shm_quota() -> TestResult {
 /// Primeiro processo em C: o `hello-c` (compilado freestanding com os headers de `abi/c`)
 /// loga pelo kernel e sai 0 — a ABI de syscalls funciona fora de Rust. Guardado pela presenca
 /// do binario no initrd (o demo so e empacotado quando o host tem clang + rust-lld).
+/// FPU/SSE em modo usuário: dois processos C (compilados COM SSE) fazem aritmética double nos
+/// XMM com padrões distintos e cedem a CPU centenas de vezes em paralelo — o estado de cada um
+/// sobrevive às trocas (FXSAVE/FXRSTOR por thread) e nada vaza entre processos. Guardado pela
+/// presença do `sse-c` no initrd (host sem clang pula).
+fn test_user_sse() -> TestResult {
+    if crate::initrd::find("sse-c").is_none() {
+        return Err(String::from(
+            "sse-c ausente do initrd (host sem clang/rust-lld)",
+        ));
+    }
+    let frames0 = phys::stats().free;
+    let a = crate::process::spawn_named("sse-c", 7, Vec::new()).map_err(String::from)?;
+    let b = crate::process::spawn_named("sse-c", 13, Vec::new()).map_err(String::from)?;
+    let ca = crate::process::wait_and_reap(&a);
+    let cb = crate::process::wait_and_reap(&b);
+    drop((a, b));
+    check!(ca == 0, "sse-c (7) saiu com {ca}");
+    check!(cb == 0, "sse-c (13) saiu com {cb}");
+    let frames = settled_free_frames(frames0, 4);
+    check!(
+        frames + 4 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
 fn test_user_c_hello() -> TestResult {
     if crate::initrd::find("hello-c").is_none() {
         return Err(String::from(

@@ -379,3 +379,53 @@ pub unsafe fn enable_write_protect() {
     // SAFETY: contrato da função.
     unsafe { write_cr0(read_cr0() | CR0_WP) };
 }
+
+/// Liga SSE/FXSR (CR0.EM←0, CR0.MP←1; CR4.OSFXSR | CR4.OSXMMEXCPT): processos de usuário
+/// passam a poder usar FPU/XMM. O kernel continua *soft-float* (nunca toca XMM); o estado do
+/// usuário é preservado por FXSAVE/FXRSTOR por thread na troca de contexto. Uma vez por CPU.
+pub fn enable_sse() {
+    // SAFETY: bits arquiteturais padrão do x86_64; idempotente.
+    unsafe {
+        write_cr0((read_cr0() & !(1 << 2)) | (1 << 1)); // EM = 0, MP = 1
+        write_cr4(read_cr4() | (1 << 9) | (1 << 10)); // OSFXSR | OSXMMEXCPT
+    }
+}
+
+/// Área de FXSAVE64/FXRSTOR64: 512 bytes alinhados a 16.
+#[repr(C, align(16))]
+pub struct FxArea(pub [u8; 512]);
+
+impl FxArea {
+    /// Estado limpo de FPU/SSE (FCW 0x037F, MXCSR 0x1F80, registradores zerados) — o estado
+    /// inicial de toda thread, para que nada vaze de um processo para outro.
+    pub const fn new() -> Self {
+        let mut a = [0u8; 512];
+        a[0] = 0x7f; // FCW = 0x037F (precisão dupla estendida, exceções mascaradas)
+        a[1] = 0x03;
+        a[24] = 0x80; // MXCSR = 0x1F80 (exceções SSE mascaradas)
+        a[25] = 0x1f;
+        FxArea(a)
+    }
+}
+
+impl Default for FxArea {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Salva o estado FPU/SSE corrente em `a`.
+pub fn fxsave(a: &mut FxArea) {
+    // SAFETY: área de 512 B alinhada a 16 por construção; CR4.OSFXSR ligado no boot.
+    unsafe {
+        core::arch::asm!("fxsave64 [{}]", in(reg) a.0.as_mut_ptr(), options(nostack, preserves_flags));
+    }
+}
+
+/// Restaura o estado FPU/SSE a partir de `a`.
+pub fn fxrstor(a: &FxArea) {
+    // SAFETY: área válida escrita por `fxsave` ou `FxArea::new`; CR4.OSFXSR ligado.
+    unsafe {
+        core::arch::asm!("fxrstor64 [{}]", in(reg) a.0.as_ptr(), options(nostack, preserves_flags));
+    }
+}

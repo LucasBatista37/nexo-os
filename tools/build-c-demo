@@ -20,3 +20,10 @@ clang $CFLAGS -c "$ROOT/sdk/libc/src/stdio.c" -o "$ROOT/build/libc-stdio.o"
 "$LLD" -flavor gnu --no-pie -e _start -o "$OUT" "$ROOT/build/hello-c.o" \
        "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o"
 echo "[c-demo] $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes)"
+# ssetest: compilado COM SSE (o kernel liga OSFXSR e salva XMM por thread) — prova FPU/SIMD
+# de usuario e o isolamento do estado entre processos.
+CFLAGS_SSE="--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector -fno-builtin \
+        -mno-red-zone -fomit-frame-pointer -O2"
+clang $CFLAGS_SSE -c "$ROOT/examples/c/ssetest.c" -o "$ROOT/build/sse-c.o"
+"$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/sse-c.elf" "$ROOT/build/sse-c.o"
+echo "[c-demo] $ROOT/build/sse-c.elf ($(wc -c < "$ROOT/build/sse-c.elf" | tr -d ' ') bytes)"

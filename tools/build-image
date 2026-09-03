@@ -151,6 +151,9 @@ def main() -> None:
     hello_c = BUILD / "hello-c.elf"
     if hello_c.exists():
         stripped.append(("hello-c", hello_c))
+    sse_c = BUILD / "sse-c.elf"
+    if sse_c.exists():
+        stripped.append(("sse-c", sse_c))
     initrd = BUILD / "initrd"
     from mkinitrd import pack
     pack([(n, str(p)) for n, p in stripped], initrd)

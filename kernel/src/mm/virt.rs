@@ -70,6 +70,7 @@ pub fn init() {
     });
     // SAFETY: seções somente-leitura do kernel foram mapeadas sem WRITABLE.
     unsafe { cpu::enable_write_protect() };
+    cpu::enable_sse();
     kinfo!(
         "virt: CR0.WP ativo, EFER.NXE={}, CR3={:#x}",
         cpu::nx_enabled(),

@@ -77,6 +77,9 @@ pub struct Thread {
     stack: Option<stack::Slot>,
     entry: UnsafeCell<Option<Entry>>,
     inner: UnsafeCell<Inner>,
+    /// Estado FPU/SSE do usuario desta thread (FXSAVE64), salvo/restaurado na troca.
+    /// So e tocado pela propria CPU durante a troca, com o lock do escalonador detido.
+    fx: UnsafeCell<cpu::FxArea>,
 }
 
 // SAFETY: `inner`/`entry` só são acessados com o lock do escalonador detido
@@ -218,6 +221,7 @@ fn new_thread(
         process: None,
         stack,
         entry: UnsafeCell::new(entry),
+        fx: UnsafeCell::new(cpu::FxArea::new()),
         inner: UnsafeCell::new(Inner {
             state: State::Ready,
             sp: 0,
@@ -478,6 +482,14 @@ fn schedule_locked(g: nexo_sync::SpinLockGuard<'static, Sched>, new_state: State
     let prev_sp = unsafe { &raw mut cur.inner().sp };
     // SAFETY: lock detido; `next` não executa em nenhuma CPU neste instante.
     let next_sp = unsafe { next.inner().sp };
+    // Estado FPU/SSE do usuário: salva o da thread que sai e restaura o da que entra. O
+    // kernel é soft-float (nunca toca XMM), então restaurar antes do salto é seguro — e cada
+    // processo só vê os próprios registradores (nada vaza entre processos).
+    // SAFETY: lock detido; `fx` só é tocado aqui, pela CPU que executa a troca.
+    unsafe {
+        cpu::fxsave(&mut *cur.fx.get());
+        cpu::fxrstor(&*next.fx.get());
+    }
     drop(next);
     drop(cur);
     drop(idle);
