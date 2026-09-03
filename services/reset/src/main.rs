@@ -4,8 +4,10 @@
 //! os ancestrais dela. O reset do SISTEMA já existe por outro caminho (slots A/B + ambiente de
 //! recuperação); este serviço cuida do volume de dados. "Quando possível": o orquestrador
 //! espelha o diretório preservado no disco de backup ANTES (serviço `backup`) — cinto e
-//! suspensório. Handle 0 = orquestrador: pedido "limpa <dir-preservado>" TRAZ o canal do fs e
-//! a resposta "ok <n>" o DEVOLVE (a capacidade é emprestada e volta, como no editor/backup).
+//! suspensório. Handle 0 = orquestrador: pedido "limpa <base> <keep>" TRAZ o canal do fs e a
+//! resposta "ok <n>" o DEVOLVE (capacidade emprestada, como no editor/backup). `<base>` é o
+//! raio da explosão (o reset de fábrica usa "/"; um teste usa a própria subárvore) e `<keep>`
+//! a subárvore preservada.
 #![no_std]
 #![no_main]
 
@@ -165,20 +167,31 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             req: [0; 4096],
             reply: [0; 4096],
         };
+        // "limpa <base> <keep>": limpa DENTRO de <base>, preservando a subárvore <keep>.
+        // O reset de fábrica usa base "/" — o chamador decide o raio da explosão.
+        let args = &buf[6..n];
+        let Some(sp) = args.iter().position(|&c| c == b' ') else {
+            let _ = nexo_sys::channel_send(PIPE, b"erro sintaxe", &[fs.ch]);
+            continue;
+        };
+        let mut base = [0u8; 256];
+        let bl = sp.min(256);
+        base[..bl].copy_from_slice(&args[..bl]);
+        let base = &base[..bl];
         let mut keep = [0u8; 256];
-        let kl = (n - 6).min(256);
-        keep[..kl].copy_from_slice(&buf[6..6 + kl]);
+        let kl = (args.len() - sp - 1).min(256);
+        keep[..kl].copy_from_slice(&args[sp + 1..sp + 1 + kl]);
         let keep = &keep[..kl];
-        if keep.first() != Some(&b'/') {
+        if base.first() != Some(&b'/') || keep.first() != Some(&b'/') {
             let _ = nexo_sys::channel_send(PIPE, b"erro caminho", &[fs.ch]);
             continue;
         }
         let mut removed = 0u32;
-        match limpa(&mut fs, b"/", keep, DEPTH_MAX, &mut removed) {
+        match limpa(&mut fs, base, keep, DEPTH_MAX, &mut removed) {
             Some(()) => {
                 let keep_str = core::str::from_utf8(keep).unwrap_or("?");
                 log!(
-                    "reset: volume limpo — {} no(s) removido(s), '{}' preservado",
+                    "reset: limpo — {} no(s) removido(s), '{}' preservado",
                     removed,
                     keep_str
                 );

@@ -116,11 +116,19 @@ impl Fs {
         Some(size)
     }
 
+    /// Cria `dir` E os ancestrais (mkdir -p): o destino do espelho pode ser aninhado.
     fn mkdir(&mut self, dir: &str) {
         use nexo_proto::fs as pfs;
-        let (path, path_len) = Self::path_req(dir);
-        if let Ok(m) = (pfs::MkdirRequest { path, path_len }).encode_msg(&mut self.req) {
-            let _ = self.rpc(m); // idempotente: Exists é aceitável
+        let bytes = dir.as_bytes();
+        let mut end = 1;
+        while end <= bytes.len() {
+            if end == bytes.len() || bytes[end] == b'/' {
+                let (path, path_len) = Self::path_req(&dir[..end]);
+                if let Ok(m) = (pfs::MkdirRequest { path, path_len }).encode_msg(&mut self.req) {
+                    let _ = self.rpc(m); // idempotente: Exists é aceitável
+                }
+            }
+            end += 1;
         }
     }
 

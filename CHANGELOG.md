@@ -326,7 +326,7 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 
 ### Adicionado (Fase 8, bloco 50 — reset preservando arquivos)
 - `services/reset`: limpa o volume de dados em **pós-ordem** (o `unlink` do nexo.fs remove diretórios vazios), preservando a subárvore do usuário e os ancestrais dela; o canal do fs viaja **emprestado por pedido e volta com a resposta** (o padrão de capacidade do editor/backup). O reset do sistema já existia por outro caminho (slots A/B + recuperação) — este cuida dos dados.
-- "Quando possível" de verdade: no fluxo testado, o diretório preservado é **espelhado no disco de backup antes** do reset (serviço `backup` — integração real entre os dois). Auto-teste `user_reset` (95º): /home intacto byte a byte, estado de sistema e entulho aninhado removidos; idempotente entre boots.
+- "Quando possível" de verdade: no fluxo testado, o diretório preservado é **espelhado no disco de backup antes** do reset (serviço `backup` — integração real entre os dois). Auto-teste `user_reset` (95º), autocontido na subárvore `/rst-teste` (o pedido leva a **base** explícita — `limpa <base> <keep>`; o reset de fábrica usa base `/`): o home do teste intacto byte a byte, estado de sistema e entulho aninhado removidos; idempotente entre boots e sem tocar a persistência alheia do volume (a 1ª versão apagava o `/boot.count` do cenário 'storage' do CI — pego pelos cenários).
 
 ### Adicionado (Fase 8, bloco 49 — ambiente de recuperação independente)
 - `\nexo\recovery\` (kernel + initrd): cópia do sistema que **nenhuma atualização toca** — só o build a grava. O loader cai nela quando os dois slots falham estruturalmente ou quando nenhum é elegível (updates esgotados sem confirmação): **a máquina sempre arranca**.

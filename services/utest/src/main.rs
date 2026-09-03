@@ -1926,23 +1926,27 @@ fn reset_driver() -> ! {
     {
         use nexo_inst::AppFs;
         let mut fs = InstFs { c: &mut c };
-        fs.mkdir("/home").unwrap_or_else(|_| nexo_sys::exit(1660));
-        fs.write_file("/home/doc.txt", b"dados preciosos do usuario")
+        let _ = fs.mkdir("/rst-teste"); // pode ja existir de um boot anterior
+        fs.mkdir("/rst-teste/home")
+            .unwrap_or_else(|_| nexo_sys::exit(1660));
+        fs.write_file("/rst-teste/home/doc.txt", b"dados preciosos do usuario")
             .unwrap_or_else(|_| nexo_sys::exit(1661));
-        fs.mkdir("/cfg").unwrap_or_else(|_| nexo_sys::exit(1662));
-        fs.write_file("/cfg/sys.bin", b"estado de sistema")
+        fs.mkdir("/rst-teste/cfg")
+            .unwrap_or_else(|_| nexo_sys::exit(1662));
+        fs.write_file("/rst-teste/cfg/sys.bin", b"estado de sistema")
             .unwrap_or_else(|_| nexo_sys::exit(1663));
-        fs.mkdir("/lixo").unwrap_or_else(|_| nexo_sys::exit(1664));
-        fs.mkdir("/lixo/sub")
+        fs.mkdir("/rst-teste/lixo")
+            .unwrap_or_else(|_| nexo_sys::exit(1664));
+        fs.mkdir("/rst-teste/lixo/sub")
             .unwrap_or_else(|_| nexo_sys::exit(1665));
-        fs.write_file("/lixo/sub/x.bin", b"entulho aninhado")
+        fs.write_file("/rst-teste/lixo/sub/x.bin", b"entulho aninhado")
             .unwrap_or_else(|_| nexo_sys::exit(1666));
     }
 
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
     // "quando possivel": espelha o diretorio do usuario no disco de backup antes do reset
-    if nexo_sys::channel_send(bkp, b"espelha /home", &[2]) != Status::Ok {
+    if nexo_sys::channel_send(bkp, b"espelha /rst-teste/home", &[2]) != Status::Ok {
         nexo_sys::exit(1667);
     }
     let fs_ch = match nexo_sys::channel_recv(bkp, &mut buf, &mut hs) {
@@ -1950,7 +1954,7 @@ fn reset_driver() -> ! {
         _ => nexo_sys::exit(1668),
     };
     // o reset limpa tudo, menos /home
-    if nexo_sys::channel_send(rst, b"limpa /home", &[fs_ch]) != Status::Ok {
+    if nexo_sys::channel_send(rst, b"limpa /rst-teste /rst-teste/home", &[fs_ch]) != Status::Ok {
         nexo_sys::exit(1669);
     }
     let fs_ch = match nexo_sys::channel_recv(rst, &mut buf, &mut hs) {
@@ -1966,15 +1970,15 @@ fn reset_driver() -> ! {
     let mut fs = InstFs { c: &mut c2 };
     let mut back = [0u8; 64];
     let n = fs
-        .read_file("/home/doc.txt", &mut back)
+        .read_file("/rst-teste/home/doc.txt", &mut back)
         .unwrap_or_else(|_| nexo_sys::exit(1671));
     if &back[..n] != b"dados preciosos do usuario" {
         nexo_sys::exit(1672);
     }
-    if fs.read_file("/cfg/sys.bin", &mut back).is_ok() {
+    if fs.read_file("/rst-teste/cfg/sys.bin", &mut back).is_ok() {
         nexo_sys::exit(1673); // o estado de sistema tinha que ter sumido
     }
-    if fs.read_file("/lixo/sub/x.bin", &mut back).is_ok() {
+    if fs.read_file("/rst-teste/lixo/sub/x.bin", &mut back).is_ok() {
         nexo_sys::exit(1674); // o entulho aninhado tambem
     }
     nexo_sys::log("utest: reset ok — volume limpo, dados do usuario preservados (e espelhados)");
