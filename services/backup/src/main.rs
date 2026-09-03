@@ -2,7 +2,7 @@
 //! dados de usuário"). Espelha os ARQUIVOS de um diretório entre dois volumes `nexo.fs`
 //! independentes — na prática, dois DISCOS físicos distintos (o principal virtio-blk e o de
 //! backup AHCI): perder um disco não perde os dados. Cópia pelo protocolo tipado, arquivo a
-//! arquivo (diretórios aninhados ficam para depois; o serviço só copia, nunca apaga).
+//! arquivo e **recursiva** (árvores aninhadas descem inteiras); o serviço só copia, nunca apaga.
 //! Handle 0 = orquestrador: "espelha <dir>" / "restaura <dir>", cada pedido TRAZ o canal do
 //! fs de origem e a resposta "ok <n>" o DEVOLVE (o fs atende um cliente por vez — a
 //! capacidade é emprestada e volta, como no editor); handle 1 = fs de BACKUP (permanente).
@@ -49,12 +49,13 @@ impl Fs {
         (p, n as u32)
     }
 
-    /// Lista nomes de ARQUIVOS regulares de `dir` em `names`; devolve a contagem.
-    fn list_files(
+    /// Lista as entradas de `dir` (nome, tamanho do nome, tipo — 2 = diretório).
+    fn list_entries(
         &mut self,
         dir: &str,
         names: &mut [[u8; 32]; 16],
         lens: &mut [usize; 16],
+        kinds: &mut [u8; 16],
     ) -> Option<usize> {
         use nexo_proto::fs as pfs;
         let (path, path_len) = Self::path_req(dir);
@@ -72,9 +73,10 @@ impl Fs {
             if pos + 6 + nl > entries.len() {
                 break;
             }
-            if kind != 2 && nl <= 32 {
+            if nl <= 32 {
                 names[count][..nl].copy_from_slice(&entries[pos + 6..pos + 6 + nl]);
                 lens[count] = nl;
+                kinds[count] = kind;
                 count += 1;
             }
             pos += 6 + nl;
@@ -185,14 +187,20 @@ impl Fs {
     }
 }
 
-/// Copia os arquivos regulares de `dir` do volume `from` para o `to`; devolve quantos.
-fn mirror(from: &mut Fs, to: &mut Fs, dir: &str) -> Option<u32> {
+/// Profundidade máxima do espelho (o `nexo.fs` também limita caminhos).
+const DEPTH_MAX: u32 = 6;
+
+/// Espelha `dir` do volume `from` para o `to`, **recursivamente** (árvores aninhadas):
+/// arquivos são copiados, subdiretórios criados e descidos. Devolve quantos ARQUIVOS copiou.
+fn mirror(from: &mut Fs, to: &mut Fs, dir: &str, depth: u32) -> Option<u32> {
+    if depth == 0 {
+        return None; // fundo demais: melhor falhar do que espelhar pela metade em silêncio
+    }
     let mut names = [[0u8; 32]; 16];
     let mut lens = [0usize; 16];
-    let count = from.list_files(dir, &mut names, &mut lens)?;
+    let mut kinds = [0u8; 16];
+    let count = from.list_entries(dir, &mut names, &mut lens, &mut kinds)?;
     to.mkdir(dir);
-    // SAFETY: unico acesso; processo de uma so thread (buffer estatico para arquivos maiores).
-    let buf = unsafe { &mut *core::ptr::addr_of_mut!(COPYBUF) };
     let mut copied = 0u32;
     for i in 0..count {
         let mut pb = [0u8; 300];
@@ -206,6 +214,14 @@ fn mirror(from: &mut Fs, to: &mut Fs, dir: &str) -> Option<u32> {
         pb[pl..pl + lens[i]].copy_from_slice(&names[i][..lens[i]]);
         pl += lens[i];
         let path = core::str::from_utf8(&pb[..pl]).ok()?;
+        if kinds[i] == 2 {
+            copied += mirror(from, to, path, depth - 1)?;
+            continue;
+        }
+        // SAFETY: unico acesso; processo de uma so thread (buffer estatico para arquivos
+        // maiores; a recursao nao o usa em dois niveis ao mesmo tempo — copia um arquivo
+        // por vez, sempre por inteiro, antes de descer ou seguir adiante).
+        let buf = unsafe { &mut *core::ptr::addr_of_mut!(COPYBUF) };
         let n = from.read_all(path, buf)?;
         to.write_all(path, &buf[..n])?;
         copied += 1;
@@ -250,9 +266,9 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         dirb[..dl].copy_from_slice(&dir_bytes[..dl]);
         let dir = core::str::from_utf8(&dirb[..dl]).unwrap_or_else(|_| fail(20, "dir"));
         let done = if verbo {
-            mirror(&mut src, &mut dst, dir)
+            mirror(&mut src, &mut dst, dir, DEPTH_MAX)
         } else {
-            mirror(&mut dst, &mut src, dir)
+            mirror(&mut dst, &mut src, dir, DEPTH_MAX)
         };
         match done {
             Some(copied_n) => {

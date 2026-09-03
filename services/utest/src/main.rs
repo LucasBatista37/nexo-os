@@ -2000,6 +2000,10 @@ fn backup_driver() -> ! {
         .unwrap_or_else(|_| nexo_sys::exit(1581));
     fs.write_file("/bk-teste/b.txt", b"conteudo-b-original")
         .unwrap_or_else(|_| nexo_sys::exit(1582));
+    fs.mkdir("/bk-teste/sub")
+        .unwrap_or_else(|_| nexo_sys::exit(1593));
+    fs.write_file("/bk-teste/sub/c.txt", b"conteudo-c-aninhado")
+        .unwrap_or_else(|_| nexo_sys::exit(1594));
 
     let mut buf = [0u8; 128];
     let mut hs = [0u32; 1];
@@ -2008,7 +2012,7 @@ fn backup_driver() -> ! {
         nexo_sys::exit(1583);
     }
     let src = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
-        Ok((n, 1)) if &buf[..n] == b"ok 2" => hs[0],
+        Ok((n, 1)) if &buf[..n] == b"ok 3" => hs[0],
         _ => nexo_sys::exit(1584),
     };
     let mut c2 = FsClient {
@@ -2023,12 +2027,16 @@ fn backup_driver() -> ! {
         .unwrap_or_else(|_| nexo_sys::exit(1585));
     fs.write_file("/bk-teste/b.txt", b"CORROMPIDO")
         .unwrap_or_else(|_| nexo_sys::exit(1586));
+    fs.unlink("/bk-teste/sub/c.txt")
+        .unwrap_or_else(|_| nexo_sys::exit(1595));
+    fs.unlink("/bk-teste/sub")
+        .unwrap_or_else(|_| nexo_sys::exit(1596));
 
     if nexo_sys::channel_send(pipe, b"restaura /bk-teste", &[src]) != Status::Ok {
         nexo_sys::exit(1587);
     }
     let src = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
-        Ok((n, 1)) if &buf[..n] == b"ok 2" => hs[0],
+        Ok((n, 1)) if &buf[..n] == b"ok 3" => hs[0],
         _ => nexo_sys::exit(1588),
     };
     let mut c3 = FsClient {
@@ -2051,7 +2059,15 @@ fn backup_driver() -> ! {
     if &back[..n] != b"conteudo-b-original" {
         nexo_sys::exit(1592);
     }
-    nexo_sys::log("utest: backup ok — espelhado em outro disco, desastre revertido");
+    let n = fs
+        .read_file("/bk-teste/sub/c.txt", &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1597));
+    if &back[..n] != b"conteudo-c-aninhado" {
+        nexo_sys::exit(1598);
+    }
+    nexo_sys::log(
+        "utest: backup ok — arvore aninhada espelhada em outro disco, desastre revertido",
+    );
     nexo_sys::exit(0)
 }
 
