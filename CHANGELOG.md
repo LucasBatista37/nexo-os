@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 58 — nasce a nexo-libc mínima)
+- `sdk/libc`: o embrião da biblioteca padrão própria (ADR-0014, passo 2) — `string.h` com memcpy/memset/memcmp/strlen/strcmp/strncmp e `stdio.h` com `puts` (por ora via log do kernel). O `hello.c` foi reescrito por cima da libc, exercitando cada função sob asserts que derrubam o processo se algo mentir ("ola da nexo-libc" no boot).
+- **Lição de ABI**: processos de usuário ainda não têm SSE habilitado (o kernel não liga OSFXSR para o usuário) — a -O2 o clang vetorizava o memcpy e o processo morria com **Invalid Opcode**; o target Rust sempre desabilitou SIMD por padrão, e o toolchain C agora torna o contrato explícito (`-mno-sse -mno-sse2 -mno-mmx -mno-avx -msoft-float`). Habilitar FPU/SIMD para usuário (com salvamento de contexto) fica como item futuro do kernel.
+
 ### Adicionado (Fase 8, bloco 57 — agendamento do backup)
 - O backup ganhou **contratos de agenda**: "agenda <s> <dir>" retém a capacidade do fs de origem pela **duração do contrato** (o padrão emprestar-e-devolver ganhou prazo) e o serviço espelha sozinho a cada intervalo (`try_recv` + relógio monotônico, sem bloquear os pedidos avulsos); "cancela" devolve a capacidade com a contagem de execuções.
 - Auto-teste `user_backup_agenda` (96º): dois ou mais espelhos automáticos em ~2,5 s e um desastre local revertido a partir do espelho **agendado**. Do item de backup da Fase 8 resta apenas a UI.
