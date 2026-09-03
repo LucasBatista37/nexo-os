@@ -34,6 +34,8 @@ static void escreve(const char *s, size_t n) {
     }
 }
 
+void nexo_stdio_write(const char *s, size_t n) { escreve(s, n); }
+
 int puts(const char *s) {
     escreve(s, strlen(s));
     escreve("\n", 1);

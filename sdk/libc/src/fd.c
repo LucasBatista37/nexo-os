@@ -1,14 +1,16 @@
 /* fd.c — nexo-libc: descritores POSIX de ARQUIVO sobre o protocolo tipado nexo.fs
  * (encoders gerados em abi/c/proto/fs.h — mesma fonte IDL do Rust, nunca desatualiza).
  * Tabela por processo: fd -> {ino, offset}; o canal do fs vem de nexo_libc_use_fs. */
+#include "../include/dirent.h"
 #include "../include/fcntl.h"
+#include "../include/stdio.h"
 #include "../include/unistd.h"
 #include "../include/string.h"
 #include "../../../abi/c/nexo.h"
 #include "../../../abi/c/proto/fs.h"
 
 #define FD_MAX 16
-#define FD_BASE 3 /* 0..2 reservados (stdin/out/err ainda nao existem) */
+#define FD_BASE 3 /* 0..2 reservados: write em 1/2 sai pelo stdio em linhas; stdin nao existe */
 
 typedef struct {
     int usado;
@@ -122,6 +124,10 @@ ssize_t read(int fd, void *buf, size_t n) {
 }
 
 ssize_t write(int fd, const void *buf, size_t n) {
+    if (fd == 1 || fd == 2) { /* stdout/stderr: mesmo caminho em linhas do puts/printf */
+        nexo_stdio_write((const char *)buf, n);
+        return (ssize_t)n;
+    }
     arq *a = pega(fd);
     if (!a)
         return -1;
@@ -165,4 +171,58 @@ off_t lseek(int fd, off_t off, int whence) {
         return -1;
     a->off = (uint64_t)novo;
     return novo;
+}
+
+/* dirent: um list por opendir; readdir percorre [ino u32][kind u8][len u8][nome] local. */
+#define DIR_MAX 2
+static DIR dirs[DIR_MAX];
+
+DIR *opendir(const char *path) {
+    if (canal_fs == 0xffffffffu)
+        return 0;
+    DIR *d = 0;
+    for (int i = 0; i < DIR_MAX; i++)
+        if (!dirs[i].usado) {
+            d = &dirs[i];
+            break;
+        }
+    if (!d)
+        return 0;
+    nexo_fs_list_req lq = {0};
+    if (caminho(path, lq.path, &lq.path_len))
+        return 0;
+    int n = nexo_fs_list_req_encode(msg, sizeof(msg), &lq);
+    if (n < 0 || (n = rpc(n)) < 0)
+        return 0;
+    static nexo_fs_list_resp lr; /* ~4K: fora da pilha, um opendir por vez ja e o contrato */
+    if (nexo_fs_list_resp_decode(msg, (size_t)n, &lr) != 0)
+        return 0;
+    d->usado = 1;
+    d->pos = 0;
+    d->len = lr.entries_len;
+    memcpy(d->dados, lr.entries, lr.entries_len);
+    return d;
+}
+
+struct dirent *readdir(DIR *d) {
+    if (!d || !d->usado || d->pos + 6 > d->len)
+        return 0;
+    const unsigned char *p = d->dados + d->pos;
+    unsigned int nlen = p[5];
+    if (d->pos + 6 + nlen > d->len || nlen >= sizeof(d->ent.d_name))
+        return 0;
+    d->ent.d_ino = (unsigned int)p[0] | ((unsigned int)p[1] << 8) | ((unsigned int)p[2] << 16)
+                   | ((unsigned int)p[3] << 24);
+    d->ent.d_type = p[4];
+    memcpy(d->ent.d_name, p + 6, nlen);
+    d->ent.d_name[nlen] = 0;
+    d->pos += 6 + nlen;
+    return &d->ent;
+}
+
+int closedir(DIR *d) {
+    if (!d || !d->usado)
+        return -1;
+    d->usado = 0;
+    return 0;
 }

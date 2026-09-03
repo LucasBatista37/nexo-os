@@ -35,9 +35,16 @@ clang $CFLAGS -c "$ROOT/examples/c/wc.c" -o "$ROOT/build/wc-c.o"
        "$ROOT/build/libc-crt0.o" "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" \
        "$ROOT/build/libc-stdlib.o" "$ROOT/build/libc-fd.o"
 echo "[c-demo] $ROOT/build/wc-c.elf ($(wc -c < "$ROOT/build/wc-c.elf" | tr -d ' ') bytes)"
+for UTIL in cat ls; do
+  clang $CFLAGS -c "$ROOT/examples/c/$UTIL.c" -o "$ROOT/build/$UTIL-c.o"
+  "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/$UTIL-c.elf" "$ROOT/build/$UTIL-c.o" \
+         "$ROOT/build/libc-crt0.o" "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" \
+         "$ROOT/build/libc-stdlib.o" "$ROOT/build/libc-fd.o"
+  echo "[c-demo] $ROOT/build/$UTIL-c.elf ($(wc -c < "$ROOT/build/$UTIL-c.elf" | tr -d ' ') bytes)"
+done
 clang $CFLAGS -c "$ROOT/examples/c/fstest.c" -o "$ROOT/build/fs-c.o"
 "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/fs-c.elf" "$ROOT/build/fs-c.o" \
-       "$ROOT/build/libc-string.o" "$ROOT/build/libc-fd.o"
+       "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" "$ROOT/build/libc-fd.o"
 echo "[c-demo] $ROOT/build/fs-c.elf ($(wc -c < "$ROOT/build/fs-c.elf" | tr -d ' ') bytes)"
 echo "[c-demo] $ROOT/build/sse-c.elf ($(wc -c < "$ROOT/build/sse-c.elf" | tr -d ' ') bytes)"
 # hello-cpp: primeiro processo C++ (clang++ freestanding, sem exceptions/RTTI; ctors via
