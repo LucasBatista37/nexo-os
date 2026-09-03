@@ -190,6 +190,25 @@ impl Fs {
 /// Profundidade máxima do espelho (o `nexo.fs` também limita caminhos).
 const DEPTH_MAX: u32 = 6;
 
+/// Escreve `v` em decimal no início de `out`; devolve quantos bytes usou.
+fn fmt_u32(v: u32, out: &mut [u8]) -> usize {
+    let mut digits = [0u8; 10];
+    let mut d = 0;
+    let mut v = v;
+    loop {
+        digits[d] = b'0' + (v % 10) as u8;
+        v /= 10;
+        d += 1;
+        if v == 0 {
+            break;
+        }
+    }
+    for i in 0..d {
+        out[i] = digits[d - 1 - i];
+    }
+    d
+}
+
 /// Espelha `dir` do volume `from` para o `to`, **recursivamente** (árvores aninhadas):
 /// arquivos são copiados, subdiretórios criados e descidos. Devolve quantos ARQUIVOS copiou.
 fn mirror(from: &mut Fs, to: &mut Fs, dir: &str, depth: u32) -> Option<u32> {
@@ -238,12 +257,56 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     };
     let mut buf = [0u8; 384];
     let mut hs = [0u32; 1];
-    log!("backup: pronto (backup=1; origem emprestada por pedido)");
+    // Agendamento: com um contrato ativo, o fs de origem fica RETIDO (emprestado pela duração
+    // do contrato, não por pedido) e o espelho roda sozinho a cada intervalo até "cancela".
+    let mut agenda: Option<(Fs, u64, [u8; 128], usize, u64, u32)> = None; // (fs, ns, dir, dl, prazo, execs)
+    log!("backup: pronto (backup=1; origem emprestada por pedido ou por contrato de agenda)");
     loop {
-        let (n, nh) = match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
-            Ok(v) => v,
-            Err(_) => nexo_sys::exit(0), // cordão de vida
+        let (n, nh) = if let Some(a) = agenda.as_mut() {
+            // contrato ativo: atende pedidos sem bloquear e espelha quando o prazo vence
+            match nexo_sys::channel_try_recv(PIPE, &mut buf, &mut hs) {
+                Ok(v) => v,
+                Err(Status::WouldBlock) => {
+                    let now = nexo_sys::time_now();
+                    if now >= a.4 {
+                        let dir = core::str::from_utf8(&a.2[..a.3]).unwrap_or("/");
+                        if mirror(&mut a.0, &mut dst, dir, DEPTH_MAX).is_some() {
+                            a.5 += 1;
+                            log!("backup: agenda — espelho #{} de '{}'", a.5, dir);
+                        } else {
+                            log!(
+                                "backup: agenda — espelho de '{}' falhou; contrato segue",
+                                dir
+                            );
+                        }
+                        a.4 = now + a.1;
+                    }
+                    nexo_sys::sleep_ns(20_000_000);
+                    continue;
+                }
+                Err(_) => nexo_sys::exit(0),
+            }
+        } else {
+            match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
+                Ok(v) => v,
+                Err(_) => nexo_sys::exit(0), // cordão de vida
+            }
         };
+        // "cancela": encerra o contrato e DEVOLVE a capacidade do fs com a contagem
+        if &buf[..n] == b"cancela" {
+            match agenda.take() {
+                Some((src, _, _, _, _, execs)) => {
+                    let mut r = [0u8; 16];
+                    r[..3].copy_from_slice(b"ok ");
+                    let rl = 3 + fmt_u32(execs, &mut r[3..]);
+                    let _ = nexo_sys::channel_send(PIPE, &r[..rl], &[src.ch]);
+                }
+                None => {
+                    let _ = nexo_sys::channel_send(PIPE, b"?", &[]);
+                }
+            }
+            continue;
+        }
         if nh != 1 {
             let _ = nexo_sys::channel_send(PIPE, b"?", &[]);
             continue;
@@ -253,6 +316,36 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             req: [0; 4096],
             reply: [0; 4096],
         };
+        // "agenda <segundos> <dir>": retém o fs e espelha `dir` a cada intervalo
+        if n > 7 && &buf[..7] == b"agenda " {
+            let rest = &buf[7..n];
+            let Some(sp) = rest.iter().position(|&c| c == b' ') else {
+                let _ = nexo_sys::channel_send(PIPE, b"erro sintaxe", &[src.ch]);
+                continue;
+            };
+            let mut secs = 0u64;
+            let mut ok = !rest[..sp].is_empty();
+            for &c in &rest[..sp] {
+                if c.is_ascii_digit() {
+                    secs = secs * 10 + (c - b'0') as u64;
+                } else {
+                    ok = false;
+                }
+            }
+            if !ok || secs == 0 || rest.len() - sp - 1 == 0 || rest.len() - sp - 1 > 128 {
+                let _ = nexo_sys::channel_send(PIPE, b"erro agenda", &[src.ch]);
+                continue;
+            }
+            let mut dirb = [0u8; 128];
+            let dl = rest.len() - sp - 1;
+            dirb[..dl].copy_from_slice(&rest[sp + 1..]);
+            let ns = secs * 1_000_000_000;
+            let prazo = nexo_sys::time_now() + ns;
+            agenda = Some((src, ns, dirb, dl, prazo, 0));
+            log!("backup: contrato de agenda — a cada {} s", secs);
+            let _ = nexo_sys::channel_send(PIPE, b"agendado", &[]);
+            continue;
+        }
         let (verbo, dir_bytes) = if n > 8 && &buf[..8] == b"espelha " {
             (true, &buf[8..n])
         } else if n > 9 && &buf[..9] == b"restaura " {

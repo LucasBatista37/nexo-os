@@ -113,6 +113,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         67 => slots_confirm_driver(),
         68 => update_apply_driver(),
         69 => reset_driver(),
+        70 => backup_agenda_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1915,6 +1916,90 @@ fn update_apply_driver() -> ! {
 /// (/cfg, /lixo aninhado), espelha /home no disco de backup ("quando possivel" — cinto e
 /// suspensorio), pede ao `reset` para limpar o volume preservando /home, e confere: o que era
 /// do usuario esta intacto, o resto sumiu. Handles: 0 = backup, 1 = reset, 2 = fs principal.
+/// Modo 70: AGENDAMENTO do backup. "agenda <s> <dir>" retem a capacidade do fs pela duracao do
+/// contrato (nao por pedido) e o servico espelha sozinho a cada intervalo; "cancela" devolve o
+/// fs com a contagem de execucoes. Prova: grava v1, agenda a cada 1 s, dorme ~2,5 s, cancela
+/// (>= 2 execucoes), provoca um desastre local e restaura do espelho — o conteudo v1 volta.
+fn backup_agenda_driver() -> ! {
+    let pipe: nexo_sys::Handle = 0;
+    let mut c = FsClient {
+        ch: 1,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    {
+        use nexo_inst::AppFs;
+        let mut fs = InstFs { c: &mut c };
+        fs.mkdir("/agenda-teste")
+            .unwrap_or_else(|_| nexo_sys::exit(1700));
+        fs.write_file("/agenda-teste/dado.txt", b"versao-agendada")
+            .unwrap_or_else(|_| nexo_sys::exit(1701));
+    }
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    if nexo_sys::channel_send(pipe, b"agenda 1 /agenda-teste", &[1]) != Status::Ok {
+        nexo_sys::exit(1702);
+    }
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, 0)) if &buf[..n] == b"agendado" => {}
+        _ => nexo_sys::exit(1703),
+    }
+    // duas execucoes do contrato (1 s cada), com folga
+    nexo_sys::sleep_ns(2_500_000_000);
+    if nexo_sys::channel_send(pipe, b"cancela", &[]) != Status::Ok {
+        nexo_sys::exit(1704);
+    }
+    let fs_ch = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, 1)) if n > 3 && &buf[..3] == b"ok " => {
+            let mut execs = 0u32;
+            for &ch in &buf[3..n] {
+                execs = execs * 10 + (ch - b'0') as u32;
+            }
+            if execs < 2 {
+                nexo_rt::log!("utest: agenda executou so {} vez(es)", execs);
+                nexo_sys::exit(1705);
+            }
+            hs[0]
+        }
+        _ => nexo_sys::exit(1706),
+    };
+    // desastre local + restauracao a partir do espelho AGENDADO
+    let mut c2 = FsClient {
+        ch: fs_ch,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    {
+        use nexo_inst::AppFs;
+        let mut fs = InstFs { c: &mut c2 };
+        fs.write_file("/agenda-teste/dado.txt", b"CORROMPIDO")
+            .unwrap_or_else(|_| nexo_sys::exit(1707));
+    }
+    if nexo_sys::channel_send(pipe, b"restaura /agenda-teste", &[fs_ch]) != Status::Ok {
+        nexo_sys::exit(1708);
+    }
+    let fs_ch = match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, 1)) if n > 3 && &buf[..3] == b"ok " => hs[0],
+        _ => nexo_sys::exit(1709),
+    };
+    let mut c3 = FsClient {
+        ch: fs_ch,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    use nexo_inst::AppFs;
+    let mut fs = InstFs { c: &mut c3 };
+    let mut back = [0u8; 32];
+    let n = fs
+        .read_file("/agenda-teste/dado.txt", &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1710));
+    if &back[..n] != b"versao-agendada" {
+        nexo_sys::exit(1711);
+    }
+    nexo_sys::log("utest: backup agendado ok — espelhos automaticos e desastre revertido");
+    nexo_sys::exit(0)
+}
+
 fn reset_driver() -> ! {
     let bkp: nexo_sys::Handle = 0;
     let rst: nexo_sys::Handle = 1;

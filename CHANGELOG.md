@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 8, bloco 57 — agendamento do backup)
+- O backup ganhou **contratos de agenda**: "agenda <s> <dir>" retém a capacidade do fs de origem pela **duração do contrato** (o padrão emprestar-e-devolver ganhou prazo) e o serviço espelha sozinho a cada intervalo (`try_recv` + relógio monotônico, sem bloquear os pedidos avulsos); "cancela" devolve a capacidade com a contagem de execuções.
+- Auto-teste `user_backup_agenda` (96º): dois ou mais espelhos automáticos em ~2,5 s e um desastre local revertido a partir do espelho **agendado**. Do item de backup da Fase 8 resta apenas a UI.
+
 ### Adicionado (Fase 5, bloco 56 — notificações por Contexto)
 - Os avisos ganharam a dimensão dos **Contextos**: o compositor atribui cada notificação ao Contexto da janela de topo da sessão publicante (a sessão não escolhe — isolamento preservado); um aviso de Contexto **inativo não interrompe** — fica à espera e aparece ao trocar para ele (com o evento de acessibilidade), o banner é recolhido ao sair do Contexto dele, e a Central de Ações limpa também as esperas. A disciplina vale no `switch_context` e no `activate` do shell.
 - Auto-teste `wm_notify` estendido: aviso do Contexto 1 não toca o banner do Contexto 0 ativo; a troca o revela; a volta o recolhe — tudo conferido por pixel.
