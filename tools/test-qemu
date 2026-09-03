@@ -109,6 +109,7 @@ SCENARIOS = {
             r"utest: shmem consumidor ok — leu o marcador e respondeu",
             r"utest: shmem produtor ok — consumidor escreveu na memoria compartilhada",
             r"\[TEST\] user_shmem \.\.\. ok",
+            r"0 5 26 /c-arquivo\.txt",
             r"\[TEST\] gfx \.\.\. ok",
             r"\[TEST\] symbols \.\.\. ok",
             r"\[RESULT\] PASS \d+/\d+",

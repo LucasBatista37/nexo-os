@@ -29,6 +29,12 @@ CFLAGS_SSE="--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector
         -mno-red-zone -fomit-frame-pointer -O2"
 clang $CFLAGS_SSE -c "$ROOT/examples/c/ssetest.c" -o "$ROOT/build/sse-c.o"
 "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/sse-c.elf" "$ROOT/build/sse-c.o"
+clang $CFLAGS -c "$ROOT/sdk/libc/src/crt0.c" -o "$ROOT/build/libc-crt0.o"
+clang $CFLAGS -c "$ROOT/examples/c/wc.c" -o "$ROOT/build/wc-c.o"
+"$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/wc-c.elf" "$ROOT/build/wc-c.o" \
+       "$ROOT/build/libc-crt0.o" "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" \
+       "$ROOT/build/libc-stdlib.o" "$ROOT/build/libc-fd.o"
+echo "[c-demo] $ROOT/build/wc-c.elf ($(wc -c < "$ROOT/build/wc-c.elf" | tr -d ' ') bytes)"
 clang $CFLAGS -c "$ROOT/examples/c/fstest.c" -o "$ROOT/build/fs-c.o"
 "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/fs-c.elf" "$ROOT/build/fs-c.o" \
        "$ROOT/build/libc-string.o" "$ROOT/build/libc-fd.o"
