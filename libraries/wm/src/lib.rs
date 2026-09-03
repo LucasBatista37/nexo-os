@@ -33,32 +33,56 @@ pub struct Window<'a> {
 }
 
 impl Window<'_> {
-    /// Lê a cor do pixel do conteúdo em `(cx, cy)` relativo ao canto da janela (com a opacidade
-    /// da janela no canal alfa), escalando do retângulo de exibição para o buffer se preciso.
-    fn sample(&self, cx: i32, cy: i32) -> Option<Color> {
-        if cx < 0 || cy < 0 || cx >= self.rect.w || cy >= self.rect.h {
-            return None;
-        }
-        let bx = if self.rect.w == self.src_w {
-            cx
-        } else {
-            cx * self.src_w / self.rect.w
-        };
-        let by = if self.rect.h == self.src_h {
-            cy
-        } else {
-            cy * self.src_h / self.rect.h
-        };
+    /// Lê a cor CRUA do texel `(bx, by)` do buffer (coordenadas do buffer, já validadas
+    /// contra `src_w`/`src_h`; o clamp é do chamador). `None` só em buffer curto/formato ruim.
+    fn texel(&self, bx: i32, by: i32) -> Option<(u16, u16, u16)> {
         let o = ((by * self.stride as i32 + bx) * 4) as usize;
         if o + 4 > self.pixels.len() {
             return None;
         }
         let p = &self.pixels[o..o + 4];
         Some(match self.format {
-            PixelFormat::Rgbx8888 => Color::rgba(p[0], p[1], p[2], self.alpha),
-            PixelFormat::Bgrx8888 => Color::rgba(p[2], p[1], p[0], self.alpha),
-            PixelFormat::Unknown => Color::TRANSPARENT,
+            PixelFormat::Rgbx8888 => (p[0] as u16, p[1] as u16, p[2] as u16),
+            PixelFormat::Bgrx8888 => (p[2] as u16, p[1] as u16, p[0] as u16),
+            PixelFormat::Unknown => return None,
         })
+    }
+
+    /// Lê a cor do pixel do conteúdo em `(cx, cy)` relativo ao canto da janela (com a opacidade
+    /// da janela no canal alfa). Sem escala é leitura direta; com escala, interpolação
+    /// **bilinear** (amostragem no centro do pixel, vizinhos presos à borda do buffer — cores
+    /// sólidas continuam sólidas e nada do fundo vaza para dentro da janela).
+    fn sample(&self, cx: i32, cy: i32) -> Option<Color> {
+        if cx < 0 || cy < 0 || cx >= self.rect.w || cy >= self.rect.h {
+            return None;
+        }
+        if self.rect.w == self.src_w && self.rect.h == self.src_h {
+            let (r, g, b) = self.texel(cx, cy)?;
+            return Some(Color::rgba(r as u8, g as u8, b as u8, self.alpha));
+        }
+        // ponto de amostragem no espaço do buffer, em 8.8 fixo: centro do pixel de destino
+        // mapeado e recuado meio texel ((cx+0,5)·src/dst − 0,5)
+        let sx = ((2 * cx + 1) * self.src_w * 128 / self.rect.w - 128).max(0);
+        let sy = ((2 * cy + 1) * self.src_h * 128 / self.rect.h - 128).max(0);
+        let (x0, y0) = (sx >> 8, sy >> 8);
+        let (fx, fy) = ((sx & 0xff) as u32, (sy & 0xff) as u32);
+        let x1 = (x0 + 1).min(self.src_w - 1);
+        let y1 = (y0 + 1).min(self.src_h - 1);
+        let c00 = self.texel(x0, y0)?;
+        let c10 = self.texel(x1, y0)?;
+        let c01 = self.texel(x0, y1)?;
+        let c11 = self.texel(x1, y1)?;
+        let lerp2 = |a: u16, b: u16, c: u16, d: u16| -> u8 {
+            let top = a as u32 * (256 - fx) + b as u32 * fx;
+            let bot = c as u32 * (256 - fx) + d as u32 * fx;
+            (((top * (256 - fy) + bot * fy) + 32768) >> 16) as u8
+        };
+        Some(Color::rgba(
+            lerp2(c00.0, c10.0, c01.0, c11.0),
+            lerp2(c00.1, c10.1, c01.1, c11.1),
+            lerp2(c00.2, c10.2, c01.2, c11.2),
+            self.alpha,
+        ))
     }
 }
 
@@ -332,11 +356,13 @@ mod tests {
             alpha: 255,
         }];
         composite(&mut out, &windows, Rect::new(0, 0, 8, 8), Color::BLACK);
-        assert_eq!(out.get(1, 1), Color::rgb(255, 0, 0)); // quadrante NO
+        assert_eq!(out.get(1, 1), Color::rgb(255, 0, 0)); // quadrante NO (longe da transição)
         assert_eq!(out.get(6, 1), Color::rgb(0, 255, 0)); // NE
         assert_eq!(out.get(1, 6), Color::rgb(0, 0, 255)); // SO
         assert_eq!(out.get(6, 6), Color::rgb(255, 255, 0)); // SE
-        assert_eq!(out.get(3, 3), Color::rgb(255, 0, 0)); // ainda NO (3*2/8 = 0)
+        // no encontro dos quadrantes o filtro BILINEAR mistura os quatro (frações 96/256):
+        // r = 255·(160·160+96·96)/65536, g = 255·(96·160+96·96)/65536, b = 255·(160·96)/65536
+        assert_eq!(out.get(3, 3), Color::rgb(135, 96, 60));
     }
 
     #[test]

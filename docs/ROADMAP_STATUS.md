@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-02 (commit `c5b762e`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-02 (commit `d879127`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 177 · 🟡 72 · ⬜ 286 · ⛔ 0 → **40% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 178 · 🟡 71 · ⬜ 286 · ⛔ 0 → **40% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -13,7 +13,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 | Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 11 | 7 | 0 | 81% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
 | Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 18 | 3 | 0 | 93% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 14 | 3 | 47% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
-| Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 11 | 12 | 2 | 68% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
+| Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 12 | 11 | 2 | 70% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
 | Fase 6 — Plataforma de aplicativos e desktop essencial (anos 4–6) | ⬜ não iniciado | 7 | 14 | 4 | 56% | 12–18 meses | ABI v1, SDK Rust/C, pacotes assinados, permissões/portais, apps essenciais, terminal, gerenciador de arquivos, editor, configurações, motor web portado |
 | Fase 7 — Áudio, mídia, USB e hardware real (anos 5–7) | ⬜ não iniciado | 1 | 1 | 18 | 8% | 12–24 meses | USB/HID/armazenamento, NVMe/AHCI, áudio, Ethernet real, Wi-Fi, GPU/display, energia/suspensão, laboratório de hardware |
 | Fase 8 — Segurança, instalação, atualização e recuperação (anos 5–8) | ⬜ não iniciado | 7 | 3 | 12 | 39% | 9–15 meses | criptografia de disco, TPM, trust root, A/B, rollback, recovery, instalador, Secure Boot, backup, crash dumps, fuzzing contínuo, revisão externa |
@@ -167,7 +167,7 @@ Gate: ⬜ não iniciado.
 | ✅ | criar captura de rede autorizada para diagnóstico | `tools/netcap`/`make netcap` (pcap via `run-qemu --net-dump` + resumo por protocolo/fluxo; sempre local e explícita) |
 | ⬜ | publicar release `0.4-network` |  |
 
-### Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) — 68% (11 ✅, 12 🟡, 2 ⬜)
+### Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) — 70% (12 ✅, 11 🟡, 2 ⬜)
 
 Gate: ⬜ não iniciado. 
 
@@ -195,7 +195,7 @@ Gate: ⬜ não iniciado.
 | ✅ | implementar drag-and-drop por grants | a sessão dona da **entrada** inicia o arrasto (`drag_start`, erro 6 para as demais); ao soltar (BTN_LEFT release), **só a sessão dona da janela sob o ponteiro** recebe os dados (evento `drop`) — ninguém mais pode lê-los; soltar no vazio ou sob captura descarta o payload — auto-teste `user_wm_dnd`. Payloads grandes (via handle de `MemoryObject` no evento) e o feedback visual do arrasto ficam para o shell |
 | 🟡 | implementar leitor de tela em arquitetura, ainda que simples | a arquitetura existe: o compositor emite **eventos semânticos** (`a11y_subscribe` + evento `a11y`: foco mudou com o **título** da janela — `set_title` —, aviso publicado, Contexto trocado) num canal que um leitor de tela assina; auto-teste `user_wm_a11y` faz o papel do leitor e confere o fluxo. Pendem a síntese de voz/braille de verdade, mais eventos (texto/valor dos widgets via `nexo-ui`) e um modelo de permissão para tecnologia assistiva |
 | 🟡 | implementar navegação completa por teclado | entre janelas: atalho global Meta+Tab cicla o foco (`user_wm_shortcut`); dentro do app: `nexo-ui::Nav` cicla o foco entre widgets (`focus_next`/`focus_prev` para Tab/Shift+Tab, com wrap) e `draw_focus_ring` torna o foco visível (cor de acento) — testes de host. "Completa" pende do shell gráfico (menus, diálogos e todos os fluxos operáveis sem mouse) |
-| 🟡 | implementar escala fracionária e redução de movimento | escala fracionária **por janela** (`set_scale{id,num,den}`: o retângulo de exibição vira buffer×num/den e a composição escala — 200%/150% conferidos por pixel) e a preferência **redução de movimento** (`set_reduce_motion` mediado pela entrada; `prefs` de leitura livre para apps desligarem animações) — auto-teste `user_wm_scale`. A **escala global padrão do sistema** existe (`set_global_scale`, privilégio do shell): todas as janelas passam a ser exibidas em buf×num/den — as existentes reescaladas a partir do buffer, as novas já nascem escaladas — e o par é exposto em `prefs` como o "DPI" que apps leem para dimensionar texto/UI (uma escala por janela sobrepõe). Pendem filtros melhores que vizinho-mais-próximo |
+| ✅ | implementar escala fracionária e redução de movimento | completo: escala **por janela** (`set_scale{id,num,den}` — 200%/150% conferidos por pixel), escala **global do sistema** (`set_global_scale`, privilégio do shell; janelas existentes reescaladas e novas nascendo escaladas; o par exposto em `prefs` como o "DPI" que apps leem), **redução de movimento** (`set_reduce_motion` mediado pela entrada; leitura livre) e filtro **bilinear** na composição escalada (amostragem no centro do pixel, vizinhos presos à borda — cores sólidas continuam sólidas e nada do fundo vaza; a mistura na transição é conferida dígito a dígito no teste de host). Auto-teste `user_wm_scale` cobre as três camadas |
 | ⬜ | testar usabilidade com usuários externos |  |
 | ⬜ | publicar release `0.5-desktop` |  |
 
