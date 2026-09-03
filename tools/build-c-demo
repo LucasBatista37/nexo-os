@@ -28,3 +28,16 @@ CFLAGS_SSE="--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector
 clang $CFLAGS_SSE -c "$ROOT/examples/c/ssetest.c" -o "$ROOT/build/sse-c.o"
 "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/sse-c.elf" "$ROOT/build/sse-c.o"
 echo "[c-demo] $ROOT/build/sse-c.elf ($(wc -c < "$ROOT/build/sse-c.elf" | tr -d ' ') bytes)"
+# hello-cpp: primeiro processo C++ (clang++ freestanding, sem exceptions/RTTI; ctors via
+# .init_array — o lld define os limites; new/delete sobre o heap da nexo-libc)
+if command -v clang++ >/dev/null 2>&1; then
+  CXXFLAGS="$CFLAGS -fno-exceptions -fno-rtti"
+  clang++ $CXXFLAGS -c "$ROOT/examples/c/hello-cpp.cpp" -o "$ROOT/build/hello-cpp.o"
+  clang++ $CXXFLAGS -c "$ROOT/sdk/libc/src/cxx.cpp" -o "$ROOT/build/libc-cxx.o"
+  "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/hello-cpp.elf" \
+         "$ROOT/build/hello-cpp.o" "$ROOT/build/libc-cxx.o" \
+         "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" "$ROOT/build/libc-stdlib.o"
+  echo "[c-demo] $ROOT/build/hello-cpp.elf ($(wc -c < "$ROOT/build/hello-cpp.elf" | tr -d ' ') bytes)"
+else
+  echo "[c-demo] hello-cpp pulado: sem clang++"
+fi

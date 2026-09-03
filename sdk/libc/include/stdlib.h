@@ -6,9 +6,17 @@
 
 #include <stddef.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 void *malloc(size_t n);
 void free(void *p);
 void *calloc(size_t nmemb, size_t size);
 void *realloc(void *p, size_t n);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

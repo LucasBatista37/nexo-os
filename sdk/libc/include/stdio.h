@@ -3,6 +3,14 @@
 #ifndef NEXO_LIBC_STDIO_H
 #define NEXO_LIBC_STDIO_H
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 int puts(const char *s);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

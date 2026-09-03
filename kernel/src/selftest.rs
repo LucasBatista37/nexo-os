@@ -67,6 +67,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("shm_quota", test_shm_quota),
     ("user_c_hello", test_user_c_hello),
     ("user_sse", test_user_sse),
+    ("user_cpp", test_user_cpp),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3210,6 +3211,28 @@ fn test_user_sse() -> TestResult {
     drop((a, b));
     check!(ca == 0, "sse-c (7) saiu com {ca}");
     check!(cb == 0, "sse-c (13) saiu com {cb}");
+    let frames = settled_free_frames(frames0, 4);
+    check!(
+        frames + 4 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Primeiro processo em **C++** (freestanding, sem exceptions/RTTI): construtor global via
+/// `.init_array`, classe com método virtual (vtable de verdade) e new/delete sobre o heap da
+/// nexo-libc — asserts derrubam com códigos distintos. Guardado pela presença no initrd.
+fn test_user_cpp() -> TestResult {
+    if crate::initrd::find("hello-cpp").is_none() {
+        return Err(String::from(
+            "hello-cpp ausente do initrd (host sem clang++/rust-lld)",
+        ));
+    }
+    let frames0 = phys::stats().free;
+    let p = crate::process::spawn_named("hello-cpp", 0, Vec::new()).map_err(String::from)?;
+    let code = crate::process::wait_and_reap(&p);
+    drop(p);
+    check!(code == 0, "hello-cpp saiu com {code}");
     let frames = settled_free_frames(frames0, 4);
     check!(
         frames + 4 >= frames0,
