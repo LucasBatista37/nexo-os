@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 7, bloco 53 — poll de UDP e select clássico)
+- `nexo.sock` ganhou **`udp_avail`** (datagramas na fila da porta, sem consumir); o `poll` do `sdk/nexo-net` passa a cobrir UDP, e nasce o **`select`** clássico (`FdSet` compacto com `FD_SET`/`FD_ISSET`/`FD_CLR`, mapeado ao poll — só leitura nesta rodada, documentado).
+- O cenário `net` prova a sequência POSIX canônica contra o servidor UDP real do host: `sendto` → `poll` vê o datagrama **sem consumir** → `select` confirma → `recvfrom` lê. Do item de sockets POSIX resta apenas a integração com uma libc.
+
 ### Adicionado (Fase 7, bloco 52 — lado servidor da personalidade POSIX de sockets)
 - `nexo.sock` ganhou **`tcp_avail`**: sonda a conexão sem consumir (bytes prontos + par fechou) — a base do `poll`/`select` da camada de compatibilidade (ADR-0014).
 - `sdk/nexo-net`: **`bind`/`listen`/`accept`** (o accept espera a conexão de entrada e devolve um novo descritor conectado + endereço do par) e **`poll`** (`PollFd`, `POLLIN`/`POLLOUT`/`POLLHUP`; TCP sonda via `tcp_avail`, UDP fica para depois — documentado).

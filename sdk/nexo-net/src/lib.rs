@@ -4,17 +4,18 @@
 //! Não é uma libc: expõe uma API no estilo BSD (`socket`/`connect`/`send`/`recv`/`close`,
 //! `sockaddr_in`, `getaddrinfo`) com descritores inteiros numa tabela do processo, cada um
 //! ligado a uma conexão/porta do `netd`, incluindo o lado servidor (`bind`/`listen`/`accept`)
-//! e `poll` (TCP: prontidão de leitura via `tcp_avail`, sem consumir; UDP fica para depois).
+//! e `poll`/`select` (prontidão de leitura via `tcp_avail`/`udp_avail`, sem consumir).
 //! `recv` de TCP faz *spin* curto até haver dados ou o par fechar.
 #![no_std]
 #![forbid(unsafe_code)]
 
 use nexo_proto::sock::{
     self, ResolveRequest, TcpAvailRequest, TcpCloseRequest, TcpConnectRequest, TcpListenRequest,
-    TcpRecvRequest, TcpSendRequest, UdpRecvRequest, UdpSendRequest, decode_resolve_response,
-    decode_tcp_avail_response, decode_tcp_close_response, decode_tcp_connect_response,
-    decode_tcp_listen_response, decode_tcp_recv_response, decode_tcp_send_response,
-    decode_udp_recv_response, decode_udp_send_response,
+    TcpRecvRequest, TcpSendRequest, UdpAvailRequest, UdpRecvRequest, UdpSendRequest,
+    decode_resolve_response, decode_tcp_avail_response, decode_tcp_close_response,
+    decode_tcp_connect_response, decode_tcp_listen_response, decode_tcp_recv_response,
+    decode_tcp_send_response, decode_udp_avail_response, decode_udp_recv_response,
+    decode_udp_send_response,
 };
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
@@ -62,6 +63,33 @@ pub struct PollFd {
     pub events: u16,
     /// Eventos prontos (preenchido pelo `poll`).
     pub revents: u16,
+}
+
+/// Conjunto de descritores para [`Sockets::select`] (equivalente compacto de `fd_set`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FdSet(u32);
+
+impl FdSet {
+    /// Conjunto vazio (`FD_ZERO`).
+    pub const fn new() -> Self {
+        FdSet(0)
+    }
+    /// Adiciona um descritor (`FD_SET`).
+    pub fn set(&mut self, fd: i32) {
+        if (0..32).contains(&fd) {
+            self.0 |= 1 << fd;
+        }
+    }
+    /// `true` se o descritor está no conjunto (`FD_ISSET`).
+    pub fn isset(&self, fd: i32) -> bool {
+        (0..32).contains(&fd) && self.0 & (1 << fd) != 0
+    }
+    /// Remove um descritor (`FD_CLR`).
+    pub fn clear(&mut self, fd: i32) {
+        if (0..32).contains(&fd) {
+            self.0 &= !(1 << fd);
+        }
+    }
 }
 
 /// Endereço IPv4 + porta (equivalente a `struct sockaddr_in`).
@@ -292,8 +320,8 @@ impl Sockets {
 
     /// `poll(fds, timeout_ms)` — prontidão de leitura/escrita. TCP conectado: `POLLIN` quando
     /// há bytes prontos (sondados com `tcp_avail`, sem consumir) ou o par fechou (`|POLLHUP`);
-    /// `POLLOUT` é imediato (o envio é síncrono no netd). Sockets não conectados e UDP ainda
-    /// não sinalizam leitura. `timeout_ms < 0` espera indefinidamente; `0` só sonda uma vez.
+    /// `POLLOUT` é imediato (o envio é síncrono no netd); UDP sinaliza `POLLIN` quando há
+    /// datagramas na fila (`udp_avail`). Sockets não conectados não sinalizam leitura. `timeout_ms < 0` espera indefinidamente; `0` só sonda uma vez.
     /// Devolve quantos descritores têm `revents != 0`, ou `-errno`.
     pub fn poll(&mut self, fds: &mut [PollFd], timeout_ms: i32) -> i32 {
         let mut waited = 0i32;
@@ -301,24 +329,38 @@ impl Sockets {
             let mut ready = 0;
             for p in fds.iter_mut() {
                 p.revents = 0;
-                let conn = match self.slot(p.fd) {
-                    Some(Kind::Tcp(c)) if c != u32::MAX => c,
-                    _ => continue,
-                };
-                if p.events & POLLIN != 0 {
-                    let m = TcpAvailRequest { conn }
-                        .encode_msg(&mut self.buf)
-                        .unwrap_or(0);
-                    if let Ok(n) = self.rpc(m)
-                        && let Ok(r) = decode_tcp_avail_response(&self.buf[..n])
-                    {
-                        if r.avail > 0 {
-                            p.revents |= POLLIN;
-                        }
-                        if r.closed != 0 {
-                            p.revents |= POLLIN | POLLHUP;
+                match self.slot(p.fd) {
+                    Some(Kind::Tcp(conn)) if conn != u32::MAX => {
+                        if p.events & POLLIN != 0 {
+                            let m = TcpAvailRequest { conn }
+                                .encode_msg(&mut self.buf)
+                                .unwrap_or(0);
+                            if let Ok(n) = self.rpc(m)
+                                && let Ok(r) = decode_tcp_avail_response(&self.buf[..n])
+                            {
+                                if r.avail > 0 {
+                                    p.revents |= POLLIN;
+                                }
+                                if r.closed != 0 {
+                                    p.revents |= POLLIN | POLLHUP;
+                                }
+                            }
                         }
                     }
+                    Some(Kind::Udp(port)) => {
+                        if p.events & POLLIN != 0 {
+                            let m = UdpAvailRequest { port }
+                                .encode_msg(&mut self.buf)
+                                .unwrap_or(0);
+                            if let Ok(n) = self.rpc(m)
+                                && let Ok(r) = decode_udp_avail_response(&self.buf[..n])
+                                && r.queued > 0
+                            {
+                                p.revents |= POLLIN;
+                            }
+                        }
+                    }
+                    _ => continue,
                 }
                 if p.events & POLLOUT != 0 {
                     p.revents |= POLLOUT;
@@ -333,6 +375,39 @@ impl Sockets {
             nexo_sys::sleep_ns(5_000_000);
             waited = waited.saturating_add(5);
         }
+    }
+
+    /// `select(nfds, readfds, timeout_ms)` — a face clássica do `poll`, só leitura nesta
+    /// rodada (escrita em TCP é sempre pronta; conjuntos de exceção ficam para depois). Ao
+    /// voltar, `readfds` contém apenas os descritores prontos; devolve a contagem, ou `-errno`.
+    pub fn select(&mut self, nfds: i32, readfds: &mut FdSet, timeout_ms: i32) -> i32 {
+        let mut pfds = [PollFd {
+            fd: -1,
+            events: 0,
+            revents: 0,
+        }; Self::MAX_FDS];
+        let mut n = 0;
+        for fd in 0..nfds.min(Self::MAX_FDS as i32) {
+            if readfds.isset(fd) {
+                pfds[n] = PollFd {
+                    fd,
+                    events: POLLIN,
+                    revents: 0,
+                };
+                n += 1;
+            }
+        }
+        let r = self.poll(&mut pfds[..n], timeout_ms);
+        if r < 0 {
+            return r;
+        }
+        *readfds = FdSet::new();
+        for p in &pfds[..n] {
+            if p.revents & (POLLIN | POLLHUP) != 0 {
+                readfds.set(p.fd);
+            }
+        }
+        r
     }
 
     /// `sendto(fd, buf, dst)` (UDP) → bytes enviados ou `-errno`.

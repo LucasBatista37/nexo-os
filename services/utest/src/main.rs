@@ -4276,6 +4276,54 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         s.close(conn_fd);
         s.close(srv);
         nexo_rt::log!("utest: posix servidor ok — bind/listen/accept e poll (dados e HUP) via BSD");
+        // 6d. poll de UDP + select: manda um datagrama ao servidor do host, espera a resposta
+        //     chegar SEM consumir (poll via udp_avail), confere o mesmo pelo select clássico e
+        //     só então lê com recvfrom.
+        use nexo_net::{FdSet, SOCK_DGRAM};
+        let ufd = s.socket(AF_INET, SOCK_DGRAM);
+        if ufd < 0 {
+            nexo_sys::exit(430);
+        }
+        let udst = SockAddrIn {
+            addr: [10, 0, 2, 2],
+            port: udp_port,
+        };
+        if s.sendto(ufd, b"ola udp posix", &udst) < 0 {
+            nexo_sys::exit(431);
+        }
+        let mut pfds = [PollFd {
+            fd: ufd,
+            events: POLLIN,
+            revents: 0,
+        }];
+        let ready = s.poll(&mut pfds, 20_000);
+        if ready != 1 || pfds[0].revents & POLLIN == 0 {
+            nexo_rt::log!(
+                "utest: posix poll udp devolveu {} (revents {:#x})",
+                ready,
+                pfds[0].revents
+            );
+            nexo_sys::exit(432);
+        }
+        let mut rset = FdSet::new();
+        rset.set(ufd);
+        let sr = s.select(ufd + 1, &mut rset, 1_000);
+        if sr != 1 || !rset.isset(ufd) {
+            nexo_rt::log!(
+                "utest: posix select devolveu {} (isset {})",
+                sr,
+                rset.isset(ufd)
+            );
+            nexo_sys::exit(433);
+        }
+        let (rn, from) = s
+            .recvfrom(ufd, &mut buf)
+            .unwrap_or_else(|e| nexo_sys::exit(434 + e as i64));
+        if &buf[..rn] != b"nexo-udp-ok" || from.addr != [10, 0, 2, 2] {
+            nexo_sys::exit(440);
+        }
+        s.close(ufd);
+        nexo_rt::log!("utest: posix udp ok — poll e select viram o datagrama antes do recvfrom");
     }
     // 7. multi-cliente + firewall: abre uma segunda sessao RESTRITA (perfil que so permite TCP
     //    para 10.0.2.2:<tcp_port>, sem DNS nem escuta) e comprova que o netd nega o resto.

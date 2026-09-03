@@ -823,6 +823,17 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
             resp.data_len = c.take_rx(&mut resp.data) as u32;
             resp.encode_msg(out).unwrap_or(0)
         }
+        Request::UdpAvail(rq) => {
+            let Some(i) = udp_bind(rq.port) else {
+                return sock::encode_error(sock::UdpAvailRequest::METHOD_ID, E_NO_RES, out)
+                    .unwrap_or(0);
+            };
+            sock::UdpAvailResponse {
+                queued: st.udp[i].qlen as u32,
+            }
+            .encode_msg(out)
+            .unwrap_or(0)
+        }
         Request::TcpAvail(rq) => {
             let i = rq.conn as usize;
             if i >= TCP_CONNS || st.tcp[i].is_none() {

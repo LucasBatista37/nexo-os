@@ -96,6 +96,17 @@ method 9 tcp_listen {
     }
 }
 
+# Sonda a porta UDP local SEM consumir: quantos datagramas esperam na fila.
+# Com tcp_avail, completa a base do poll/select da camada POSIX (ADR-0014).
+method 12 udp_avail {
+    request {
+        port: u16,
+    }
+    response {
+        queued: u32,
+    }
+}
+
 # Sonda a conexao SEM consumir: bytes prontos para leitura e se o outro lado fechou.
 # E a base do poll/select da camada POSIX (ADR-0014).
 method 10 tcp_avail {
