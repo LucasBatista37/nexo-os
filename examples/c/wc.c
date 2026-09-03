@@ -8,15 +8,14 @@
 #include "../../sdk/libc/include/unistd.h"
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        puts("uso: wc <arquivo>");
-        return 2;
-    }
-    nexo_libc_use_fs(0);
-    int fd = open(argv[1], O_RDONLY);
-    if (fd < 0) {
-        puts("wc: nao abriu o arquivo");
-        return 1;
+    int fd = 0; /* sem argumento: conta o stdin (canal no handle 2), como o wc classico */
+    if (argc >= 2) {
+        nexo_libc_use_fs(0);
+        fd = open(argv[1], O_RDONLY);
+        if (fd < 0) {
+            puts("wc: nao abriu o arquivo");
+            return 1;
+        }
     }
     unsigned long linhas = 0, palavras = 0, bytes = 0;
     int dentro = 0;
@@ -36,7 +35,11 @@ int main(int argc, char **argv) {
             }
         }
     }
-    close(fd);
-    printf("%lu %lu %lu %s\n", linhas, palavras, bytes, argv[1]);
+    if (fd != 0) {
+        close(fd);
+        printf("%lu %lu %lu %s\n", linhas, palavras, bytes, argv[1]);
+    } else {
+        printf("%lu %lu %lu\n", linhas, palavras, bytes);
+    }
     return 0;
 }

@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6/7, bloco 69 — stdin pela convenção do Nexo)
+- A convenção de processos ganhou o **handle 2 = stdin** (opcional): um canal onde cada mensagem é um pedaço de entrada; fila vazia com a outra ponta viva **bloqueia** (o recv do kernel), `PeerClosed` — ou handle inexistente — é o **EOF**. `read(0)` na libc consome com buffer local (leituras menores que a mensagem funcionam).
+- `wc` e `cat` sem argumento leem o stdin, como os clássicos. Auto-testes `user_wc_stdin`/`user_cat_stdin` (105º/106º): os bytes vão em DOIS pedaços (prova o reabastecimento do buffer) e a ponta de escrita é fechada ANTES do spawn — a fila sobrevive (garantia provada pelo `ipc_handoff`); marcadores no cenário boot: `wc-c] 2 4 20` e `cat-c] stdin do cat via canal`.
+
 ### Adicionado (Fase 6/7, bloco 68 — unlink e os utilitários cp/rm)
 - **`unlink(path)`** na nexo-libc (unistd.h) sobre o método `unlink` do `nexo.fs` — no NexoFS o mesmo unlink remove diretório VAZIO (não há rmdir).
 - Utilitários portados: **`cp`** (O_CREAT|O_TRUNC no destino — repetir sobrescreve, cp clássico; sem rename no protocolo, um mv atômico ainda não existe) e **`rm`**. Auto-testes `user_cp`/`user_rm` (103º/104º): o cp é verificado por **conteúdo** — o `wc` roda na cópia e "0 5 26 /cp-teste.txt" é marcador do cenário boot (mesmos números do original = bytes idênticos); o rm remove a cópia no mesmo boot, deixando o disco idempotente entre boots (a dupla cp+rm se limpa sozinha).

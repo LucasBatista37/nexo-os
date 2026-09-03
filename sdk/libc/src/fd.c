@@ -10,7 +10,7 @@
 #include "../../../abi/c/proto/fs.h"
 
 #define FD_MAX 16
-#define FD_BASE 3 /* 0..2 reservados: write em 1/2 sai pelo stdio em linhas; stdin nao existe */
+#define FD_BASE 3 /* 0..2: read(0) = canal de stdin no handle 2; write(1/2) = stdio em linhas */
 
 typedef struct {
     int usado;
@@ -100,7 +100,38 @@ static arq *pega(int fd) {
     return &tabela[fd];
 }
 
+/* stdin (fd 0): canal no handle 2 pela convencao do Nexo — cada mensagem e um pedaco de
+ * entrada; fila vazia com a outra ponta viva BLOQUEIA (recv do kernel), PeerClosed (ou
+ * handle 2 inexistente) = EOF. Buffer local serve leituras menores que a mensagem. */
+#define STDIN_HANDLE 2
+static uint8_t ent[4096];
+static size_t ent_n, ent_pos;
+static int ent_eof;
+
+static ssize_t le_stdin(void *buf, size_t n) {
+    while (ent_pos == ent_n && !ent_eof) {
+        uint64_t nb = 0, nh = 0;
+        uint32_t hs[2];
+        if (nexo_channel_recv(STDIN_HANDLE, ent, sizeof(ent), hs, 2, &nb, &nh)
+            != NEXO_STATUS_OK) {
+            ent_eof = 1;
+            break;
+        }
+        ent_n = (size_t)nb;
+        ent_pos = 0;
+    }
+    size_t tem = ent_n - ent_pos;
+    if (tem == 0)
+        return 0; /* EOF */
+    size_t leva = tem < n ? tem : n;
+    memcpy(buf, ent + ent_pos, leva);
+    ent_pos += leva;
+    return (ssize_t)leva;
+}
+
 ssize_t read(int fd, void *buf, size_t n) {
+    if (fd == 0)
+        return le_stdin(buf, n);
     arq *a = pega(fd);
     if (!a)
         return -1;

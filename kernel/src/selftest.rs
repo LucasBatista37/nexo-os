@@ -74,6 +74,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_ls", test_user_ls),
     ("user_cp", test_user_cp),
     ("user_rm", test_user_rm),
+    ("user_wc_stdin", test_user_wc_stdin),
+    ("user_cat_stdin", test_user_cat_stdin),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3277,7 +3279,10 @@ fn test_user_c_fs() -> TestResult {
 /// pre-envia UMA mensagem com os argumentos separados por `\0` (argv[0] incluso) no canal que
 /// vira o handle 1 — o crt0 da nexo-libc le uma unica vez e monta `main(argc, argv)` — e
 /// espera os tres processos sairem 0, conferindo vazamentos de canais e quadros.
-fn run_c_util(bin: &str, argv: &[u8]) -> TestResult {
+/// Com `stdin`, um terceiro canal vira o handle 2: os bytes vao em DOIS pedacos (prova o
+/// reabastecimento do buffer da libc) e a ponta de escrita e fechada ANTES do spawn — a fila
+/// sobrevive (garantia do ipc_handoff) e o PeerClosed apos drena-la e o EOF.
+fn run_c_util(bin: &str, argv: &[u8], stdin: Option<&[u8]>) -> TestResult {
     use crate::ipc::{ChannelEnd, Message};
     if crate::initrd::find(bin).is_none() {
         return Err(alloc::format!(
@@ -3310,12 +3315,23 @@ fn run_c_util(bin: &str, argv: &[u8]) -> TestResult {
     let fs =
         crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
             .map_err(String::from)?;
-    let client = crate::process::spawn_named(
-        bin,
-        0,
-        alloc::vec![channel_handle(d), channel_handle(argv_rx)],
-    )
-    .map_err(String::from)?;
+    let mut iniciais = alloc::vec![channel_handle(d), channel_handle(argv_rx)];
+    if let Some(dados) = stdin {
+        let (tx, rx) = ChannelEnd::create_pair();
+        let meio = dados.len() / 2;
+        for parte in [&dados[..meio], &dados[meio..]] {
+            if !parte.is_empty() {
+                tx.send(Message {
+                    data: parte.to_vec(),
+                    handles: alloc::vec![],
+                })
+                .map_err(|e| alloc::format!("envio do stdin falhou: {e:?}"))?;
+            }
+        }
+        drop(tx);
+        iniciais.push(channel_handle(rx));
+    }
+    let client = crate::process::spawn_named(bin, 0, iniciais).map_err(String::from)?;
     let cc = crate::process::wait_and_reap(&client);
     let fc = crate::process::wait_and_reap(&fs);
     let bc = crate::process::wait_and_reap(&blk);
@@ -3338,33 +3354,45 @@ fn run_c_util(bin: &str, argv: &[u8]) -> TestResult {
 /// escrever (mesmo boot, registrado antes) e loga "0 5 26 /c-arquivo.txt" — a linha e
 /// marcador do cenario boot, entao os NUMEROS sao conferidos de fora, nao so a saida 0.
 fn test_user_wc() -> TestResult {
-    run_c_util("wc-c", b"wc\0/c-arquivo.txt\0")
+    run_c_util("wc-c", b"wc\0/c-arquivo.txt\0", None)
 }
 
 /// `cat` portado: copia o mesmo arquivo para a saida via `write(1)` — o conteudo sem `\n`
 /// final sai pelo flush do crt0 ("escrito pelo C via nexo.fs" e marcador do cenario boot).
 fn test_user_cat() -> TestResult {
-    run_c_util("cat-c", b"cat\0/c-arquivo.txt\0")
+    run_c_util("cat-c", b"cat\0/c-arquivo.txt\0", None)
 }
 
 /// `ls` portado: lista a raiz via opendir/readdir/closedir da nexo-libc (uma chamada `list`
 /// do nexo.fs; "- c-arquivo.txt" na saida e marcador do cenario boot).
 fn test_user_ls() -> TestResult {
-    run_c_util("ls-c", b"ls\0/\0")
+    run_c_util("ls-c", b"ls\0/\0", None)
 }
 
 /// `cp` portado, com verificacao por CONTEUDO: copia o arquivo de `user_c_fs` para
 /// /cp-teste.txt e roda o `wc` na copia — "0 5 26 /cp-teste.txt" e marcador do cenario boot
 /// (mesmos numeros do original = bytes identicos). O_TRUNC torna a repeticao idempotente.
 fn test_user_cp() -> TestResult {
-    run_c_util("cp-c", b"cp\0/c-arquivo.txt\0/cp-teste.txt\0")?;
-    run_c_util("wc-c", b"wc\0/cp-teste.txt\0")
+    run_c_util("cp-c", b"cp\0/c-arquivo.txt\0/cp-teste.txt\0", None)?;
+    run_c_util("wc-c", b"wc\0/cp-teste.txt\0", None)
 }
 
 /// `rm` portado: remove a copia que `user_cp` criou neste mesmo boot — sair 0 prova que o
 /// unlink achou e removeu; a dupla cp+rm deixa o disco como estava (idempotente entre boots).
 fn test_user_rm() -> TestResult {
-    run_c_util("rm-c", b"rm\0/cp-teste.txt\0")
+    run_c_util("rm-c", b"rm\0/cp-teste.txt\0", None)
+}
+
+/// `wc` sem argumento conta o STDIN (canal no handle 2): duas mensagens somam 2 linhas,
+/// 4 palavras e 20 bytes — "2 4 20" na saida e marcador do cenario boot.
+fn test_user_wc_stdin() -> TestResult {
+    run_c_util("wc-c", b"wc\0", Some(b"linha um\nlinha dois\n"))
+}
+
+/// `cat` sem argumento copia o STDIN para a saida — a linha atravessa canal, buffer da libc
+/// e write(1) e vira marcador do cenario boot.
+fn test_user_cat_stdin() -> TestResult {
+    run_c_util("cat-c", b"cat\0", Some(b"stdin do cat via canal\n"))
 }
 
 /// Primeiro processo em **C++** (freestanding, sem exceptions/RTTI): construtor global via

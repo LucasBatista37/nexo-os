@@ -6,20 +6,20 @@
 #include "../../sdk/libc/include/unistd.h"
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        puts("uso: cat <arquivo>");
-        return 2;
-    }
-    nexo_libc_use_fs(0);
-    int fd = open(argv[1], O_RDONLY);
-    if (fd < 0) {
-        puts("cat: nao abriu o arquivo");
-        return 1;
+    int fd = 0; /* sem argumento: copia o stdin (canal no handle 2), como o cat classico */
+    if (argc >= 2) {
+        nexo_libc_use_fs(0);
+        fd = open(argv[1], O_RDONLY);
+        if (fd < 0) {
+            puts("cat: nao abriu o arquivo");
+            return 1;
+        }
     }
     char buf[512];
     ssize_t n;
     while ((n = read(fd, buf, sizeof(buf))) > 0)
         write(1, buf, (size_t)n);
-    close(fd);
+    if (fd != 0)
+        close(fd);
     return 0;
 }

@@ -113,6 +113,8 @@ SCENARIOS = {
             r"cat-c\] escrito pelo C via nexo\.fs",
             r"ls-c\] - c-arquivo\.txt",
             r"0 5 26 /cp-teste\.txt",
+            r"wc-c\] 2 4 20",
+            r"cat-c\] stdin do cat via canal",
             r"\[TEST\] gfx \.\.\. ok",
             r"\[TEST\] symbols \.\.\. ok",
             r"\[RESULT\] PASS \d+/\d+",
