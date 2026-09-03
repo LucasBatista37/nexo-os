@@ -68,6 +68,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_c_hello", test_user_c_hello),
     ("user_sse", test_user_sse),
     ("user_cpp", test_user_cpp),
+    ("user_c_fs", test_user_c_fs),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3214,6 +3215,54 @@ fn test_user_sse() -> TestResult {
     let frames = settled_free_frames(frames0, 4);
     check!(
         frames + 4 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Arquivos POSIX em **C** sobre o `nexo.fs`: o `fs-c` (open/write/lseek/read/close da
+/// nexo-libc, com os encoders GERADOS do IDL — a mesma fonte do Rust) recebe o canal do fs em
+/// handle 0 e faz o ciclo completo num arquivo real do disco de dados. Guardado pela presença.
+fn test_user_c_fs() -> TestResult {
+    use crate::ipc::ChannelEnd;
+    if crate::initrd::find("fs-c").is_none() {
+        return Err(String::from(
+            "fs-c ausente do initrd (host sem clang/rust-lld)",
+        ));
+    }
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (a, b) = ChannelEnd::create_pair();
+    let (c, d) = ChannelEnd::create_pair();
+    let blk = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a)],
+    )
+    .map_err(String::from)?;
+    let fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
+            .map_err(String::from)?;
+    let client = crate::process::spawn_named("fs-c", 0, alloc::vec![channel_handle(d)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let fc = crate::process::wait_and_reap(&fs);
+    let bc = crate::process::wait_and_reap(&blk);
+    drop((client, fs, blk));
+    sched::reap();
+    check!(cc == 0, "fs-c saiu com {cc}");
+    check!(fc == 0, "fs saiu com {fc}");
+    check!(bc == 0, "blockdev saiu com {bc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    let frames = settled_free_frames(frames0, 8);
+    check!(
+        frames + 8 >= frames0,
         "quadros vazaram: {frames0} -> {frames}"
     );
     Ok(())

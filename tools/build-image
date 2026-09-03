@@ -157,6 +157,9 @@ def main() -> None:
     hello_cpp = BUILD / "hello-cpp.elf"
     if hello_cpp.exists():
         stripped.append(("hello-cpp", hello_cpp))
+    fs_c = BUILD / "fs-c.elf"
+    if fs_c.exists():
+        stripped.append(("fs-c", fs_c))
     initrd = BUILD / "initrd"
     from mkinitrd import pack
     pack([(n, str(p)) for n, p in stripped], initrd)

@@ -42,4 +42,39 @@ static inline uint64_t nexo_wall_epoch(void) {
     return nexo_syscall3(NEXO_SYS_DEBUG_INFO, 7, 0, 0).value;
 }
 
+/* Syscall de 5 argumentos (a3 em r10, a4 em r8 — ABI v0). */
+static inline nexo_ret nexo_syscall5(uint64_t n, uint64_t a0, uint64_t a1, uint64_t a2,
+                                     uint64_t a3, uint64_t a4) {
+    uint64_t status = n, value = a2;
+    register uint64_t r10 __asm__("r10") = a3;
+    register uint64_t r8 __asm__("r8") = a4;
+    __asm__ volatile("syscall"
+                     : "+a"(status), "+d"(value)
+                     : "D"(a0), "S"(a1), "r"(r10), "r"(r8)
+                     : "rcx", "r11", "memory");
+    nexo_ret r = {status, value};
+    return r;
+}
+
+/* Envia uma mensagem pelo canal `ch` (handles viajam no vetor; pode ser NULL/0). */
+static inline uint64_t nexo_channel_send(uint32_t ch, const void *data, uint64_t len,
+                                         const uint32_t *handles, uint64_t n_handles) {
+    return nexo_syscall5(NEXO_SYS_CHANNEL_SEND, ch, (uint64_t)data, len, (uint64_t)handles,
+                         n_handles)
+        .status;
+}
+
+/* Recebe uma mensagem (bloqueante). Devolve o status; com NEXO_STATUS_OK, escreve o numero de
+ * bytes e de handles recebidos. */
+static inline uint64_t nexo_channel_recv(uint32_t ch, void *buf, uint64_t cap, uint32_t *handles,
+                                         uint64_t h_cap, uint64_t *n_bytes, uint64_t *n_handles) {
+    nexo_ret r = nexo_syscall5(NEXO_SYS_CHANNEL_RECV, ch, (uint64_t)buf, cap, (uint64_t)handles,
+                               h_cap);
+    if (r.status == NEXO_STATUS_OK) {
+        *n_bytes = r.value & 0xffffffffULL;
+        *n_handles = r.value >> 32;
+    }
+    return r.status;
+}
+
 #endif /* NEXO_H */

@@ -18,8 +18,10 @@ clang $CFLAGS -c "$ROOT/examples/c/hello.c" -o "$ROOT/build/hello-c.o"
 clang $CFLAGS -c "$ROOT/sdk/libc/src/string.c" -o "$ROOT/build/libc-string.o"
 clang $CFLAGS -c "$ROOT/sdk/libc/src/stdio.c" -o "$ROOT/build/libc-stdio.o"
 clang $CFLAGS -c "$ROOT/sdk/libc/src/stdlib.c" -o "$ROOT/build/libc-stdlib.o"
+clang $CFLAGS -c "$ROOT/sdk/libc/src/fd.c" -o "$ROOT/build/libc-fd.o"
 "$LLD" -flavor gnu --no-pie -e _start -o "$OUT" "$ROOT/build/hello-c.o" \
-       "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" "$ROOT/build/libc-stdlib.o"
+       "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" "$ROOT/build/libc-stdlib.o" \
+       "$ROOT/build/libc-fd.o"
 echo "[c-demo] $OUT ($(wc -c < "$OUT" | tr -d ' ') bytes)"
 # ssetest: compilado COM SSE (o kernel liga OSFXSR e salva XMM por thread) — prova FPU/SIMD
 # de usuario e o isolamento do estado entre processos.
@@ -27,6 +29,10 @@ CFLAGS_SSE="--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector
         -mno-red-zone -fomit-frame-pointer -O2"
 clang $CFLAGS_SSE -c "$ROOT/examples/c/ssetest.c" -o "$ROOT/build/sse-c.o"
 "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/sse-c.elf" "$ROOT/build/sse-c.o"
+clang $CFLAGS -c "$ROOT/examples/c/fstest.c" -o "$ROOT/build/fs-c.o"
+"$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/fs-c.elf" "$ROOT/build/fs-c.o" \
+       "$ROOT/build/libc-string.o" "$ROOT/build/libc-fd.o"
+echo "[c-demo] $ROOT/build/fs-c.elf ($(wc -c < "$ROOT/build/fs-c.elf" | tr -d ' ') bytes)"
 echo "[c-demo] $ROOT/build/sse-c.elf ($(wc -c < "$ROOT/build/sse-c.elf" | tr -d ' ') bytes)"
 # hello-cpp: primeiro processo C++ (clang++ freestanding, sem exceptions/RTTI; ctors via
 # .init_array — o lld define os limites; new/delete sobre o heap da nexo-libc)
