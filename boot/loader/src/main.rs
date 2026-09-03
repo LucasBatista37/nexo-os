@@ -55,6 +55,9 @@ const SLOT_KERNEL: [&CStr16; 2] = [
 const SLOT_INIT: [&CStr16; 2] = [cstr16!("\\nexo\\a\\initrd"), cstr16!("\\nexo\\b\\initrd")];
 /// Nome de exibição de cada slot nos logs.
 const SLOT_NAME: [&str; 2] = ["A", "B"];
+/// Ambiente de recuperação: cópia do sistema que nenhuma atualização toca (só o build grava).
+const RECOVERY_KERNEL: &CStr16 = cstr16!("\\nexo\\recovery\\kernel.elf");
+const RECOVERY_INIT: &CStr16 = cstr16!("\\nexo\\recovery\\initrd");
 const LOADER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 static SERIAL: SerialPort = SerialPort::new(SerialPort::COM1);
@@ -144,7 +147,8 @@ fn load_system() -> Result<(Vec<u8>, Vec<u8>), &'static str> {
         return Ok((kernel, read_file(INIT_PATH).unwrap_or_default()));
     };
     let Some(chosen) = state.choose() else {
-        return Err("nenhum slot elegivel (ambos sem sucesso e sem tentativas)");
+        warn!("nenhum slot elegivel (ambos sem sucesso e sem tentativas)");
+        return load_recovery();
     };
     for slot in [chosen, 1 - chosen] {
         if !state.eligible(slot) {
@@ -186,7 +190,21 @@ fn load_system() -> Result<(Vec<u8>, Vec<u8>), &'static str> {
         );
         return Ok((kernel, read_file(SLOT_INIT[slot]).unwrap_or_default()));
     }
-    Err("nenhum slot com kernel valido")
+    warn!("nenhum slot com kernel valido");
+    load_recovery()
+}
+
+/// Último recurso (ADR-0010: "ambiente de recuperação independente"): `\nexo\recovery\` é uma
+/// cópia do sistema que **nenhuma atualização toca** (só o build a grava). Sem estado, sem
+/// desconto de tentativas — se também estiver quebrada, o erro final é honesto.
+fn load_recovery() -> Result<(Vec<u8>, Vec<u8>), &'static str> {
+    let kernel = read_file(RECOVERY_KERNEL)
+        .map_err(|_| "RECUPERACAO indisponivel: \\nexo\\recovery\\kernel.elf ilegivel")?;
+    if ElfFile::parse(&kernel).is_err() {
+        return Err("RECUPERACAO indisponivel: kernel de recuperacao invalido");
+    }
+    warn!("RECUPERACAO: arrancando pelo ambiente de recuperacao (\\nexo\\recovery)");
+    Ok((kernel, read_file(RECOVERY_INIT).unwrap_or_default()))
 }
 
 fn framebuffer_info() -> FramebufferInfo {

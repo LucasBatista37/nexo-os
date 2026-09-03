@@ -56,7 +56,8 @@ def make_esp(esp_img: Path, loader: Path, kernel: Path, cmdline: str, initrd: Pa
     # -C cria a imagem; -F FAT32; -N serial fixo (reprodutibilidade); -T total de setores.
     run([mformat, "-i", str(esp_img), "-C", "-F", "-T", str(sectors), "-h", "64", "-s", "32",
          "-N", "4E45584F", "-v", "NEXO", "::"])
-    run([mmd, "-i", esp_img, "::/EFI", "::/EFI/BOOT", "::/nexo", "::/nexo/a", "::/nexo/b"])
+    run([mmd, "-i", esp_img, "::/EFI", "::/EFI/BOOT", "::/nexo", "::/nexo/a", "::/nexo/b",
+         "::/nexo/recovery"])
     # Área de preparação com mtime fixo: os timestamps FAT vêm de SOURCE_DATE_EPOCH
     # (mtools) e nunca do relógio ou do mtime dos binários recém-compilados.
     staging = BUILD / "esp-staging"
@@ -68,8 +69,9 @@ def make_esp(esp_img: Path, loader: Path, kernel: Path, cmdline: str, initrd: Pa
     # confirmados com 3 tentativas — a imagem canônica arranca por A; B é o para-quedas.
     files = {
         "BOOTX64.EFI": (loader, "::/EFI/BOOT/BOOTX64.EFI"),
-        "kernel.elf": (kernel, "::/nexo/a/kernel.elf", "::/nexo/b/kernel.elf"),
-        "initrd": (initrd, "::/nexo/a/initrd", "::/nexo/b/initrd"),
+        "kernel.elf": (kernel, "::/nexo/a/kernel.elf", "::/nexo/b/kernel.elf",
+                       "::/nexo/recovery/kernel.elf"),
+        "initrd": (initrd, "::/nexo/a/initrd", "::/nexo/b/initrd", "::/nexo/recovery/initrd"),
         "boot.cfg": (None, "::/nexo/boot.cfg"),
         "slots.bin": (None, "::/nexo/slots.bin"),
     }

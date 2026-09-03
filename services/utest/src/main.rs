@@ -3115,7 +3115,11 @@ fn esp_checks(esp: Option<nexo_sys::Handle>, hs: &mut [u32; 1]) {
     // Layout A/B: basta UM slot com kernel ELF integro (o outro pode estar corrompido —
     // e exatamente o cenario do teste de fallback do loader, tools/test-ab).
     let mut kernel_size = 0u64;
-    for path in [&b"/nexo/a/kernel.elf"[..], &b"/nexo/b/kernel.elf"[..]] {
+    for path in [
+        &b"/nexo/a/kernel.elf"[..],
+        &b"/nexo/b/kernel.elf"[..],
+        &b"/nexo/recovery/kernel.elf"[..],
+    ] {
         let (st, size, _) = call(1, 0, 0, path, &mut ereq, &mut ereply, hs);
         if st != 0 || size == 0 {
             continue;
@@ -3174,6 +3178,7 @@ fn vfs_client() -> ! {
     for path in [
         &b"/boot/nexo/a/kernel.elf"[..],
         &b"/boot/nexo/b/kernel.elf"[..],
+        &b"/boot/nexo/recovery/kernel.elf"[..],
     ] {
         let (st, kino, n) = a.call(0, 0, 0, 0, path);
         if st != 0 || n < 9 {
