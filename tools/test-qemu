@@ -614,9 +614,12 @@ def run_net_scenario(timeout: float) -> bool:
     probe.close()
 
     def connector():
-        # tenta ate o convidado escutar (o utest so escuta depois das fases anteriores)
+        # duas conexoes de entrada: a 1a atende o teste cru do nexo.sock (resposta
+        # "nexo-listen-ok"); a 2a, o servidor POSIX bind/listen/accept + poll do utest
+        # ("nexo-accept-ok" — e o CLOSE daqui dispara o POLLHUP que o teste confere).
+        esperados = [b"nexo-listen-ok", b"nexo-accept-ok"]
         deadline = time.time() + timeout
-        while time.time() < deadline:
+        while esperados and time.time() < deadline:
             try:
                 c = socket.create_connection(("127.0.0.1", fwd_port), timeout=3)
             except OSError:
@@ -632,8 +635,8 @@ def run_net_scenario(timeout: float) -> bool:
                         break
                     data += chunk
                 c.close()
-                if data == b"nexo-listen-ok":
-                    return
+                if data == esperados[0]:
+                    esperados.pop(0)
             except OSError:
                 try:
                     c.close()
@@ -731,6 +734,8 @@ def run_net_scenario(timeout: float) -> bool:
                 r"utest: sock listen — conexao de entrada de 10\.0\.2\.2:\d+",
                 r"utest: sock listen ok — servimos uma conexao de entrada na porta 8080",
                 r"utest: posix sockets ok — socket/connect/send/recv/close via BSD sobre nexo.sock",
+            r"utest: posix accept — conexao de 10\.0\.2\.2:\d+",
+            r"utest: posix servidor ok — bind/listen/accept e poll \(dados e HUP\) via BSD",
                 r"utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados",
                 r"utest: http ok — GET /nexo\.txt devolveu 200 e o corpo esperado \(\d+ bytes\)",
                 r"\[NET\] fase 2 \(netd\) terminou com 0",

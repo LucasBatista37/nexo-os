@@ -96,6 +96,18 @@ method 9 tcp_listen {
     }
 }
 
+# Sonda a conexao SEM consumir: bytes prontos para leitura e se o outro lado fechou.
+# E a base do poll/select da camada POSIX (ADR-0014).
+method 10 tcp_avail {
+    request {
+        conn: u32,
+    }
+    response {
+        avail: u32,
+        closed: u8,
+    }
+}
+
 # Encerra a conexao (FIN; erro 4 se ja reiniciada).
 method 8 tcp_close {
     request {

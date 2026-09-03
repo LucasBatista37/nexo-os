@@ -1396,6 +1396,124 @@ impl TcpListenResponse {
     }
 }
 
+/// `nexo.sock.tcp_avail` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TcpAvailRequest {
+    /// Campo `conn`.
+    pub conn: u32,
+}
+
+impl TcpAvailRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 10;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.conn.to_le_bytes());
+        o += 4;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let conn = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let _ = o;
+        Ok(TcpAvailRequest { conn })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.sock.tcp_avail` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TcpAvailResponse {
+    /// Campo `avail`.
+    pub avail: u32,
+    /// Campo `closed`.
+    pub closed: u8,
+}
+
+impl TcpAvailResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 10;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.avail.to_le_bytes());
+        o += 4;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.closed.to_le_bytes());
+        o += 1;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let avail = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let closed = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
+        let _ = o;
+        Ok(TcpAvailResponse { avail, closed })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// `nexo.sock.tcp_close` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TcpCloseRequest {
@@ -1709,6 +1827,8 @@ pub enum Request {
     TcpRecv(TcpRecvRequest),
     /// `tcp_listen`.
     TcpListen(TcpListenRequest),
+    /// `tcp_avail`.
+    TcpAvail(TcpAvailRequest),
     /// `tcp_close`.
     TcpClose(TcpCloseRequest),
     /// `open`.
@@ -1759,6 +1879,11 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
                 return Err(ProtoError::Length);
             }
         }
+        Request::TcpAvail(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
         Request::TcpClose(_) => {
             if !hs.is_empty() {
                 return Err(ProtoError::Length);
@@ -1796,6 +1921,7 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
         6 => Ok(Request::TcpSend(TcpSendRequest::decode_payload(p)?)),
         7 => Ok(Request::TcpRecv(TcpRecvRequest::decode_payload(p)?)),
         9 => Ok(Request::TcpListen(TcpListenRequest::decode_payload(p)?)),
+        10 => Ok(Request::TcpAvail(TcpAvailRequest::decode_payload(p)?)),
         8 => Ok(Request::TcpClose(TcpCloseRequest::decode_payload(p)?)),
         11 => Ok(Request::Open(OpenRequest::decode_payload(p)?)),
         _ => Err(ProtoError::Method),
@@ -2016,6 +2142,33 @@ pub fn decode_tcp_listen_response(msg: &[u8]) -> Result<TcpListenResponse, Proto
         return Err(ProtoError::Flags);
     }
     TcpListenResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `tcp_avail` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_tcp_avail_response(msg: &[u8]) -> Result<TcpAvailResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 10 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    TcpAvailResponse::decode_payload(p)
 }
 
 /// Decodifica a resposta de `tcp_close` (erro remoto vira `ProtoError::Remote`).

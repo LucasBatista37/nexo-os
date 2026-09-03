@@ -4211,6 +4211,71 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         nexo_rt::log!(
             "utest: posix sockets ok — socket/connect/send/recv/close via BSD sobre nexo.sock"
         );
+        // 6c. lado SERVIDOR da personalidade POSIX: bind/listen/accept + poll. O host conecta
+        //     de novo na 8080 (segunda conexao do connector do cenario); o poll sinaliza a
+        //     chegada dos dados SEM consumir (tcp_avail), o recv le e respondemos.
+        use nexo_net::{POLLHUP, POLLIN, PollFd};
+        let srv = s.socket(AF_INET, SOCK_STREAM);
+        if srv < 0 {
+            nexo_sys::exit(410);
+        }
+        let local = SockAddrIn {
+            addr: [0, 0, 0, 0],
+            port: 8080,
+        };
+        if s.bind(srv, &local) != 0 {
+            nexo_sys::exit(411);
+        }
+        if s.listen(srv, 1) != 0 {
+            nexo_sys::exit(412);
+        }
+        let (conn_fd, peer) = s
+            .accept(srv)
+            .unwrap_or_else(|e| nexo_sys::exit(413 + e as i64));
+        nexo_rt::log!(
+            "utest: posix accept — conexao de {}.{}.{}.{}:{}",
+            peer.addr[0],
+            peer.addr[1],
+            peer.addr[2],
+            peer.addr[3],
+            peer.port
+        );
+        let mut pfds = [PollFd {
+            fd: conn_fd,
+            events: POLLIN,
+            revents: 0,
+        }];
+        let ready = s.poll(&mut pfds, 20_000);
+        if ready != 1 || pfds[0].revents & POLLIN == 0 {
+            nexo_rt::log!(
+                "utest: posix poll devolveu {} (revents {:#x})",
+                ready,
+                pfds[0].revents
+            );
+            nexo_sys::exit(420);
+        }
+        let mut buf = [0u8; 64];
+        let r = s.recv(conn_fd, &mut buf);
+        if r <= 0 || !buf[..r as usize].starts_with(b"ola do host") {
+            nexo_sys::exit(421);
+        }
+        if s.send(conn_fd, b"nexo-accept-ok") < 0 {
+            nexo_sys::exit(422);
+        }
+        // o par fecha depois de ler; o poll deve sinalizar o HUP
+        let mut pfds = [PollFd {
+            fd: conn_fd,
+            events: POLLIN,
+            revents: 0,
+        }];
+        let _ = s.poll(&mut pfds, 20_000);
+        if pfds[0].revents & POLLHUP == 0 {
+            nexo_rt::log!("utest: posix poll sem HUP (revents {:#x})", pfds[0].revents);
+            nexo_sys::exit(423);
+        }
+        s.close(conn_fd);
+        s.close(srv);
+        nexo_rt::log!("utest: posix servidor ok — bind/listen/accept e poll (dados e HUP) via BSD");
     }
     // 7. multi-cliente + firewall: abre uma segunda sessao RESTRITA (perfil que so permite TCP
     //    para 10.0.2.2:<tcp_port>, sem DNS nem escuta) e comprova que o netd nega o resto.

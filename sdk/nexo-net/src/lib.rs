@@ -3,15 +3,17 @@
 //!
 //! Não é uma libc: expõe uma API no estilo BSD (`socket`/`connect`/`send`/`recv`/`close`,
 //! `sockaddr_in`, `getaddrinfo`) com descritores inteiros numa tabela do processo, cada um
-//! ligado a uma conexão/porta do `netd`. Blocos assíncronos e `poll`/`select` completos ficam
-//! para depois; `recv` de TCP faz *spin* curto até haver dados ou o par fechar.
+//! ligado a uma conexão/porta do `netd`, incluindo o lado servidor (`bind`/`listen`/`accept`)
+//! e `poll` (TCP: prontidão de leitura via `tcp_avail`, sem consumir; UDP fica para depois).
+//! `recv` de TCP faz *spin* curto até haver dados ou o par fechar.
 #![no_std]
 #![forbid(unsafe_code)]
 
 use nexo_proto::sock::{
-    self, ResolveRequest, TcpCloseRequest, TcpConnectRequest, TcpRecvRequest, TcpSendRequest,
-    UdpRecvRequest, UdpSendRequest, decode_resolve_response, decode_tcp_close_response,
-    decode_tcp_connect_response, decode_tcp_recv_response, decode_tcp_send_response,
+    self, ResolveRequest, TcpAvailRequest, TcpCloseRequest, TcpConnectRequest, TcpListenRequest,
+    TcpRecvRequest, TcpSendRequest, UdpRecvRequest, UdpSendRequest, decode_resolve_response,
+    decode_tcp_avail_response, decode_tcp_close_response, decode_tcp_connect_response,
+    decode_tcp_listen_response, decode_tcp_recv_response, decode_tcp_send_response,
     decode_udp_recv_response, decode_udp_send_response,
 };
 use nexo_sys::Handle;
@@ -44,6 +46,24 @@ pub mod errno {
     pub const EAI_FAIL: i32 = -1;
 }
 
+/// Evento de `poll`: há dados para ler.
+pub const POLLIN: u16 = 0x001;
+/// Evento de `poll`: pode escrever.
+pub const POLLOUT: u16 = 0x004;
+/// Evento de `poll` (só em `revents`): o par fechou.
+pub const POLLHUP: u16 = 0x010;
+
+/// Um descritor sondado por [`Sockets::poll`] (equivalente a `struct pollfd`).
+#[derive(Clone, Copy, Debug)]
+pub struct PollFd {
+    /// Descritor.
+    pub fd: i32,
+    /// Eventos de interesse (`POLLIN` | `POLLOUT`).
+    pub events: u16,
+    /// Eventos prontos (preenchido pelo `poll`).
+    pub revents: u16,
+}
+
 /// Endereço IPv4 + porta (equivalente a `struct sockaddr_in`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SockAddrIn {
@@ -58,6 +78,8 @@ enum Kind {
     Free,
     /// TCP: id da conexão no netd (`u32::MAX` = criado mas não conectado).
     Tcp(u32),
+    /// TCP ligado a uma porta local por `bind` e pronto para `listen`/`accept`.
+    TcpBound(u16),
     /// UDP: porta local ligada.
     Udp(u16),
 }
@@ -210,6 +232,106 @@ impl Sockets {
                 Err(nexo_proto::ProtoError::Remote(c)) => return -(map_remote(c) as isize),
                 Err(_) => return -(errno::EIO as isize),
             }
+        }
+    }
+
+    /// `bind(fd, addr)` — liga um socket TCP recém-criado à porta local `addr.port`.
+    /// (O endereço é ignorado: há uma interface só.)
+    pub fn bind(&mut self, fd: i32, addr: &SockAddrIn) -> i32 {
+        match self.slot(fd) {
+            Some(Kind::Tcp(c)) if c == u32::MAX => {
+                self.fds[fd as usize] = Kind::TcpBound(addr.port);
+                0
+            }
+            _ => -errno::EINVAL,
+        }
+    }
+
+    /// `listen(fd, backlog)` — marca o socket ligado como servidor. O `backlog` é ignorado:
+    /// o `netd` atende uma conexão de entrada por `accept` (fila fica para depois).
+    pub fn listen(&mut self, fd: i32, _backlog: i32) -> i32 {
+        match self.slot(fd) {
+            Some(Kind::TcpBound(_)) => 0,
+            _ => -errno::EINVAL,
+        }
+    }
+
+    /// `accept(fd)` — espera uma conexão de entrada na porta ligada e devolve um NOVO
+    /// descritor conectado + o endereço do par. Bloqueante (retenta no timeout do netd).
+    pub fn accept(&mut self, fd: i32) -> Result<(i32, SockAddrIn), i32> {
+        let port = match self.slot(fd) {
+            Some(Kind::TcpBound(p)) => p,
+            _ => return Err(errno::EINVAL),
+        };
+        let Some(new_fd) = self.fds.iter().position(|k| matches!(k, Kind::Free)) else {
+            return Err(errno::EMFILE);
+        };
+        loop {
+            let m = TcpListenRequest { port }
+                .encode_msg(&mut self.buf)
+                .unwrap_or(0);
+            let n = self.rpc(m)?;
+            match decode_tcp_listen_response(&self.buf[..n]) {
+                Ok(r) => {
+                    self.fds[new_fd] = Kind::Tcp(r.conn);
+                    return Ok((
+                        new_fd as i32,
+                        SockAddrIn {
+                            addr: r.peer_ip,
+                            port: r.peer_port,
+                        },
+                    ));
+                }
+                // timeout do netd: accept POSIX bloqueia — tenta de novo
+                Err(nexo_proto::ProtoError::Remote(3)) => continue,
+                Err(nexo_proto::ProtoError::Remote(c)) => return Err(map_remote(c)),
+                Err(_) => return Err(errno::EIO),
+            }
+        }
+    }
+
+    /// `poll(fds, timeout_ms)` — prontidão de leitura/escrita. TCP conectado: `POLLIN` quando
+    /// há bytes prontos (sondados com `tcp_avail`, sem consumir) ou o par fechou (`|POLLHUP`);
+    /// `POLLOUT` é imediato (o envio é síncrono no netd). Sockets não conectados e UDP ainda
+    /// não sinalizam leitura. `timeout_ms < 0` espera indefinidamente; `0` só sonda uma vez.
+    /// Devolve quantos descritores têm `revents != 0`, ou `-errno`.
+    pub fn poll(&mut self, fds: &mut [PollFd], timeout_ms: i32) -> i32 {
+        let mut waited = 0i32;
+        loop {
+            let mut ready = 0;
+            for p in fds.iter_mut() {
+                p.revents = 0;
+                let conn = match self.slot(p.fd) {
+                    Some(Kind::Tcp(c)) if c != u32::MAX => c,
+                    _ => continue,
+                };
+                if p.events & POLLIN != 0 {
+                    let m = TcpAvailRequest { conn }
+                        .encode_msg(&mut self.buf)
+                        .unwrap_or(0);
+                    if let Ok(n) = self.rpc(m)
+                        && let Ok(r) = decode_tcp_avail_response(&self.buf[..n])
+                    {
+                        if r.avail > 0 {
+                            p.revents |= POLLIN;
+                        }
+                        if r.closed != 0 {
+                            p.revents |= POLLIN | POLLHUP;
+                        }
+                    }
+                }
+                if p.events & POLLOUT != 0 {
+                    p.revents |= POLLOUT;
+                }
+                if p.revents != 0 {
+                    ready += 1;
+                }
+            }
+            if ready > 0 || timeout_ms == 0 || (timeout_ms > 0 && waited >= timeout_ms) {
+                return ready;
+            }
+            nexo_sys::sleep_ns(5_000_000);
+            waited = waited.saturating_add(5);
         }
     }
 

@@ -823,6 +823,20 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
             resp.data_len = c.take_rx(&mut resp.data) as u32;
             resp.encode_msg(out).unwrap_or(0)
         }
+        Request::TcpAvail(rq) => {
+            let i = rq.conn as usize;
+            if i >= TCP_CONNS || st.tcp[i].is_none() {
+                return sock::encode_error(sock::TcpAvailRequest::METHOD_ID, E_INVALID, out)
+                    .unwrap_or(0);
+            }
+            let c = st.tcp[i].as_ref().unwrap();
+            sock::TcpAvailResponse {
+                avail: c.rx_available() as u32,
+                closed: (c.peer_closed || c.reset || c.state == nsk::tcp::State::Closed) as u8,
+            }
+            .encode_msg(out)
+            .unwrap_or(0)
+        }
         Request::TcpListen(rq) => {
             if profile.allows_listen().is_err() {
                 return sock::encode_error(sock::TcpListenRequest::METHOD_ID, E_DENIED, out)

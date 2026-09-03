@@ -324,6 +324,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 7, bloco 52 — lado servidor da personalidade POSIX de sockets)
+- `nexo.sock` ganhou **`tcp_avail`**: sonda a conexão sem consumir (bytes prontos + par fechou) — a base do `poll`/`select` da camada de compatibilidade (ADR-0014).
+- `sdk/nexo-net`: **`bind`/`listen`/`accept`** (o accept espera a conexão de entrada e devolve um novo descritor conectado + endereço do par) e **`poll`** (`PollFd`, `POLLIN`/`POLLOUT`/`POLLHUP`; TCP sonda via `tcp_avail`, UDP fica para depois — documentado).
+- O cenário `net` agora exercita o **lado servidor** da personalidade POSIX: o host conecta de verdade (slirp) no `bind(8080)+listen+accept` do guest, o `poll` sinaliza a chegada dos dados sem consumi-los, e o close do host dispara o `POLLHUP` conferido. Estável em três execuções seguidas.
+
 ### Adicionado (Fase 8, bloco 51 — backup de árvores aninhadas)
 - O espelho do `backup` ficou **recursivo**: subdiretórios descem inteiros (profundidade limitada, falha explícita em vez de espelho pela metade), com `mkdir -p` no destino. O `user_backup` agora prova o ciclo com uma árvore aninhada: espelha, sofre um desastre que inclui o subdiretório inteiro removido no principal, e a restauração devolve tudo byte a byte do outro disco físico.
 

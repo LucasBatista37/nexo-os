@@ -410,6 +410,11 @@ impl TcpSocket {
         })
     }
 
+    /// Bytes prontos para leitura, sem consumir (a base do poll/select da camada POSIX).
+    pub fn rx_available(&self) -> usize {
+        self.rx_len
+    }
+
     /// Retira dados recebidos; devolve quantos bytes copiou.
     pub fn take_rx(&mut self, out: &mut [u8]) -> usize {
         let take = self.rx_len.min(out.len());
