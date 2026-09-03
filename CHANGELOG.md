@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 5, bloco 64 — mosaico contínuo)
+- `nexo.wm` ganhou **`set_auto_tile`** (privilégio do shell): com o modo ligado, **criar, fechar e desconectar** janelas refaz o mosaico sozinho (o `tile` por gesto virou um `retile` reutilizado pelo ciclo de vida). Auto-teste `wm_tile` estendido: as transições 2 janelas → grade 2×2 com a terceira → volta ao lado-a-lado, conferidas por pixel e sem gesto. Fecha o "layouts contínuos/automáticos" do item de mosaico — ao shell gráfico resta a decisão de UX de quando ligar.
+
 ### Adicionado (Fase 6/7, bloco 63 — arquivos POSIX em C e o backend C do idlgen)
 - O `tools/idlgen` ganhou um **backend C**: `abi/c/proto/fs.h` é gerado do MESMO IDL do Rust (structs + encode de pedido + decode de resposta, fio NXIP idêntico — nunca desatualiza, a filosofia do `nexo-cheaders` aplicada aos protocolos). `nexo.h` ganhou `nexo_syscall5` e os wrappers de canal (`nexo_channel_send`/`recv`).
 - `sdk/libc`: **arquivos POSIX** — `fcntl.h`/`unistd.h` + a camada fd (`open` com O_CREAT/O_TRUNC, `read`/`write` em pedaços, `lseek`, `close`) sobre o canal do `nexo.fs`; o `fs-c` prova o ciclo completo num arquivo real do disco de dados (auto-teste `user_c_fs`, 99º). Com isso o item "publicar headers e toolchain C/C++" fecha por inteiro.

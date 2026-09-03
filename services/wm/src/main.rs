@@ -78,6 +78,8 @@ struct Attention {
     /// Escala global padrão do sistema (num, den): janelas exibidas em buf×num/den; uma
     /// escala por janela (`set_scale`) sobrepõe. Apps leem o par em `prefs` (o "DPI").
     scale: (u32, u32),
+    /// Mosaico contínuo: criar/fechar/desconectar refaz o mosaico sozinho.
+    auto_tile: bool,
     /// Registro das notificações recentes (0 = mais recente) — inclusive as suprimidas pelo DND.
     log: [([u8; 64], u32); 8],
     log_n: usize,
@@ -282,6 +284,29 @@ fn recompose(
     }
 }
 
+/// Refaz o mosaico: grade cobrindo a saída, na ordem dos slots; só muda os retângulos de
+/// exibição (o conteúdo é escalado na composição). Devolve `true` se havia janelas.
+fn retile(surfaces: &mut [Slot; MAX_SURFACES]) -> bool {
+    let n = surfaces.iter().filter(|s| s.used).count() as i32;
+    if n == 0 {
+        return false;
+    }
+    let mut cols = 1i32;
+    while cols * cols < n {
+        cols += 1;
+    }
+    let rows = (n + cols - 1) / cols;
+    let (cw, chh) = (OUT_W / cols, OUT_H / rows);
+    let mut k = 0i32;
+    for s in surfaces.iter_mut() {
+        if s.used {
+            s.rect = Rect::new((k % cols) * cw, (k / cols) * chh, cw, chh);
+            k += 1;
+        }
+    }
+    true
+}
+
 /// Libera as superfícies da sessão `owner` (fecha o handle do wm e marca o slot livre).
 fn free_session_surfaces(surfaces: &mut [Slot; MAX_SURFACES], owner: usize) {
     for s in surfaces.iter_mut() {
@@ -370,6 +395,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         dnd: false,
         reduce_motion: false,
         scale: (1, 1),
+        auto_tile: false,
         log: [([0; 64], 0); 8],
         log_n: 0,
     };
@@ -412,6 +438,9 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                         let _ = nexo_sys::handle_close(ch);
                     }
                     sessions[slot] = None;
+                    if attention.auto_tile {
+                        retile(&mut surfaces);
+                    }
                     recompose(&surfaces, &outs, fb.as_ref(), active_ctx, &attention);
                     if sessions.iter().all(|s| s.is_none()) {
                         log!("wm: ultima sessao desconectou; encerrando");
@@ -711,6 +740,11 @@ fn serve(
             if focused.is_none() {
                 *focused = Some(id);
             }
+            // mosaico continuo: a nova janela entra na grade sem gesto
+            if attention.auto_tile {
+                retile(surfaces);
+                recompose(surfaces, outs, fb, *active_ctx, attention);
+            }
             // duplica o handle para o cliente (o wm mantém o seu para ler os pixels)
             let client_mem = nexo_sys::handle_duplicate(mem, nexo_sys::abi::RIGHTS_MEMORY_DEFAULT)
                 .unwrap_or_else(|_| fail(55, "dup handle"));
@@ -747,6 +781,9 @@ fn serve(
             if mine(surfaces, rq.id) {
                 let _ = nexo_sys::handle_close(surfaces[rq.id as usize].mem);
                 surfaces[rq.id as usize].used = false;
+                if attention.auto_tile {
+                    retile(surfaces);
+                }
                 recompose(surfaces, outs, fb, *active_ctx, attention);
                 let m = wm::DestroyResponse {}.encode_msg(out).unwrap_or(0);
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
@@ -877,21 +914,7 @@ fn serve(
         Request::Tile(_) => {
             // Mosaico: grade cobrindo a saída, na ordem dos slots; só muda os retângulos de
             // exibição (o conteúdo é escalado na composição). Gesto global de layout.
-            let n = surfaces.iter().filter(|s| s.used).count() as i32;
-            if n > 0 {
-                let mut cols = 1i32;
-                while cols * cols < n {
-                    cols += 1;
-                }
-                let rows = (n + cols - 1) / cols;
-                let (cw, chh) = (OUT_W / cols, OUT_H / rows);
-                let mut k = 0i32;
-                for s in surfaces.iter_mut() {
-                    if s.used {
-                        s.rect = Rect::new((k % cols) * cw, (k / cols) * chh, cw, chh);
-                        k += 1;
-                    }
-                }
+            if retile(surfaces) {
                 recompose(surfaces, outs, fb, *active_ctx, attention);
             }
             let m = wm::TileResponse {}.encode_msg(out).unwrap_or(0);
@@ -1002,6 +1025,19 @@ fn serve(
             a11y_emit(a11y, 1, i as u32, &t[..tl as usize]);
             recompose(surfaces, outs, fb, *active_ctx, attention);
             let m = wm::ActivateResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::SetAutoTile(rq) => {
+            // layout global: privilegio do shell, como tile por gesto/global_scale
+            if owner != 0 {
+                reply_err(ch, wm::SetAutoTileRequest::METHOD_ID, E_NOT_SHELL, out);
+                return;
+            }
+            attention.auto_tile = rq.enabled != 0;
+            if attention.auto_tile && retile(surfaces) {
+                recompose(surfaces, outs, fb, *active_ctx, attention);
+            }
+            let m = wm::SetAutoTileResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::SetGlobalScale(rq) => {

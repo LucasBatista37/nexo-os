@@ -370,6 +370,16 @@ method 37 prefs {
     }
 }
 
+# Mosaico continuo (so o shell): com o modo ligado, criar/fechar/desconectar janelas
+# refaz o mosaico sozinho — o layout automatico do item "janelas e mosaico" da Fase 5.
+method 42 set_auto_tile {
+    request {
+        enabled: u8,
+    }
+    response {
+    }
+}
+
 # Escala global padrao do sistema (so o shell, sessao bootstrap; erro 7): todas as janelas
 # passam a ser exibidas em buf*num/den (uma escala por janela via set_scale SOBREPOE a global).
 # Apps leem o par em `prefs` para dimensionar texto/UI (o "DPI" do sistema).

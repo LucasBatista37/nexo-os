@@ -6870,7 +6870,48 @@ fn wm_tile() -> ! {
     if wm_px(ob, stride, 4, 4) != (255, 0, 0) {
         nexo_sys::exit(671); // sem sobreposicao: canto esquerdo agora e A
     }
-    nexo_sys::log("utest: wm tile ok — mosaico poe as janelas lado a lado com conteudo escalado");
+    // Mosaico CONTINUO: liga o modo e cria uma 3a janela — a grade refaz sozinha (2x2);
+    // destruir a 3a volta sozinha para lado a lado.
+    let m = nexo_proto::wm::SetAutoTileRequest { enabled: 1 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(672));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(673);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_auto_tile_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(674),
+    }
+    let (c, c_base) = wm_create(ch, 0, 0, 8, 8, 2);
+    wm_fill(c_base, 8, 8, 0, 0, 255); // C azul
+    wm_commit(ch, c);
+    // 3 janelas -> grade 2x2 de celulas 32x24, SEM gesto de tile
+    if wm_px(ob, stride, 16, 12) != (255, 0, 0) {
+        nexo_sys::exit(675); // A na celula (0,0)
+    }
+    if wm_px(ob, stride, 48, 12) != (0, 255, 0) {
+        nexo_sys::exit(676); // B na celula (1,0)
+    }
+    if wm_px(ob, stride, 16, 36) != (0, 0, 255) {
+        nexo_sys::exit(677); // C na celula (0,1)
+    }
+    // destruir C refaz o lado a lado sozinho
+    let m = nexo_proto::wm::DestroyRequest { id: c }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(678));
+    if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(679);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_destroy_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(680),
+    }
+    if wm_px(ob, stride, 16, 24) != (255, 0, 0) || wm_px(ob, stride, 48, 24) != (0, 255, 0) {
+        nexo_sys::exit(681);
+    }
+    nexo_sys::log(
+        "utest: wm tile ok — mosaico por gesto e CONTINUO (criar/fechar refaz a grade sozinho)",
+    );
     nexo_sys::exit(0)
 }
 
