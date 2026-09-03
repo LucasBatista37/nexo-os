@@ -4,7 +4,7 @@
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap idl idl-check
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap idl idl-check toolchain
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 # Margem +900s +1% da duracao: o relogio do guest (TCG) atrasa em relacao a parede sob
@@ -94,3 +94,7 @@ roadmap:
 
 clean:
 	rm -rf build target kernel/target boot/loader/target services/target
+
+# Empacota o toolchain C/C++ (sysroot + libnexo.a + nexo-cc/nexo-c++) com auto-teste.
+toolchain:
+	tools/nexo-toolchain

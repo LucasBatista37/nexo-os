@@ -1,0 +1,85 @@
+#!/bin/sh
+# nexo-toolchain — empacota o toolchain C/C++ do Nexo OS (Plano §Fase 6: "publicar headers e
+# toolchain C/C++"): monta build/toolchain/ com os headers (ABI + nexo-libc), a libnexo.a e os
+# wrappers nexo-cc/nexo-c++ com as flags corretas do alvo, gera o tarball e SE AUTO-TESTA
+# compilando um programa de fora usando apenas o pacote. Sem clang/rustc, sai 0 com aviso.
+set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TC="$ROOT/build/toolchain"
+command -v clang >/dev/null 2>&1 || { echo "[toolchain] pulado: sem clang"; exit 0; }
+SYSROOT="$(rustc --print sysroot 2>/dev/null)" || { echo "[toolchain] pulado: sem rustc"; exit 0; }
+LLD="$(find "$SYSROOT" -name rust-lld -type f 2>/dev/null | head -1)"
+[ -n "$LLD" ] || { echo "[toolchain] pulado: sem rust-lld"; exit 0; }
+AR="$(find "$SYSROOT" -name llvm-ar -type f 2>/dev/null | head -1)"
+[ -n "$AR" ] || AR="$(command -v llvm-ar || true)"
+[ -n "$AR" ] || { echo "[toolchain] pulado: sem llvm-ar"; exit 0; }
+
+rm -rf "$TC"
+mkdir -p "$TC/include/nexo" "$TC/lib" "$TC/bin"
+
+# headers: ABI (nexo.h + nexo_syscalls.h gerado da fonte) e a nexo-libc
+"$ROOT/tools/nexo-cheaders" >/dev/null
+cp "$ROOT/abi/c/nexo.h" "$ROOT/abi/c/nexo_syscalls.h" "$TC/include/nexo/"
+cp "$ROOT"/sdk/libc/include/*.h "$TC/include/"
+# nexo.h referencia nexo_syscalls.h no mesmo diretorio; stdio/stdlib/string sao planos
+sed -i.bak 's#"\.\./\.\./abi/c/nexo\.h"#<nexo/nexo.h>#' "$TC/include/"*.h 2>/dev/null || true
+rm -f "$TC/include/"*.bak
+
+CFLAGS="--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector -fno-builtin \
+        -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -msoft-float \
+        -fomit-frame-pointer -O2"
+for f in string stdio stdlib; do
+  clang $CFLAGS -I "$ROOT/sdk/libc/include" -c "$ROOT/sdk/libc/src/$f.c" -o "$TC/lib/$f.o"
+done
+clang++ $CFLAGS -fno-exceptions -fno-rtti -c "$ROOT/sdk/libc/src/cxx.cpp" -o "$TC/lib/cxx.o"
+"$AR" rcs "$TC/lib/libnexo.a" "$TC/lib/string.o" "$TC/lib/stdio.o" "$TC/lib/stdlib.o" "$TC/lib/cxx.o"
+rm -f "$TC/lib"/*.o
+
+cat > "$TC/bin/nexo-cc" <<WRAP
+#!/bin/sh
+# nexo-cc — compila e linka um programa C para o Nexo OS usando este sysroot.
+set -eu
+TCDIR="\$(cd "\$(dirname "\$0")/.." && pwd)"
+SAIDA="a.elf"; FONTES=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) SAIDA="\$2"; shift 2;; *) FONTES="\$FONTES \$1"; shift;; esac; done
+clang $CFLAGS -I "\$TCDIR/include" -c \$FONTES -o "\$SAIDA.o"
+"$LLD" -flavor gnu --no-pie -e _start -o "\$SAIDA" "\$SAIDA.o" "\$TCDIR/lib/libnexo.a"
+rm -f "\$SAIDA.o"
+WRAP
+sed "s/^clang \$CFLAGS -I/clang++ $CFLAGS -fno-exceptions -fno-rtti -I/" "$TC/bin/nexo-cc" \
+  | sed 's/nexo-cc — compila e linka um programa C /nexo-c++ — compila e linka um programa C++ /' \
+  > "$TC/bin/nexo-c++"
+chmod +x "$TC/bin/nexo-cc" "$TC/bin/nexo-c++"
+
+cat > "$TC/README.md" <<'DOC'
+# Toolchain C/C++ do Nexo OS
+
+Sysroot freestanding: headers da ABI (`include/nexo/`) e da nexo-libc (`include/`),
+`lib/libnexo.a` (string/stdio/stdlib + runtime C++ minimo) e os wrappers `bin/nexo-cc` /
+`bin/nexo-c++` com as flags do alvo (`x86_64-unknown-none-elf`, sem SSE por padrao — o
+kernel salva XMM por thread, mas o SSE e opt-in por programa; sem exceptions/RTTI no C++).
+O binario resultante e um ELF estatico com entrada `_start(uint64_t)`; empacote no initrd
+(tools/build-image) para rodar.
+DOC
+
+# auto-teste: um programa de fora, compilado so com o pacote
+TESTC="$ROOT/build/tc-teste.c"
+cat > "$TESTC" <<'SRC'
+#include <nexo/nexo.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+void _start(uint64_t arg) {
+    (void)arg;
+    char *p = malloc(32);
+    memcpy(p, "toolchain ok", 13);
+    puts(p);
+    free(p);
+    nexo_exit(0);
+}
+SRC
+"$TC/bin/nexo-cc" -o "$ROOT/build/tc-teste.elf" "$TESTC"
+[ -s "$ROOT/build/tc-teste.elf" ] || { echo "[toolchain] auto-teste FALHOU"; exit 1; }
+
+tar -czf "$ROOT/build/nexo-toolchain.tar.gz" -C "$ROOT/build" toolchain
+echo "[toolchain] build/toolchain + nexo-toolchain.tar.gz ($(wc -c < "$ROOT/build/nexo-toolchain.tar.gz" | tr -d ' ') bytes; auto-teste compilou)"

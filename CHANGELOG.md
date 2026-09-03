@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 62 — empacotamento do toolchain C/C++)
+- `make toolchain` (`tools/nexo-toolchain`): monta o **sysroot** do Nexo — headers da ABI (`include/nexo/`) e da nexo-libc, `lib/libnexo.a` (string/stdio/stdlib + runtime C++), wrappers `bin/nexo-cc`/`nexo-c++` com as flags do alvo (sem SSE por padrão; sem exceptions/RTTI no C++) e README — e gera `nexo-toolchain.tar.gz`. **Auto-teste embutido**: compila um programa de fora usando apenas o pacote (includes `<nexo/nexo.h>`, `<stdio.h>`… e a libnexo.a) e falha o empacotamento se o link quebrar. Do item de toolchain resta apenas stdio de arquivos.
+
 ### Adicionado (Fase 6, bloco 61 — primeiro processo C++)
 - Runtime C++ mínimo na nexo-libc (`cxx.cpp`): **new/delete sobre o malloc** (todas as variantes), `__cxa_pure_virtual` e a execução de **construtores globais** via `.init_array` (limites definidos pelo lld); headers da libc ganharam guards `extern "C"`.
 - `examples/c/hello-cpp.cpp` (clang++, `-fno-exceptions -fno-rtti`): construtor global observado, duas classes com método virtual despachado por vtable de verdade, new/delete no heap — auto-teste `user_cpp` (98º), guardado pela presença no initrd. Do item de toolchain restam stdio de arquivos e o empacotamento.
