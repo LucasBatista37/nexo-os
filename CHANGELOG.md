@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 60 — heap da nexo-libc)
+- `sdk/libc` ganhou `stdlib.h`: **malloc/free/calloc/realloc** sobre os objetos de memória do kernel (`memory_create`/`map`) — arenas de 256 KiB, primeira adequação com divisão de blocos, cabeçalhos com magic que **abortam free inválido/duplo**; `realloc` preserva conteúdo, `calloc` zera com verificação de overflow. As páginas voltam ao kernel quando o processo sai.
+- O `hello.c` exercita o ciclo completo (aloca, libera, reusa o buraco, calloc zerado, realloc crescendo) sob asserts. Um programa C no Nexo agora tem os três pés — strings, saída e memória dinâmica — e o C++ do item de toolchain tem o pré-requisito pronto.
+
 ### Adicionado (Fase 2/6, bloco 59 — FPU/SSE para processos de usuário)
 - O kernel liga **SSE/FXSR por CPU** (CR0.MP, CR4.OSFXSR|OSXMMEXCPT) e salva/restaura o estado FPU/XMM **por thread** na troca de contexto (área FXSAVE64 de 512 B, nascida em estado limpo — **nada vaza entre processos**: correção e segurança). O kernel continua soft-float; o custo é um par fxsave/fxrstor por troca, no ponto único de switch.
 - Prova em C (`examples/c/ssetest.c`, compilado COM SSE): dois processos com padrões XMM distintos fazem aritmética double e cedem a CPU 400 vezes em paralelo, cada um conferindo o próprio estado a cada volta — auto-teste `user_sse` (97º). A restrição de ABI do bloco 58 está removida; o toolchain C mantém flags conservadoras por padrão e o SSE é opt-in por programa.
