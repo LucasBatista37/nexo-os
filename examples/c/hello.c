@@ -45,7 +45,24 @@ void _start(uint64_t arg) {
     free(r);
     free(c);
     free(z);
+    /* printf/snprintf: numeros com sinal e zero-pad, hex nos dois casos, truncamento com
+     * retorno completo, modificadores l/ll/z, largura de %s, %c e %% — conferidos por strcmp */
+    char f[40];
+    if (snprintf(f, sizeof(f), "%d %05d %u %x %X", -42, -42, 7u, 0xbeefu, 0xBEEFu) != 21
+        || strcmp(f, "-42 -0042 7 beef BEEF") != 0) {
+        nexo_exit(7);
+    }
+    if (snprintf(f, 4, "abcdef") != 6 || strcmp(f, "abc") != 0) {
+        nexo_exit(8);
+    }
+    if (snprintf(f, sizeof(f), "%lu:%llx:%zu:%3s:%c:%%", 123456789012UL, 0xffffffffffULL,
+                 (size_t)9, "ab", 'k') != 33
+        || strcmp(f, "123456789012:ffffffffff:9: ab:k:%") != 0) {
+        nexo_exit(9);
+    }
     puts(linha);
     puts("heap da nexo-libc ok (malloc/free/calloc/realloc)");
+    printf("printf da nexo-libc ok (%d casos, ate %s)\n", 3, "truncamento");
+    nexo_stdio_flush(); /* _start proprio, sem crt0 — flush explicito por clareza */
     nexo_exit(0);
 }

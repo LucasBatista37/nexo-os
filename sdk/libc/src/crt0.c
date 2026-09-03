@@ -8,6 +8,7 @@
 
 extern int main(int argc, char **argv);
 extern void nexo_run_ctors(void) __attribute__((weak));
+extern void nexo_stdio_flush(void) __attribute__((weak));
 
 #define ARGV_MAX 16
 #define ARGS_BYTES 512
@@ -32,5 +33,8 @@ void _start(uint64_t arg) {
         }
     }
     argv[argc] = 0;
-    nexo_exit(main(argc, argv));
+    int code = main(argc, argv);
+    if (nexo_stdio_flush) /* ultima linha sem '\n' nao se perde */
+        nexo_stdio_flush();
+    nexo_exit(code);
 }

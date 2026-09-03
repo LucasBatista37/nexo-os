@@ -74,6 +74,7 @@ void _start(uint64_t arg) {
     char *p = malloc(32);
     memcpy(p, "toolchain ok", 13);
     puts(p);
+    printf("printf do pacote: %d %s\n", 42, p);
     free(p);
     nexo_exit(0);
 }
