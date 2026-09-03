@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6/7, bloco 68 — unlink e os utilitários cp/rm)
+- **`unlink(path)`** na nexo-libc (unistd.h) sobre o método `unlink` do `nexo.fs` — no NexoFS o mesmo unlink remove diretório VAZIO (não há rmdir).
+- Utilitários portados: **`cp`** (O_CREAT|O_TRUNC no destino — repetir sobrescreve, cp clássico; sem rename no protocolo, um mv atômico ainda não existe) e **`rm`**. Auto-testes `user_cp`/`user_rm` (103º/104º): o cp é verificado por **conteúdo** — o `wc` roda na cópia e "0 5 26 /cp-teste.txt" é marcador do cenário boot (mesmos números do original = bytes idênticos); o rm remove a cópia no mesmo boot, deixando o disco idempotente entre boots (a dupla cp+rm se limpa sozinha).
+
 ### Adicionado (Fase 6/7, bloco 67 — stdout POSIX, dirent e os utilitários cat/ls)
 - **`write(1)`/`write(2)`** na camada fd: stdout/stderr saem pelo mesmo caminho em linhas do `puts`/`printf` (sem reordenação entre eles); fds 0–2 deixaram de ser buraco — só stdin segue inexistente.
 - **`dirent.h`**: opendir/readdir/closedir sobre o `list` do `nexo.fs` — um opendir faz UMA chamada (até 3900 bytes, o limite do protocolo) e o readdir percorre localmente; `d_type` espelha o Kind do NexoFS (1 arquivo, 2 diretório), não os DT_* do Linux.

@@ -173,6 +173,19 @@ off_t lseek(int fd, off_t off, int whence) {
     return novo;
 }
 
+int unlink(const char *path) {
+    if (canal_fs == 0xffffffffu)
+        return -1;
+    nexo_fs_unlink_req uq = {0};
+    if (caminho(path, uq.path, &uq.path_len))
+        return -1;
+    int n = nexo_fs_unlink_req_encode(msg, sizeof(msg), &uq);
+    if (n < 0 || (n = rpc(n)) < 0)
+        return -1;
+    nexo_fs_unlink_resp ur;
+    return nexo_fs_unlink_resp_decode(msg, (size_t)n, &ur) == 0 ? 0 : -1;
+}
+
 /* dirent: um list por opendir; readdir percorre [ino u32][kind u8][len u8][nome] local. */
 #define DIR_MAX 2
 static DIR dirs[DIR_MAX];

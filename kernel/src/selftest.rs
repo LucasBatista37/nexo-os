@@ -72,6 +72,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wc", test_user_wc),
     ("user_cat", test_user_cat),
     ("user_ls", test_user_ls),
+    ("user_cp", test_user_cp),
+    ("user_rm", test_user_rm),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3349,6 +3351,20 @@ fn test_user_cat() -> TestResult {
 /// do nexo.fs; "- c-arquivo.txt" na saida e marcador do cenario boot).
 fn test_user_ls() -> TestResult {
     run_c_util("ls-c", b"ls\0/\0")
+}
+
+/// `cp` portado, com verificacao por CONTEUDO: copia o arquivo de `user_c_fs` para
+/// /cp-teste.txt e roda o `wc` na copia — "0 5 26 /cp-teste.txt" e marcador do cenario boot
+/// (mesmos numeros do original = bytes identicos). O_TRUNC torna a repeticao idempotente.
+fn test_user_cp() -> TestResult {
+    run_c_util("cp-c", b"cp\0/c-arquivo.txt\0/cp-teste.txt\0")?;
+    run_c_util("wc-c", b"wc\0/cp-teste.txt\0")
+}
+
+/// `rm` portado: remove a copia que `user_cp` criou neste mesmo boot — sair 0 prova que o
+/// unlink achou e removeu; a dupla cp+rm deixa o disco como estava (idempotente entre boots).
+fn test_user_rm() -> TestResult {
+    run_c_util("rm-c", b"rm\0/cp-teste.txt\0")
 }
 
 /// Primeiro processo em **C++** (freestanding, sem exceptions/RTTI): construtor global via

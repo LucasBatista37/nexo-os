@@ -112,6 +112,7 @@ SCENARIOS = {
             r"0 5 26 /c-arquivo\.txt",
             r"cat-c\] escrito pelo C via nexo\.fs",
             r"ls-c\] - c-arquivo\.txt",
+            r"0 5 26 /cp-teste\.txt",
             r"\[TEST\] gfx \.\.\. ok",
             r"\[TEST\] symbols \.\.\. ok",
             r"\[RESULT\] PASS \d+/\d+",
