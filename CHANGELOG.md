@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 5, bloco 54 — escala global do sistema no compositor)
+- `nexo.wm` ganhou **`set_global_scale`** (privilégio do shell, como `output`): a escala padrão do sistema — todas as janelas exibidas em buf×num/den, as existentes reescaladas a partir do buffer e as novas nascendo já escaladas; `prefs` expõe o par (o "DPI" que apps leem para dimensionar texto/UI). Uma escala por janela (`set_scale`) continua absoluta e sobrepõe.
+- Auto-teste `user_wm_scale` estendido: 200% global dobra a exibição conferida por pixel, janela criada sob a escala nasce dobrada, e a volta ao 100% restaura — junto das fases por-janela já existentes.
+
 ### Adicionado (Fase 7, bloco 53 — poll de UDP e select clássico)
 - `nexo.sock` ganhou **`udp_avail`** (datagramas na fila da porta, sem consumir); o `poll` do `sdk/nexo-net` passa a cobrir UDP, e nasce o **`select`** clássico (`FdSet` compacto com `FD_SET`/`FD_ISSET`/`FD_CLR`, mapeado ao poll — só leitura nesta rodada, documentado).
 - O cenário `net` prova a sequência POSIX canônica contra o servidor UDP real do host: `sendto` → `poll` vê o datagrama **sem consumir** → `select` confirma → `recvfrom` lê. Do item de sockets POSIX resta apenas a integração com uma libc.

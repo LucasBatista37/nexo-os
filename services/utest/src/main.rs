@@ -5209,6 +5209,51 @@ fn wm_scale() -> ! {
         nexo_sys::exit(1053);
     }
 
+    // escala GLOBAL do sistema (so o shell): volta a janela para 1:1 proprio, liga 200%%
+    // global e confere a exibicao dobrada; prefs expoe o par (o "DPI" que apps leem)
+    if !scale(s1, a, 1, 1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1070);
+    }
+    let gscale = |ch: nexo_sys::Handle,
+                  num: u32,
+                  den: u32,
+                  out: &mut [u8; 256],
+                  buf: &mut [u8; 256],
+                  hs: &mut [u32; 1]|
+     -> bool {
+        let m = nexo_proto::wm::SetGlobalScaleRequest { num, den }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(1071));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(1072);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => nexo_proto::wm::decode_set_global_scale_response(&buf[..n]).is_ok(),
+            _ => nexo_sys::exit(1073),
+        }
+    };
+    if !gscale(s1, 2, 1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1074);
+    }
+    if wm_px(ob, stride, 12, 12) != (255, 0, 255) {
+        nexo_sys::exit(1075); // 8x8 exibida em 16x16 pela escala do sistema
+    }
+    // janela criada JA sob a escala global nasce escalada: 4x4 -> 8x8 na tela
+    let (b2, b2_base) = wm_create(s1, 24, 0, 4, 4, 0);
+    wm_fill(b2_base, 4, 4, 0, 255, 255);
+    wm_commit(s1, b2);
+    if wm_px(ob, stride, 30, 6) != (0, 255, 255) {
+        nexo_sys::exit(1076);
+    }
+    let _ = b2;
+    // de volta ao 100%%
+    if !gscale(s1, 1, 1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(1077);
+    }
+    if wm_px(ob, stride, 12, 12) != (0, 0, 0) {
+        nexo_sys::exit(1078);
+    }
+
     // reducao de movimento: escrita mediada, leitura livre
     let prefs =
         |ch: nexo_sys::Handle, out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 1]| -> u8 {

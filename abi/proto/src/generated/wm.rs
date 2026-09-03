@@ -3260,6 +3260,10 @@ impl PrefsRequest {
 pub struct PrefsResponse {
     /// Campo `reduce_motion`.
     pub reduce_motion: u8,
+    /// Campo `scale_num`.
+    pub scale_num: u32,
+    /// Campo `scale_den`.
+    pub scale_den: u32,
 }
 
 impl PrefsResponse {
@@ -3275,6 +3279,16 @@ impl PrefsResponse {
         }
         out[o..o + 1].copy_from_slice(&self.reduce_motion.to_le_bytes());
         o += 1;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.scale_num.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.scale_den.to_le_bytes());
+        o += 4;
         Ok(o)
     }
     /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
@@ -3286,8 +3300,124 @@ impl PrefsResponse {
         }
         let reduce_motion = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
         o += 1;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let scale_num = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let scale_den = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
         let _ = o;
-        Ok(PrefsResponse { reduce_motion })
+        Ok(PrefsResponse {
+            reduce_motion,
+            scale_num,
+            scale_den,
+        })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.set_global_scale` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetGlobalScaleRequest {
+    /// Campo `num`.
+    pub num: u32,
+    /// Campo `den`.
+    pub den: u32,
+}
+
+impl SetGlobalScaleRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 41;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.num.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.den.to_le_bytes());
+        o += 4;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let num = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let den = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let _ = o;
+        Ok(SetGlobalScaleRequest { num, den })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.set_global_scale` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetGlobalScaleResponse {}
+
+impl SetGlobalScaleResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 41;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(SetGlobalScaleResponse {})
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
     pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
@@ -4162,6 +4292,8 @@ pub enum Request {
     SetReduceMotion(SetReduceMotionRequest),
     /// `prefs`.
     Prefs(PrefsRequest),
+    /// `set_global_scale`.
+    SetGlobalScale(SetGlobalScaleRequest),
     /// `notification_info`.
     NotificationInfo(NotificationInfoRequest),
     /// `notifications_clear`.
@@ -4338,6 +4470,11 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
                 return Err(ProtoError::Length);
             }
         }
+        Request::SetGlobalScale(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
         Request::NotificationInfo(_) => {
             if !hs.is_empty() {
                 return Err(ProtoError::Length);
@@ -4427,6 +4564,9 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
             SetReduceMotionRequest::decode_payload(p)?,
         )),
         37 => Ok(Request::Prefs(PrefsRequest::decode_payload(p)?)),
+        41 => Ok(Request::SetGlobalScale(
+            SetGlobalScaleRequest::decode_payload(p)?,
+        )),
         38 => Ok(Request::NotificationInfo(
             NotificationInfoRequest::decode_payload(p)?,
         )),
@@ -5311,6 +5451,33 @@ pub fn decode_prefs_response(msg: &[u8]) -> Result<PrefsResponse, ProtoError> {
         return Err(ProtoError::Flags);
     }
     PrefsResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `set_global_scale` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_set_global_scale_response(msg: &[u8]) -> Result<SetGlobalScaleResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 41 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    SetGlobalScaleResponse::decode_payload(p)
 }
 
 /// Decodifica a resposta de `notification_info` (erro remoto vira `ProtoError::Remote`).

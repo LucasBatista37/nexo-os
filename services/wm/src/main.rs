@@ -71,6 +71,9 @@ struct Attention {
     dnd: bool,
     /// Preferência de acessibilidade: apps devem desligar animações.
     reduce_motion: bool,
+    /// Escala global padrão do sistema (num, den): janelas exibidas em buf×num/den; uma
+    /// escala por janela (`set_scale`) sobrepõe. Apps leem o par em `prefs` (o "DPI").
+    scale: (u32, u32),
     /// Registro das notificações recentes (0 = mais recente) — inclusive as suprimidas pelo DND.
     log: [([u8; 64], u32); 8],
     log_n: usize,
@@ -359,6 +362,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         banner: None,
         dnd: false,
         reduce_motion: false,
+        scale: (1, 1),
         log: [([0; 64], 0); 8],
         log_n: 0,
     };
@@ -677,10 +681,13 @@ fn serve(
                 }
             };
             let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| fail(54, "map superficie"));
+            let (gn, gd) = attention.scale;
+            let gw = ((rq.w as i64 * gn as i64 / gd as i64) as i32).clamp(1, OUT_W);
+            let gh = ((rq.h as i64 * gn as i64 / gd as i64) as i32).clamp(1, OUT_H);
             surfaces[id] = Slot {
                 used: true,
                 owner,
-                rect: Rect::new(rq.x, rq.y, rq.w, rq.h),
+                rect: Rect::new(rq.x, rq.y, gw, gh),
                 z: rq.z,
                 alpha: 255,
                 buf_w: rq.w,
@@ -976,6 +983,31 @@ fn serve(
             let m = wm::ActivateResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
+        Request::SetGlobalScale(rq) => {
+            // Escala padrão do sistema: privilégio do shell (sessão bootstrap), como Output.
+            if owner != 0 {
+                reply_err(ch, wm::SetGlobalScaleRequest::METHOD_ID, E_NOT_SHELL, out);
+                return;
+            }
+            if rq.num == 0 || rq.den == 0 || rq.num > 8 * rq.den {
+                reply_err(ch, wm::SetGlobalScaleRequest::METHOD_ID, E_INVALID, out);
+                return;
+            }
+            attention.scale = (rq.num, rq.den);
+            // reescala o retângulo de exibição de todas as janelas a partir do buffer (uma
+            // escala por janela via set_scale é absoluta — o dono refaz se quiser mantê-la)
+            for s in surfaces.iter_mut() {
+                if s.used {
+                    s.rect.w =
+                        ((s.buf_w as i64 * rq.num as i64 / rq.den as i64) as i32).clamp(1, OUT_W);
+                    s.rect.h =
+                        ((s.buf_h as i64 * rq.num as i64 / rq.den as i64) as i32).clamp(1, OUT_H);
+                }
+            }
+            recompose(surfaces, outs, fb, *active_ctx, attention);
+            let m = wm::SetGlobalScaleResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
         Request::SetScale(rq) => {
             if !mine(surfaces, rq.id) {
                 reply_err(ch, wm::SetScaleRequest::METHOD_ID, E_NO_SURFACE, out);
@@ -1015,6 +1047,8 @@ fn serve(
         Request::Prefs(_) => {
             let resp = wm::PrefsResponse {
                 reduce_motion: attention.reduce_motion as u8,
+                scale_num: attention.scale.0,
+                scale_den: attention.scale.1,
             };
             let m = resp.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);

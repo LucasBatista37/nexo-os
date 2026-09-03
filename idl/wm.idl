@@ -365,6 +365,20 @@ method 37 prefs {
     }
     response {
         reduce_motion: u8,
+        scale_num: u32,
+        scale_den: u32,
+    }
+}
+
+# Escala global padrao do sistema (so o shell, sessao bootstrap; erro 7): todas as janelas
+# passam a ser exibidas em buf*num/den (uma escala por janela via set_scale SOBREPOE a global).
+# Apps leem o par em `prefs` para dimensionar texto/UI (o "DPI" do sistema).
+method 41 set_global_scale {
+    request {
+        num: u32,
+        den: u32,
+    }
+    response {
     }
 }
 
