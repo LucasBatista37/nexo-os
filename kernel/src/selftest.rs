@@ -72,6 +72,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_nvme_fs", test_user_nvme_fs),
     ("user_ahci_fs", test_user_ahci_fs),
     ("user_backup", test_user_backup),
+    ("user_reset", test_user_reset),
     ("user_slots", test_user_slots_confirm),
     ("user_update", test_user_update),
     ("user_services", test_user_services),
@@ -3252,6 +3253,94 @@ fn test_user_slots_confirm() -> TestResult {
     check!(cc == 0, "cliente saiu com {cc}");
     check!(uc == 0, "upd saiu com {uc}");
     check!(dc == 0, "ahcidev saiu com {dc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    let frames = settled_free_frames(frames0, 8);
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
+}
+
+/// Reset preservando arquivos: o driver (modo 69) cria dados de usuário (/home) e "estado de
+/// sistema" (/cfg, /lixo aninhado) no volume de dados, espelha /home no disco de backup
+/// ("quando possível"), e o `reset` limpa o volume em pós-ordem preservando /home — o driver
+/// confere que os dados do usuário ficaram e o resto sumiu. Mesma pilha dupla do backup
+/// (blockdev+fs principal, ahcidev+fs de backup) + os serviços `backup` e `reset`.
+fn test_user_reset() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let Some(ahci) = crate::pci::devices()
+        .iter()
+        .find(|d| d.class == 0x01 && d.subclass == 0x06 && d.prog_if == 0x01)
+        .map(|d| d.bdf)
+    else {
+        return Err(String::from("AHCI ausente (rode com o disco AHCI)"));
+    };
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    // pilha principal: blockdev + fs
+    let (a, b) = ChannelEnd::create_pair();
+    let (c, d) = ChannelEnd::create_pair();
+    let blk = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a)],
+    )
+    .map_err(String::from)?;
+    let fs1 =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
+            .map_err(String::from)?;
+    // pilha de backup: ahcidev + fs
+    let (e, f) = ChannelEnd::create_pair();
+    let (g, h) = ChannelEnd::create_pair();
+    let gr = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(ahci))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let ahcid = crate::process::spawn_named("ahcidev", 0, alloc::vec![gr, channel_handle(e)])
+        .map_err(String::from)?;
+    let fs2 =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(f), channel_handle(g)])
+            .map_err(String::from)?;
+    // serviços backup + reset e o driver
+    let (pa, pb) = ChannelEnd::create_pair();
+    let bkp = crate::process::spawn_named(
+        "backup",
+        0,
+        alloc::vec![channel_handle(pa), channel_handle(h)],
+    )
+    .map_err(String::from)?;
+    let (ra, rb) = ChannelEnd::create_pair();
+    let rst = crate::process::spawn_named("reset", 0, alloc::vec![channel_handle(ra)])
+        .map_err(String::from)?;
+    let driver = crate::process::spawn_named(
+        "utest",
+        69,
+        alloc::vec![channel_handle(pb), channel_handle(rb), channel_handle(d)],
+    )
+    .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&driver);
+    let kc = crate::process::wait_and_reap(&bkp);
+    let rc = crate::process::wait_and_reap(&rst);
+    let f1 = crate::process::wait_and_reap(&fs1);
+    let f2 = crate::process::wait_and_reap(&fs2);
+    let bc = crate::process::wait_and_reap(&blk);
+    let ac = crate::process::wait_and_reap(&ahcid);
+    drop((driver, bkp, rst, fs1, fs2, blk, ahcid));
+    sched::reap();
+    check!(cc == 0, "driver saiu com {cc}");
+    check!(kc == 0, "backup saiu com {kc}");
+    check!(rc == 0, "reset saiu com {rc}");
+    check!(f1 == 0, "fs principal saiu com {f1}");
+    check!(f2 == 0, "fs de backup saiu com {f2}");
+    check!(bc == 0, "blockdev saiu com {bc}");
+    check!(ac == 0, "ahcidev saiu com {ac}");
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
     let frames = settled_free_frames(frames0, 8);

@@ -112,6 +112,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         66 => wm_flip_client(),
         67 => slots_confirm_driver(),
         68 => update_apply_driver(),
+        69 => reset_driver(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -1907,6 +1908,76 @@ fn update_apply_driver() -> ! {
         "utest: update ok — slot {} atualizado por dentro do FAT, identico ao ativo, pendente p3 t3",
         to as char
     );
+    nexo_sys::exit(0)
+}
+
+/// Modo 69: reset preservando arquivos. Cria dados de usuario (/home) e "estado de sistema"
+/// (/cfg, /lixo aninhado), espelha /home no disco de backup ("quando possivel" — cinto e
+/// suspensorio), pede ao `reset` para limpar o volume preservando /home, e confere: o que era
+/// do usuario esta intacto, o resto sumiu. Handles: 0 = backup, 1 = reset, 2 = fs principal.
+fn reset_driver() -> ! {
+    let bkp: nexo_sys::Handle = 0;
+    let rst: nexo_sys::Handle = 1;
+    let mut c = FsClient {
+        ch: 2,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    {
+        use nexo_inst::AppFs;
+        let mut fs = InstFs { c: &mut c };
+        fs.mkdir("/home").unwrap_or_else(|_| nexo_sys::exit(1660));
+        fs.write_file("/home/doc.txt", b"dados preciosos do usuario")
+            .unwrap_or_else(|_| nexo_sys::exit(1661));
+        fs.mkdir("/cfg").unwrap_or_else(|_| nexo_sys::exit(1662));
+        fs.write_file("/cfg/sys.bin", b"estado de sistema")
+            .unwrap_or_else(|_| nexo_sys::exit(1663));
+        fs.mkdir("/lixo").unwrap_or_else(|_| nexo_sys::exit(1664));
+        fs.mkdir("/lixo/sub")
+            .unwrap_or_else(|_| nexo_sys::exit(1665));
+        fs.write_file("/lixo/sub/x.bin", b"entulho aninhado")
+            .unwrap_or_else(|_| nexo_sys::exit(1666));
+    }
+
+    let mut buf = [0u8; 128];
+    let mut hs = [0u32; 1];
+    // "quando possivel": espelha o diretorio do usuario no disco de backup antes do reset
+    if nexo_sys::channel_send(bkp, b"espelha /home", &[2]) != Status::Ok {
+        nexo_sys::exit(1667);
+    }
+    let fs_ch = match nexo_sys::channel_recv(bkp, &mut buf, &mut hs) {
+        Ok((n, 1)) if &buf[..n] == b"ok 1" => hs[0],
+        _ => nexo_sys::exit(1668),
+    };
+    // o reset limpa tudo, menos /home
+    if nexo_sys::channel_send(rst, b"limpa /home", &[fs_ch]) != Status::Ok {
+        nexo_sys::exit(1669);
+    }
+    let fs_ch = match nexo_sys::channel_recv(rst, &mut buf, &mut hs) {
+        Ok((n, 1)) if n > 3 && &buf[..3] == b"ok " => hs[0],
+        _ => nexo_sys::exit(1670),
+    };
+    let mut c2 = FsClient {
+        ch: fs_ch,
+        req: [0; 4096],
+        reply: [0; 4096],
+    };
+    use nexo_inst::AppFs;
+    let mut fs = InstFs { c: &mut c2 };
+    let mut back = [0u8; 64];
+    let n = fs
+        .read_file("/home/doc.txt", &mut back)
+        .unwrap_or_else(|_| nexo_sys::exit(1671));
+    if &back[..n] != b"dados preciosos do usuario" {
+        nexo_sys::exit(1672);
+    }
+    if fs.read_file("/cfg/sys.bin", &mut back).is_ok() {
+        nexo_sys::exit(1673); // o estado de sistema tinha que ter sumido
+    }
+    if fs.read_file("/lixo/sub/x.bin", &mut back).is_ok() {
+        nexo_sys::exit(1674); // o entulho aninhado tambem
+    }
+    nexo_sys::log("utest: reset ok — volume limpo, dados do usuario preservados (e espelhados)");
     nexo_sys::exit(0)
 }
 

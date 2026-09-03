@@ -287,6 +287,15 @@ name = "nexo-proto"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-reset"
+version = "0.0.1"
+dependencies = [
+ "nexo-proto",
+ "nexo-rt",
+ "nexo-sys",
+]
+
+[[package]]
 name = "nexo-rngdev"
 version = "0.0.1"
 dependencies = [

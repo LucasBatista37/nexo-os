@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 8, bloco 50 — reset preservando arquivos)
+- `services/reset`: limpa o volume de dados em **pós-ordem** (o `unlink` do nexo.fs remove diretórios vazios), preservando a subárvore do usuário e os ancestrais dela; o canal do fs viaja **emprestado por pedido e volta com a resposta** (o padrão de capacidade do editor/backup). O reset do sistema já existia por outro caminho (slots A/B + recuperação) — este cuida dos dados.
+- "Quando possível" de verdade: no fluxo testado, o diretório preservado é **espelhado no disco de backup antes** do reset (serviço `backup` — integração real entre os dois). Auto-teste `user_reset` (95º): /home intacto byte a byte, estado de sistema e entulho aninhado removidos; idempotente entre boots.
+
 ### Adicionado (Fase 8, bloco 49 — ambiente de recuperação independente)
 - `\nexo\recovery\` (kernel + initrd): cópia do sistema que **nenhuma atualização toca** — só o build a grava. O loader cai nela quando os dois slots falham estruturalmente ou quando nenhum é elegível (updates esgotados sem confirmação): **a máquina sempre arranca**.
 - `tools/test-recovery`: as duas variantes provadas — kernels de A e B corrompidos, e estado inelegível — com a suíte inteira (94/94) passando dentro do ambiente de recuperação; os auto-testes de esp/vfs aceitam o recovery como terceiro caminho de kernel íntegro.
