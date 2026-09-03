@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 5, bloco 56 — notificações por Contexto)
+- Os avisos ganharam a dimensão dos **Contextos**: o compositor atribui cada notificação ao Contexto da janela de topo da sessão publicante (a sessão não escolhe — isolamento preservado); um aviso de Contexto **inativo não interrompe** — fica à espera e aparece ao trocar para ele (com o evento de acessibilidade), o banner é recolhido ao sair do Contexto dele, e a Central de Ações limpa também as esperas. A disciplina vale no `switch_context` e no `activate` do shell.
+- Auto-teste `wm_notify` estendido: aviso do Contexto 1 não toca o banner do Contexto 0 ativo; a troca o revela; a volta o recolhe — tudo conferido por pixel.
+
 ### Adicionado (Fase 5, bloco 55 — filtro bilinear na composição escalada)
 - A composição escalada do `nexo-wm` trocou o vizinho-mais-próximo por **interpolação bilinear** (ponto fixo 8.8, amostragem no centro do pixel, vizinhos presos à borda do buffer): rampas ficam suaves, cores sólidas continuam sólidas e nada do fundo vaza para dentro da janela; o caminho 1:1 segue leitura direta. Testes de host conferem a rampa e a mistura na transição de quadrantes dígito a dígito — e a suíte inteira de testes de pixel (tile, maximize, escala, contextos) permanece exata nos interiores. Com isso o item de escala fracionária da Fase 5 fecha por completo.
 

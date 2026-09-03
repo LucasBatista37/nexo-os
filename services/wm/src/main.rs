@@ -67,7 +67,11 @@ fn hdr(base: u64, off: usize) -> &'static AtomicU32 {
 
 /// Notificação em exibição (título truncado) e o modo não-perturbe.
 struct Attention {
-    banner: Option<([u8; 64], u32)>,
+    /// Banner em exibição: título + tamanho + o **Contexto a que pertence** (só aparece
+    /// quando esse Contexto está ativo — um aviso não vaza para o Contexto errado).
+    banner: Option<([u8; 64], u32, u8)>,
+    /// Aviso à espera por Contexto inativo: não interrompe; aparece ao trocar para ele.
+    pending: [Option<([u8; 64], u32)>; NUM_CONTEXTS as usize],
     dnd: bool,
     /// Preferência de acessibilidade: apps devem desligar animações.
     reduce_motion: bool,
@@ -245,9 +249,11 @@ fn recompose(
         let mut dmg = Damage::new();
         dmg.add(Rect::new(0, 0, OUT_W, OUT_H));
         composite(&mut out, &wins[..n], dmg.bounds(), Color::rgb(0, 0, 0));
-        // Banner de notificação: sobreposição no topo direito do display 0, acima de tudo.
+        // Banner de notificação: sobreposição no topo direito do display 0, acima de tudo —
+        // e só quando o Contexto dele é o ativo (um aviso não vaza para o Contexto errado).
         if d == 0
-            && let Some((title, tlen)) = &att.banner
+            && let Some((title, tlen, bctx)) = &att.banner
+            && *bctx == ctx
         {
             let r = Rect::new(OUT_W - 32, 0, 32, 10);
             out.fill_rect(r, Color::rgb(40, 80, 200));
@@ -360,6 +366,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut drag: Option<([u8; 256], u32)> = None;
     let mut attention = Attention {
         banner: None,
+        pending: [None; NUM_CONTEXTS as usize],
         dnd: false,
         reduce_motion: false,
         scale: (1, 1),
@@ -921,6 +928,7 @@ fn serve(
                 return;
             }
             attention.log_n = 0;
+            attention.pending = [None; NUM_CONTEXTS as usize];
             if attention.banner.take().is_some() {
                 recompose(surfaces, outs, fb, *active_ctx, attention);
             }
@@ -969,6 +977,19 @@ fn serve(
             }
             // troca para o contexto da janela, traz à frente e dá o foco (com evento a11y)
             *active_ctx = surfaces[i].context;
+            // mesma disciplina do switch_context: banner alheio recolhido, aviso à espera sobe
+            if let Some((t, l, c)) = attention.banner
+                && c != *active_ctx
+            {
+                attention.pending[c as usize] = Some((t, l));
+                attention.banner = None;
+            }
+            if attention.banner.is_none()
+                && let Some((t, l)) = attention.pending[*active_ctx as usize].take()
+            {
+                attention.banner = Some((t, l, *active_ctx));
+                a11y_emit(a11y, 2, 0, &t[..l as usize]);
+            }
             let top = surfaces
                 .iter()
                 .filter(|s| s.used)
@@ -1094,9 +1115,22 @@ fn serve(
             attention.log[0] = (title, t.len() as u32);
             attention.log_n = (attention.log_n + 1).min(attention.log.len());
             if !attention.dnd {
-                attention.banner = Some((title, t.len() as u32));
-                a11y_emit(a11y, 2, 0, t);
-                recompose(surfaces, outs, fb, *active_ctx, attention);
+                // O aviso pertence ao Contexto da janela de topo da sessão publicante (o wm
+                // atribui — a sessão não escolhe); sem janelas, ao Contexto ativo. Contexto
+                // inativo NÃO é interrompido: o aviso espera a troca.
+                let nctx = surfaces
+                    .iter()
+                    .filter(|s| s.used && s.owner == owner)
+                    .max_by_key(|s| s.z)
+                    .map(|s| s.context)
+                    .unwrap_or(*active_ctx);
+                if nctx == *active_ctx {
+                    attention.banner = Some((title, t.len() as u32, nctx));
+                    a11y_emit(a11y, 2, 0, t);
+                    recompose(surfaces, outs, fb, *active_ctx, attention);
+                } else {
+                    attention.pending[nctx as usize] = Some((title, t.len() as u32));
+                }
             }
             let m = wm::NotifyResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
@@ -1222,6 +1256,20 @@ fn serve(
             }
             *active_ctx = rq.context;
             a11y_emit(a11y, 3, rq.context as u32, b"");
+            // banner de outro Contexto é recolhido (volta à espera do Contexto dele); um
+            // aviso que esperava por este Contexto aparece agora
+            if let Some((t, l, c)) = attention.banner
+                && c != rq.context
+            {
+                attention.pending[c as usize] = Some((t, l));
+                attention.banner = None;
+            }
+            if attention.banner.is_none()
+                && let Some((t, l)) = attention.pending[rq.context as usize].take()
+            {
+                attention.banner = Some((t, l, rq.context));
+                a11y_emit(a11y, 2, 0, &t[..l as usize]);
+            }
             // foco vai para a janela de maior z do contexto ativado (ou nenhuma)
             *focused = surfaces
                 .iter()

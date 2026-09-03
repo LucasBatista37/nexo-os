@@ -5865,8 +5865,54 @@ fn wm_notify() -> ! {
     if wm_px(ob, stride, 60, 4) == (0, 0, 255) {
         nexo_sys::exit(925); // o banner do aviso em segundo plano aparece
     }
+    dismiss(s1, &mut out, &mut buf, &mut hs);
+
+    // avisos POR CONTEXTO: a janela de topo da sessao vai para o Contexto 1; um aviso dela
+    // NAO interrompe o Contexto 0 ativo — espera, e aparece ao trocar para o 1
+    let (b2, b2_base) = wm_create(s1, 0, 0, 16, 16, 9);
+    wm_fill(b2_base, 16, 16, 0, 128, 0);
+    wm_commit(s1, b2);
+    let m = nexo_proto::wm::SetContextRequest { id: b2, context: 1 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(926));
+    if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(927);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_context_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(928),
+    }
+    let switch = |ch: nexo_sys::Handle,
+                  c: u8,
+                  out: &mut [u8; 256],
+                  buf: &mut [u8; 256],
+                  hs: &mut [u32; 1]| {
+        let m = nexo_proto::wm::SwitchContextRequest { context: c }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(929));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(930);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) if nexo_proto::wm::decode_switch_context_response(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(931),
+        }
+    };
+    notify(s1, b"do ctx 1", &mut out, &mut buf, &mut hs);
+    if wm_px(ob, stride, 60, 4) != (0, 0, 255) {
+        nexo_sys::exit(932); // o aviso do Contexto 1 nao pode interromper o Contexto 0
+    }
+    switch(s1, 1, &mut out, &mut buf, &mut hs);
+    if wm_px(ob, stride, 60, 4) == (0, 0, 0) {
+        nexo_sys::exit(933); // ao entrar no Contexto 1, o aviso a espera aparece (nao e fundo)
+    }
+    switch(s1, 0, &mut out, &mut buf, &mut hs);
+    if wm_px(ob, stride, 60, 4) != (0, 0, 255) {
+        nexo_sys::exit(934); // de volta ao 0: o banner do 1 foi recolhido, o azul reaparece
+    }
+    let _ = b2;
     nexo_sys::log(
-        "utest: wm notify ok — banner de aviso, DND descarta e so o dono da entrada o controla",
+        "utest: wm notify ok — banner, DND, posse da entrada e avisos por Contexto (espera e troca)",
     );
     nexo_sys::exit(0)
 }
