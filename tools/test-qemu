@@ -115,6 +115,7 @@ SCENARIOS = {
             r"0 5 26 /cp-teste\.txt",
             r"wc-c\] 2 4 20",
             r"cat-c\] stdin do cat via canal",
+            r"0 5 26 /mv-teste\.txt",
             r"\[TEST\] gfx \.\.\. ok",
             r"\[TEST\] symbols \.\.\. ok",
             r"\[RESULT\] PASS \d+/\d+",

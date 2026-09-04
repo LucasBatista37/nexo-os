@@ -248,6 +248,98 @@ fn read_all(fs: &mut Fs<MemDisk>, path: &[u8]) -> Option<Vec<u8>> {
 }
 
 #[test]
+fn rename_semantics() {
+    let mut fs = Fs::format(MemDisk::new(512), 64).unwrap();
+    let free0 = baseline_free(&mut fs);
+    fs.create(b"/d1", Kind::Dir).unwrap();
+    fs.create(b"/d2", Kind::Dir).unwrap();
+    let ino = fs.create(b"/d1/a.txt", Kind::File).unwrap();
+    fs.write(ino, 0, b"conteudo do a").unwrap();
+    // mesmo diretorio: o inode nao muda
+    fs.rename(b"/d1/a.txt", b"/d1/b.txt").unwrap();
+    assert_eq!(fs.stat(b"/d1/a.txt"), Err(FsError::NotFound));
+    assert_eq!(fs.stat(b"/d1/b.txt").unwrap().ino, ino);
+    // entre diretorios: mesmo inode, conteudo intacto
+    fs.rename(b"/d1/b.txt", b"/d2/c.txt").unwrap();
+    assert_eq!(fs.stat(b"/d2/c.txt").unwrap().ino, ino);
+    assert_eq!(read_all(&mut fs, b"/d2/c.txt").unwrap(), b"conteudo do a");
+    // destino existente (incluindo ele mesmo) e origem inexistente
+    fs.create(b"/d2/x.txt", Kind::File).unwrap();
+    assert_eq!(fs.rename(b"/d2/c.txt", b"/d2/x.txt"), Err(FsError::Exists));
+    assert_eq!(fs.rename(b"/d2/x.txt", b"/d2/x.txt"), Err(FsError::Exists));
+    assert_eq!(fs.rename(b"/nada", b"/algo"), Err(FsError::NotFound));
+    // diretorio renomeado leva a subarvore junto
+    fs.create(b"/d1/sub", Kind::Dir).unwrap();
+    let f = fs.create(b"/d1/sub/f.txt", Kind::File).unwrap();
+    fs.write(f, 0, b"fundo").unwrap();
+    fs.rename(b"/d1", b"/renomeado").unwrap();
+    assert_eq!(
+        read_all(&mut fs, b"/renomeado/sub/f.txt").unwrap(),
+        b"fundo"
+    );
+    // mover um diretorio para dentro da propria subarvore criaria um ciclo
+    assert_eq!(
+        fs.rename(b"/renomeado", b"/renomeado/sub/ciclo"),
+        Err(FsError::InvalidArgs)
+    );
+    // limpeza total: nenhum bloco vazou
+    fs.unlink(b"/renomeado/sub/f.txt").unwrap();
+    fs.unlink(b"/renomeado/sub").unwrap();
+    fs.unlink(b"/renomeado").unwrap();
+    fs.unlink(b"/d2/c.txt").unwrap();
+    fs.unlink(b"/d2/x.txt").unwrap();
+    fs.unlink(b"/d2").unwrap();
+    assert_eq!(fs.info().free_blocks, free0, "blocos vazaram");
+    let mut fs = Fs::mount(fs.into_device()).unwrap();
+    assert_eq!(fs.info().repairs, 0);
+    assert_eq!(fs.list(b"/", |_, _| {}).unwrap(), 0);
+}
+
+#[test]
+fn power_cut_during_rename_never_loses_the_file() {
+    let monta = || {
+        let mut fs = Fs::format(MemDisk::new(256), 32).unwrap();
+        fs.create(b"/de", Kind::Dir).unwrap();
+        fs.create(b"/para", Kind::Dir).unwrap();
+        let ino = fs.create(b"/de/a.txt", Kind::File).unwrap();
+        fs.write(ino, 0, b"sobrevive ao corte").unwrap();
+        fs
+    };
+    let total = {
+        let mut fs = monta();
+        let base = fs.dev.writes;
+        fs.rename(b"/de/a.txt", b"/para/b.txt").unwrap();
+        fs.dev.writes - base
+    };
+    assert!(total >= 2, "rename curto demais: {total} escritas");
+    let conteudo = b"sobrevive ao corte".to_vec();
+    for cut in 0..total {
+        for torn in [0usize, 1, 3] {
+            let mut fs = monta();
+            fs.dev.cut = Some((fs.dev.writes + cut, torn));
+            assert_eq!(fs.rename(b"/de/a.txt", b"/para/b.txt"), Err(FsError::Io));
+            let mut dev = fs.into_device();
+            dev.cut = None;
+            let mut fs = Fs::mount(dev)
+                .unwrap_or_else(|e| panic!("montagem apos corte em {cut}/{torn}: {e:?}"));
+            // A ordem do rename garante: o arquivo existe sob o nome velho OU o novo (um
+            // corte entre o commit do destino e a limpeza da origem deixa os DOIS — nunca
+            // nenhum), sempre com o conteudo integro.
+            let velho = read_all(&mut fs, b"/de/a.txt");
+            let novo = read_all(&mut fs, b"/para/b.txt");
+            assert!(
+                velho.as_ref() == Some(&conteudo) || novo.as_ref() == Some(&conteudo),
+                "corte {cut}/{torn}: arquivo perdido (velho={velho:?} novo={novo:?})"
+            );
+            // volume utilizavel apos o reparo
+            let ino = fs.create(b"/pos", Kind::File).unwrap();
+            fs.write(ino, 0, b"ok").unwrap();
+            fs.unlink(b"/pos").unwrap();
+        }
+    }
+}
+
+#[test]
 fn power_cut_at_every_write_keeps_files_consistent() {
     // Conta as escritas de cada passo para saber em que passo o corte cai.
     let mut boundaries = Vec::new();

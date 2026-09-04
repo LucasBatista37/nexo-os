@@ -204,6 +204,19 @@ off_t lseek(int fd, off_t off, int whence) {
     return novo;
 }
 
+int rename(const char *from, const char *to) {
+    if (canal_fs == 0xffffffffu)
+        return -1;
+    nexo_fs_rename_req rq = {0};
+    if (caminho(from, rq.from, &rq.from_len) || caminho(to, rq.to, &rq.to_len))
+        return -1;
+    int n = nexo_fs_rename_req_encode(msg, sizeof(msg), &rq);
+    if (n < 0 || (n = rpc(n)) < 0)
+        return -1;
+    nexo_fs_rename_resp rr;
+    return nexo_fs_rename_resp_decode(msg, (size_t)n, &rr) == 0 ? 0 : -1;
+}
+
 int unlink(const char *path) {
     if (canal_fs == 0xffffffffu)
         return -1;

@@ -310,6 +310,45 @@ impl Vfs {
         }
     }
 
+    fn rename(&mut self, from: &[u8], to: &[u8], out: &mut [u8; 4096]) -> Op {
+        let (fm, frest) = split_mount(from);
+        let (tm, trest) = split_mount(to);
+        if fm != tm {
+            return Err(E_INVALID); // sem rename entre montagens (o EXDEV do POSIX)
+        }
+        if fm == b"disk" && self.mounts & MOUNT_DISK != 0 {
+            let (fp, fp_len) = path_of(frest);
+            let (tp, tp_len) = path_of(trest);
+            let m = pfs::RenameRequest {
+                from: fp,
+                from_len: fp_len,
+                to: tp,
+                to_len: tp_len,
+            }
+            .encode_msg(&mut self.msg)
+            .map_err(|_| E_IO)?;
+            let n = roundtrip(FS, &mut self.msg, m);
+            pfs::decode_rename_response(&self.msg[..n]).map_err(remote_code)?;
+            pfs::RenameResponse {}.encode_msg(out).map_err(|_| E_IO)
+        } else if fm == b"boot" && self.mounts & MOUNT_BOOT != 0 {
+            Err(E_READ_ONLY)
+        } else if fm == b"tmp" && self.mounts & MOUNT_TMP != 0 {
+            if trest.is_empty() || trest.len() > NAME_MAX || trest.contains(&b'/') {
+                return Err(E_INVALID_NAME);
+            }
+            if ram_find(trest).is_some() {
+                return Err(E_EXISTS);
+            }
+            let i = ram_find(frest).ok_or(E_NOT_FOUND)?;
+            let r = ramfs();
+            r.files[i].name[..trest.len()].copy_from_slice(trest);
+            r.files[i].name_len = trest.len() as u8;
+            pfs::RenameResponse {}.encode_msg(out).map_err(|_| E_IO)
+        } else {
+            Err(E_NOT_FOUND)
+        }
+    }
+
     fn read(&mut self, ino: u32, offset: u64, len: u32, out: &mut [u8; 4096]) -> Op {
         let (tag, raw) = (ino >> TAG_SHIFT, ino & ((1 << TAG_SHIFT) - 1));
         match tag {
@@ -657,6 +696,18 @@ pub extern "C" fn _start(mounts: u64) -> ! {
                 pfs::TruncateRequest::METHOD_ID,
                 vfs.truncate(rq.ino, rq.size, &mut out),
             ),
+            pfs::Request::Rename(rq) => {
+                let (f, fl) = (rq.from, rq.from_len);
+                let (t, tl) = (rq.to, rq.to_len);
+                (
+                    pfs::RenameRequest::METHOD_ID,
+                    vfs.rename(
+                        &f[..(fl as usize).min(256)],
+                        &t[..(tl as usize).min(256)],
+                        &mut out,
+                    ),
+                )
+            }
         };
         let m = match r {
             Ok(m) => m,

@@ -76,6 +76,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_rm", test_user_rm),
     ("user_wc_stdin", test_user_wc_stdin),
     ("user_cat_stdin", test_user_cat_stdin),
+    ("user_mv", test_user_mv),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3283,6 +3284,12 @@ fn test_user_c_fs() -> TestResult {
 /// reabastecimento do buffer da libc) e a ponta de escrita e fechada ANTES do spawn — a fila
 /// sobrevive (garantia do ipc_handoff) e o PeerClosed apos drena-la e o EOF.
 fn run_c_util(bin: &str, argv: &[u8], stdin: Option<&[u8]>) -> TestResult {
+    run_c_util_codes(bin, argv, stdin, &[0])
+}
+
+/// Variante que aceita um conjunto de saidas validas do utilitario — para passos de faxina
+/// tolerantes (ex.: `rm` de um resto de boot interrompido pode nao achar nada e sair 1).
+fn run_c_util_codes(bin: &str, argv: &[u8], stdin: Option<&[u8]>, ok: &[i64]) -> TestResult {
     use crate::ipc::{ChannelEnd, Message};
     if crate::initrd::find(bin).is_none() {
         return Err(alloc::format!(
@@ -3337,7 +3344,7 @@ fn run_c_util(bin: &str, argv: &[u8], stdin: Option<&[u8]>) -> TestResult {
     let bc = crate::process::wait_and_reap(&blk);
     drop((client, fs, blk, argv_tx));
     sched::reap();
-    check!(cc == 0, "{bin} saiu com {cc}");
+    check!(ok.contains(&cc), "{bin} saiu com {cc}");
     check!(fc == 0, "fs saiu com {fc}");
     check!(bc == 0, "blockdev saiu com {bc}");
     let ends = crate::ipc::live_channel_ends();
@@ -3393,6 +3400,18 @@ fn test_user_wc_stdin() -> TestResult {
 /// e write(1) e vira marcador do cenario boot.
 fn test_user_cat_stdin() -> TestResult {
     run_c_util("cat-c", b"cat\0", Some(b"stdin do cat via canal\n"))
+}
+
+/// `mv` portado sobre o `rename` NOVO do NexoFS (metodo 11, fs v1.1; crash-safe: a entrada
+/// nova e o commit, corte deixa um ou dois nomes — nunca zero, provado nos testes de host
+/// com corte em cada escrita). Copia, move, confere por CONTEUDO ("0 5 26 /mv-teste.txt" e
+/// marcador do cenario boot) e remove — idempotente, com faxina tolerante de restos.
+fn test_user_mv() -> TestResult {
+    run_c_util_codes("rm-c", b"rm\0/mv-teste.txt\0", None, &[0, 1])?;
+    run_c_util("cp-c", b"cp\0/c-arquivo.txt\0/mv-de.txt\0", None)?;
+    run_c_util("mv-c", b"mv\0/mv-de.txt\0/mv-teste.txt\0", None)?;
+    run_c_util("wc-c", b"wc\0/mv-teste.txt\0", None)?;
+    run_c_util("rm-c", b"rm\0/mv-teste.txt\0", None)
 }
 
 /// Primeiro processo em **C++** (freestanding, sem exceptions/RTTI): construtor global via

@@ -1,4 +1,4 @@
-/* nexo_proto_fs.h — protocolo tipado `nexo.fs` v1.0 em C.
+/* nexo_proto_fs.h — protocolo tipado `nexo.fs` v1.1 em C.
  * GERADO por tools/idlgen do idl/fs.idl — nao editar. Fio identico ao Rust:
  * cabecalho NXIP de 24 bytes + payload little-endian (bytes<N>: u32 len + dados).
  * Nesta rodada: encode de PEDIDO + decode de RESPOSTA (clientes C); handles nao
@@ -11,7 +11,7 @@
 
 #define NEXO_FS_PROTOCOL_ID 0x2d3847ceu
 #define NEXO_FS_VMAJOR 1
-#define NEXO_FS_VMINOR 0
+#define NEXO_FS_VMINOR 1
 
 typedef struct {
     uint8_t path[256];
@@ -399,6 +399,52 @@ static inline int nexo_fs_info_resp_decode(const uint8_t *b, size_t len, nexo_fs
       { uint64_t v = 0; size_t i; if (o + 8 > len) return -1; for (i = 0; i < 8; i++) v |= (uint64_t)b[o + i] << (8 * i); m->free_blocks = (uint64_t)v; o += 8; }
       { uint64_t v = 0; size_t i; if (o + 8 > len) return -1; for (i = 0; i < 8; i++) v |= (uint64_t)b[o + i] << (8 * i); m->repairs = (uint64_t)v; o += 8; }
       { uint64_t v = 0; size_t i; if (o + 8 > len) return -1; for (i = 0; i < 8; i++) v |= (uint64_t)b[o + i] << (8 * i); m->generation = (uint64_t)v; o += 8; }
+    }
+    return 0;
+}
+
+typedef struct {
+    uint8_t from[256];
+    uint32_t from_len;
+    uint8_t to[256];
+    uint32_t to_len;
+} nexo_fs_rename_req;
+
+typedef struct {
+    uint8_t _vazio; /* sem campos */
+} nexo_fs_rename_resp;
+
+/* Codifica o pedido `rename` (metodo 11); devolve o tamanho ou -1. */
+static inline int nexo_fs_rename_req_encode(uint8_t *out, size_t cap, const nexo_fs_rename_req *m) {
+    size_t o = 24;
+    if (m->from_len > 256 || o + 4 + m->from_len > cap) return -1;
+    { uint32_t l = m->from_len; size_t i; for (i = 0; i < 4; i++) out[o + i] = (uint8_t)(l >> (8 * i)); }
+    { size_t i; for (i = 0; i < m->from_len; i++) out[o + 4 + i] = m->from[i]; }
+    o += 4 + m->from_len;
+    if (m->to_len > 256 || o + 4 + m->to_len > cap) return -1;
+    { uint32_t l = m->to_len; size_t i; for (i = 0; i < 4; i++) out[o + i] = (uint8_t)(l >> (8 * i)); }
+    { size_t i; for (i = 0; i < m->to_len; i++) out[o + 4 + i] = m->to[i]; }
+    o += 4 + m->to_len;
+    if (cap < 24) return -1;
+    /* magic NXIP: u32 0x4e584950 em little-endian no fio */
+    out[0] = 0x50; out[1] = 0x49; out[2] = 0x58; out[3] = 0x4e;
+    { uint32_t v = NEXO_FS_PROTOCOL_ID; size_t i; for (i = 0; i < 4; i++) out[4 + i] = (uint8_t)(v >> (8 * i)); }
+    out[8] = (uint8_t)NEXO_FS_VMAJOR; out[9] = (uint8_t)(NEXO_FS_VMAJOR >> 8);
+    out[10] = (uint8_t)NEXO_FS_VMINOR; out[11] = (uint8_t)(NEXO_FS_VMINOR >> 8);
+    { uint32_t v = 11; size_t i; for (i = 0; i < 4; i++) out[12 + i] = (uint8_t)(v >> (8 * i)); }
+    out[16] = out[17] = out[18] = out[19] = 0; /* flags: pedido */
+    { uint32_t v = (uint32_t)(o - 24); size_t i; for (i = 0; i < 4; i++) out[20 + i] = (uint8_t)(v >> (8 * i)); }
+    return (int)o;
+}
+
+/* Decodifica a resposta de `rename`: 0 = ok; >0 = erro remoto; -1 = malformada. */
+static inline int nexo_fs_rename_resp_decode(const uint8_t *b, size_t len, nexo_fs_rename_resp *m) {
+    if (len < 24 || b[0] != 0x50 || b[1] != 0x49 || b[2] != 0x58 || b[3] != 0x4e) return -1;
+    { uint32_t fl = (uint32_t)b[16] | ((uint32_t)b[17] << 8) | ((uint32_t)b[18] << 16) | ((uint32_t)b[19] << 24);
+      if (fl & 2u) { if (len < 28) return -1;
+        return (int)((uint32_t)b[24] | ((uint32_t)b[25] << 8) | ((uint32_t)b[26] << 16) | ((uint32_t)b[27] << 24)); } }
+    { size_t o = 24;
+      (void)o; (void)m;
     }
     return 0;
 }

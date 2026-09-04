@@ -10,6 +10,8 @@
 //! em um setor de 512 B (inode ou entrada de diretório); os dados são escritos antes em blocos novos
 //! (copy-on-write) e os antigos liberados depois. Um corte em qualquer ponto deixa cada arquivo na
 //! versão anterior ou na nova; blocos/inodes órfãos são recuperados na montagem (`repairs`).
+//! Um `rename` cortado pode deixar o arquivo com dois nomes (nunca zero); como a v0 não tem
+//! hardlinks, a montagem trata a referência dupla como rename interrompido e apaga a segunda.
 //! Limitação documentada: arquivos com mais de 12 blocos usam um bloco indireto cujos ponteiros
 //! são confirmados antes do inode (mistura de versões por bloco possível, nunca ponteiros pendentes).
 #![no_std]
@@ -914,42 +916,7 @@ impl<D: BlockDevice> Fs<D> {
         if self.find_in_dir(&parent, name)?.is_some() {
             return Err(FsError::Exists);
         }
-        // 1. slot livre no diretorio (ou extensao)
-        let entries = (parent.size / DIRENT_SIZE as u64) as usize;
-        let mut used = [0u8; (NDIRECT + PTRS_PER_BLOCK) * (BLOCK / DIRENT_SIZE) / 8];
-        self.for_each_entry(&parent, |i, _| {
-            used[i / 8] |= 1 << (i % 8);
-            true
-        })?;
-        let mut slot = None;
-        for i in 0..entries {
-            if used[i / 8] & (1 << (i % 8)) == 0 {
-                let per_block = BLOCK / DIRENT_SIZE;
-                if self.block_ptr(&parent, i / per_block)? != 0 {
-                    slot = Some(i);
-                    break;
-                }
-            }
-        }
-        let slot = match slot {
-            Some(s) => s,
-            None => {
-                let per_block = BLOCK / DIRENT_SIZE;
-                let idx = entries / per_block;
-                if idx >= NDIRECT {
-                    return Err(FsError::NoSpace); // diretorios v0: ate 12 blocos (384 entradas)
-                }
-                let nb = self.alloc_block()?;
-                let zero = [0u8; BLOCK];
-                self.dev.write_block(nb, &zero)?;
-                parent.direct[idx] = nb;
-                parent.size = ((idx + 1) * per_block * DIRENT_SIZE) as u64;
-                parent.generation = parent.generation.wrapping_add(1);
-                self.write_inode(pino, &parent)?; // commit da extensao (entradas vazias)
-                self.write_bitmap()?;
-                idx * per_block
-            }
-        };
+        let slot = self.dir_alloc_slot(pino, &mut parent)?;
         // 2. inode novo
         let ino = self.alloc_inode()?;
         let inode = Inode {
@@ -963,6 +930,93 @@ impl<D: BlockDevice> Fs<D> {
         // 3. commit: entrada de diretorio
         self.write_entry(&parent, slot, ino, name)?;
         Ok(ino)
+    }
+
+    /// Um slot livre no diretório, estendendo-o por um bloco novo se preciso (a extensão é
+    /// commitada com entradas vazias antes de qualquer uso) — passo 1 do create e do rename.
+    fn dir_alloc_slot(&mut self, pino: u32, parent: &mut Inode) -> Result<usize, FsError> {
+        let entries = (parent.size / DIRENT_SIZE as u64) as usize;
+        let mut used = [0u8; (NDIRECT + PTRS_PER_BLOCK) * (BLOCK / DIRENT_SIZE) / 8];
+        self.for_each_entry(parent, |i, _| {
+            used[i / 8] |= 1 << (i % 8);
+            true
+        })?;
+        let mut slot = None;
+        for i in 0..entries {
+            if used[i / 8] & (1 << (i % 8)) == 0 {
+                let per_block = BLOCK / DIRENT_SIZE;
+                if self.block_ptr(parent, i / per_block)? != 0 {
+                    slot = Some(i);
+                    break;
+                }
+            }
+        }
+        match slot {
+            Some(s) => Ok(s),
+            None => {
+                let per_block = BLOCK / DIRENT_SIZE;
+                let idx = entries / per_block;
+                if idx >= NDIRECT {
+                    return Err(FsError::NoSpace); // diretorios v0: ate 12 blocos (384 entradas)
+                }
+                let nb = self.alloc_block()?;
+                let zero = [0u8; BLOCK];
+                self.dev.write_block(nb, &zero)?;
+                parent.direct[idx] = nb;
+                parent.size = ((idx + 1) * per_block * DIRENT_SIZE) as u64;
+                parent.generation = parent.generation.wrapping_add(1);
+                self.write_inode(pino, parent)?; // commit da extensao (entradas vazias)
+                self.write_bitmap()?;
+                Ok(idx * per_block)
+            }
+        }
+    }
+
+    /// Renomeia/move `src` para `dst` no mesmo volume: a entrada nova aponta para o MESMO
+    /// inode e é escrita PRIMEIRO (o commit); só depois a antiga é apagada. Um corte entre os
+    /// dois passos deixa o arquivo com DOIS nomes — nunca com zero — íntegro sob qualquer um.
+    /// O destino não pode existir (sem substituição na v0) e mover um diretório para dentro
+    /// da própria subárvore é recusado (`InvalidArgs`) — criaria um ciclo fora da raiz.
+    pub fn rename(&mut self, src: &[u8], dst: &[u8]) -> Result<(), FsError> {
+        let (sparent_path, sname) = Self::split_parent(src)?;
+        let (dparent_path, dname) = Self::split_parent(dst)?;
+        let (_, sparent) = self.resolve(sparent_path)?;
+        if sparent.kind() != Some(Kind::Dir) {
+            return Err(FsError::NotDir);
+        }
+        let (_, ino) = self
+            .find_in_dir(&sparent, sname)?
+            .ok_or(FsError::NotFound)?;
+        let inode = self.read_inode(ino)?;
+        if inode.kind() == Some(Kind::Dir) {
+            let mut cur = self.read_inode(ROOT_INO)?;
+            for comp in dparent_path.split(|&c| c == b'/') {
+                if comp.is_empty() || comp == b"." {
+                    continue;
+                }
+                let (_, next) = self.find_in_dir(&cur, comp)?.ok_or(FsError::NotFound)?;
+                if next == ino {
+                    return Err(FsError::InvalidArgs);
+                }
+                cur = self.read_inode(next)?;
+            }
+        }
+        let (dpino, mut dparent) = self.resolve(dparent_path)?;
+        if dparent.kind() != Some(Kind::Dir) {
+            return Err(FsError::NotDir);
+        }
+        if self.find_in_dir(&dparent, dname)?.is_some() {
+            return Err(FsError::Exists);
+        }
+        let slot = self.dir_alloc_slot(dpino, &mut dparent)?;
+        self.write_entry(&dparent, slot, ino, dname)?; // commit: o nome novo existe
+        // Apaga a entrada antiga re-resolvendo o pai: se origem e destino são o mesmo
+        // diretório, o inode dele pode ter sido estendido logo acima.
+        let (_, sparent) = self.resolve(sparent_path)?;
+        let (sslot, _) = self
+            .find_in_dir(&sparent, sname)?
+            .ok_or(FsError::NotFound)?;
+        self.write_entry(&sparent, sslot, 0, b"")
     }
 
     /// Remove um arquivo ou diretório vazio.
@@ -1092,6 +1146,15 @@ impl<D: BlockDevice> Fs<D> {
                 Some((i, child)) => {
                     stack[depth].1 = i + 1;
                     let inode = self.read_inode(child)?;
+                    // Referência dupla = rename cortado entre o commit do destino e a
+                    // limpeza da origem (a v0 não tem hardlinks): mantém a primeira entrada
+                    // encontrada e apaga esta — o arquivo fica com exatamente um nome.
+                    let (iu, mu) = (child as usize / 8, 1u8 << (child % 8));
+                    if inode.kind != 0 && inode_used[iu] & mu != 0 {
+                        self.write_entry(&dir, i, 0, b"")?;
+                        self.repairs += 1;
+                        continue;
+                    }
                     self.mark_inode(child, &inode, &mut inode_used)?;
                     if inode.kind() == Some(Kind::Dir) {
                         depth += 1;

@@ -296,6 +296,10 @@ pub extern "C" fn _start(arg: u64) -> ! {
                 Ok(()) => pfs::TruncateResponse {}.encode_msg(&mut out).unwrap_or(0),
                 Err(e) => err(pfs::TruncateRequest::METHOD_ID, e, &mut out),
             },
+            pfs::Request::Rename(rq) => match fs.rename(rq.from(), rq.to()) {
+                Ok(()) => pfs::RenameResponse {}.encode_msg(&mut out).unwrap_or(0),
+                Err(e) => err(pfs::RenameRequest::METHOD_ID, e, &mut out),
+            },
         };
         if nexo_sys::channel_send(CLIENT, &out[..m], &[]) != Status::Ok {
             fail(34, "send");

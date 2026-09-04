@@ -1,6 +1,6 @@
 # nexo.fs — sistema de arquivos (services/fs e services/vfs)
 # Erros remotos: 1..=11 = nexofs::FsError::code(); 13 = montagem somente leitura (vfs /boot).
-protocol fs 1.0
+protocol fs 1.1
 
 # Metadados de um caminho.
 method 1 stat {
@@ -95,6 +95,17 @@ method 9 info {
         free_blocks: u64,
         repairs: u64,
         generation: u64,
+    }
+}
+
+# Renomeia/move `from` para `to` (mesmo volume; destino nao pode existir). O commit e a
+# entrada nova: um corte deixa o arquivo com um ou dois nomes, nunca com zero (v1.1).
+method 11 rename {
+    request {
+        from: bytes<256>,
+        to: bytes<256>,
+    }
+    response {
     }
 }
 
