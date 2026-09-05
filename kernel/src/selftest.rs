@@ -83,6 +83,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_pipe", test_user_pipe),
     ("user_sh", test_user_sh),
     ("user_sh_fs", test_user_sh_fs),
+    ("user_grep", test_user_grep),
+    ("user_sort", test_user_sort),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3457,6 +3459,29 @@ fn test_user_sh() -> TestResult {
 /// "wc /c-arquivo.txt"` so sai 0 se o wc abriu o arquivo REAL pelo handle duplicado.
 fn test_user_sh_fs() -> TestResult {
     run_c_util("sh-c", b"sh\0-c\0wc /c-arquivo.txt\0", None)
+}
+
+/// `grep` portado (substring, sem regex): imprime SO a linha que contem o padrao (marcador
+/// "com nexo dentro"; as outras nao saem) e devolve a semantica classica — 0 com achado,
+/// 1 sem nenhum (o segundo passo procura um padrao ausente e ACEITA a saida 1).
+fn test_user_grep() -> TestResult {
+    run_c_util(
+        "grep-c",
+        b"grep\0nexo\0",
+        Some(b"linha um\ncom nexo dentro\nfim\n"),
+    )?;
+    run_c_util_codes("grep-c", b"grep\0ausente\0", Some(b"nada aqui\n"), &[1])
+}
+
+/// `sort` verificado por COMPOSICAO: `sh -c "sort | head -n 1"` sobre linhas fora de ordem
+/// — o head so emite a PRIMEIRA linha do sort, entao "abacate" no log (marcador) prova que
+/// a ordenacao aconteceu antes do corte; o stdin do sh alimenta o primeiro estagio.
+fn test_user_sort() -> TestResult {
+    run_c_util(
+        "sh-c",
+        b"sh\0-c\0sort | head -n 1\0",
+        Some(b"pera\nabacate\nuva\n"),
+    )
 }
 
 /// PIPELINE de verdade: `cat | wc` — o stdout do cat e um CANAL (handle 3 da convencao,

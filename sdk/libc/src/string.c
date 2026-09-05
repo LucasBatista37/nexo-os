@@ -49,3 +49,14 @@ int strncmp(const char *a, const char *b, size_t n) {
     }
     return 0;
 }
+
+char *strstr(const char *pajar, const char *agulha) {
+    size_t n = strlen(agulha);
+    if (n == 0)
+        return (char *)pajar;
+    for (; *pajar; pajar++) {
+        if (strncmp(pajar, agulha, n) == 0)
+            return (char *)pajar;
+    }
+    return 0;
+}

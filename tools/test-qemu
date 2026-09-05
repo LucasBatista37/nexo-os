@@ -122,6 +122,8 @@ SCENARIOS = {
             r"ls-c\] d mk-teste",
             r"wc-c\] 2 3 13",
             r"wc-c\] 1 3 12",
+            r"grep-c\] com nexo dentro",
+            r"head-c\] abacate",
             r"\[TEST\] gfx \.\.\. ok",
             r"\[TEST\] symbols \.\.\. ok",
             r"\[RESULT\] PASS \d+/\d+",

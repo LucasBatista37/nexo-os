@@ -163,7 +163,7 @@ def main() -> None:
     wc_c = BUILD / "wc-c.elf"
     if wc_c.exists():
         stripped.append(("wc-c", wc_c))
-    for util in ("cat", "ls", "cp", "rm", "mv", "echo", "head", "mkdir", "sh"):
+    for util in ("cat", "ls", "cp", "rm", "mv", "echo", "head", "mkdir", "sh", "grep", "sort"):
         elf = BUILD / f"{util}-c.elf"
         if elf.exists():
             stripped.append((f"{util}-c", elf))
