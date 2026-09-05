@@ -689,6 +689,12 @@ def run_net_scenario(timeout: float) -> bool:
     run([sys.executable, ROOT / "tools" / "nexo-pack", "build", "--manifest", manifest,
          "--out", npk, app_elf], stdout=subprocess.DEVNULL)
     npk_bytes = npk.read_bytes()
+    # o indice vem do proprio nexo-repo (a ferramenta oficial), num diretorio-repositorio do host
+    repo_dir = BUILD / "repo-net"
+    repo_dir.mkdir(exist_ok=True)
+    shutil.copy2(npk, repo_dir / "app-net.npk")
+    run([sys.executable, ROOT / "tools" / "nexo-repo", "build", repo_dir], stdout=subprocess.DEVNULL)
+    idx_bytes = (repo_dir / "indice.txt").read_bytes()
 
     def hserve():
         hsrv.settimeout(timeout)
@@ -706,7 +712,7 @@ def run_net_scenario(timeout: float) -> bool:
                         break
                     data += chunk
                 path = data.split(b" ")[1] if data.count(b" ") >= 2 else b"/"
-                body = npk_bytes if path == b"/repo/app-net.npk" else b"nexo-http-ok\n"
+                body = {b"/repo/app-net.npk": npk_bytes, b"/repo/indice.txt": idx_bytes}.get(path, b"nexo-http-ok\n")
                 conn.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: "
                              + str(len(body)).encode() + b"\r\n\r\n" + body)
                 conn.close()
@@ -776,7 +782,7 @@ def run_net_scenario(timeout: float) -> bool:
             r"utest: posix udp ok — poll e select viram o datagrama antes do recvfrom",
                 r"utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados",
                 r"utest: http ok — GET /nexo\.txt devolveu 200 e o corpo esperado \(\d+ bytes\)",
-                r"utest: repo em rede ok — app-net\.npk baixado por HTTP \(\d+ bytes\), instalado v\d+",
+                r"utest: atualizacao em rede ok — app-net (instalado v\d+ \(versao 1\.0, \d+ bytes por HTTP em \d+ ms\)|ja na versao 1\.0 \(v\d+\); nada a fazer)",
                 r"\[NET\] fase 3 \(repo em rede\) terminou com 0",
                 r"\[NET\] fase 2 \(netd\) terminou com 0",
                 r"\[NET\] teste de rede terminou com 0",

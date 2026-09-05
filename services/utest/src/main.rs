@@ -4257,127 +4257,179 @@ fn tcp_check(mac: [u8; 6], gw: [u8; 6], my_ip: [u8; 4], port: u16) -> ! {
 
 /// Modo 15: cliente do `netd` (handle 0, protocolo `nexo.sock`): info, DNS com cache,
 /// eco UDP e conexao TCP com os servidores do harness no host (10.0.2.2).
-/// Modo 71: repositorio de pacotes EM REDE. Baixa /repo/app-net.npk do host por HTTP (API de
-/// sockets do netd, handle 0), grava em /repo do fs real (handle 1) e instala pelo caminho
-/// oficial (`install_from_repo`) — a publicacao em rede do repositorio. Sem TLS nem assinatura
-/// (cripto adiada): o transporte e claro; o pacote e validado como sempre (NEXOPKG1 + CRC).
-/// Idempotente entre boots: cada rodada instala a versao seguinte (a coleta mantem duas).
+/// Modo 71: repositorio de pacotes EM REDE com DESCOBERTA e ATUALIZACAO. Le o `indice.txt`
+/// publicado pelo host (HTTP, API de sockets do netd no handle 0), compara a versao publicada
+/// de `app-net` com a do manifesto da versao instalada (fs real no handle 1) e SO baixa e
+/// instala (`install_from_repo`, o caminho oficial) quando difere — no boot seguinte, com o
+/// disco persistente, nao ha nada a fazer. Sem TLS nem assinatura (cripto adiada): o
+/// transporte e claro; o pacote e validado como sempre (NEXOPKG1 + CRC).
 fn repo_net_client(http_port: u16) -> ! {
-    use nexo_proto::sock::{
-        TcpCloseRequest, TcpConnectRequest, TcpRecvRequest, TcpSendRequest,
-        decode_tcp_close_response, decode_tcp_connect_response, decode_tcp_recv_response,
-        decode_tcp_send_response,
-    };
-    let mut msg = [0u8; 4096];
-    let mut hs = [0u32; 1];
-    macro_rules! call {
-        ($req:expr, $dec:ident, $code:expr) => {{
-            let m = $req.encode_msg(&mut msg).unwrap_or(0);
-            if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
-                nexo_sys::exit($code);
-            }
-            let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
-                Ok((n, _)) => n,
-                _ => nexo_sys::exit($code + 1),
-            };
-            match $dec(&msg[..n]) {
-                Ok(r) => r,
-                Err(e) => {
-                    nexo_rt::log!("utest: repo-net: erro {:?} (passo {})", e, $code);
-                    nexo_sys::exit($code + 2)
+    use nexo_inst::AppFs;
+    use nexo_pkg::{Manifest, RepoIndex};
+
+    /// GET `path` no host (10.0.2.2:http_port); devolve (inicio, tamanho) do corpo em `out`.
+    fn http_get(http_port: u16, path: &[u8], out: &mut [u8], base: i64) -> (usize, usize) {
+        use nexo_proto::sock::{
+            TcpCloseRequest, TcpConnectRequest, TcpRecvRequest, TcpSendRequest,
+            decode_tcp_close_response, decode_tcp_connect_response, decode_tcp_recv_response,
+            decode_tcp_send_response,
+        };
+        let mut msg = [0u8; 4096];
+        let mut hs = [0u32; 1];
+        macro_rules! call {
+            ($req:expr, $dec:ident, $code:expr) => {{
+                let m = $req.encode_msg(&mut msg).unwrap_or(0);
+                if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+                    nexo_sys::exit($code);
                 }
+                let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+                    Ok((n, _)) => n,
+                    _ => nexo_sys::exit($code + 1),
+                };
+                match $dec(&msg[..n]) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        nexo_rt::log!("utest: repo-net: erro {:?} (passo {})", e, $code);
+                        nexo_sys::exit($code + 2)
+                    }
+                }
+            }};
+        }
+        let h = call!(
+            TcpConnectRequest {
+                dst_ip: [10, 0, 2, 2],
+                dst_ip_len: 4,
+                dst_port: http_port,
+            },
+            decode_tcp_connect_response,
+            base
+        );
+        let mut t = TcpSendRequest {
+            conn: h.conn,
+            data: [0; 1400],
+            data_len: 0,
+        };
+        let mut k = 0usize;
+        for part in [
+            &b"GET "[..],
+            path,
+            &b" HTTP/1.0\r\nHost: 10.0.2.2\r\n\r\n"[..],
+        ] {
+            t.data[k..k + part.len()].copy_from_slice(part);
+            k += part.len();
+        }
+        t.data_len = k as u32;
+        call!(t, decode_tcp_send_response, base + 4);
+        let mut n = 0usize;
+        let start = nexo_sys::time_now();
+        loop {
+            let r = call!(
+                TcpRecvRequest { conn: h.conn },
+                decode_tcp_recv_response,
+                base + 8
+            );
+            let d = r.data();
+            if !d.is_empty() {
+                if n + d.len() > out.len() {
+                    nexo_sys::exit(base + 11);
+                }
+                out[n..n + d.len()].copy_from_slice(d);
+                n += d.len();
             }
-        }};
+            if r.closed != 0 && d.is_empty() {
+                break; // FIN visto E fila drenada: `closed` pode vir com bytes ainda por ler
+            }
+            if nexo_sys::time_now() - start > 30_000_000_000 {
+                nexo_rt::log!("utest: repo-net: sem fim de resposta em 30 s ({} bytes)", n);
+                nexo_sys::exit(base + 12);
+            }
+            if d.is_empty() {
+                nexo_sys::sleep_ns(20_000_000);
+            }
+        }
+        call!(
+            TcpCloseRequest { conn: h.conn },
+            decode_tcp_close_response,
+            base + 13
+        );
+        if !out[..n].starts_with(b"HTTP/1.0 200") {
+            nexo_sys::exit(base + 16);
+        }
+        let Some(hdr) = out[..n].windows(4).position(|w| w == b"\r\n\r\n") else {
+            nexo_sys::exit(base + 17)
+        };
+        let len = n - hdr - 4;
+        // Content-Length confere o tamanho do corpo (um download truncado falharia so no CRC)
+        if let Some(p) = out[..hdr]
+            .windows(16)
+            .position(|w| w == b"Content-Length: ")
+        {
+            let mut esperado = 0usize;
+            for &c in &out[p + 16..hdr] {
+                if !c.is_ascii_digit() {
+                    break;
+                }
+                esperado = esperado * 10 + (c - b'0') as usize;
+            }
+            if esperado != len {
+                nexo_rt::log!(
+                    "utest: repo-net: corpo com {} bytes, Content-Length {}",
+                    len,
+                    esperado
+                );
+                nexo_sys::exit(base + 21);
+            }
+        }
+        (hdr + 4, len)
     }
+
     static mut PKGNET: [u8; 65536] = [0; 65536];
+    static mut IDXNET: [u8; 4096] = [0; 4096];
     // SAFETY: utest tem uma unica thread; buffer estatico evita estourar a pilha.
     let buf = unsafe { &mut *core::ptr::addr_of_mut!(PKGNET) };
-    let h = call!(
-        TcpConnectRequest {
-            dst_ip: [10, 0, 2, 2],
-            dst_ip_len: 4,
-            dst_port: http_port,
-        },
-        decode_tcp_connect_response,
-        2600
-    );
-    let req = b"GET /repo/app-net.npk HTTP/1.0\r\nHost: 10.0.2.2\r\n\r\n";
-    let mut t = TcpSendRequest {
-        conn: h.conn,
-        data: [0; 1400],
-        data_len: req.len() as u32,
+    // SAFETY: idem — unico acesso a IDXNET neste processo de uma so thread.
+    let idx = unsafe { &mut *core::ptr::addr_of_mut!(IDXNET) };
+
+    // 1. descoberta: o indice publicado diz qual versao de app-net existe no repositorio
+    let (ib, il) = http_get(http_port, b"/repo/indice.txt", idx, 2600);
+    let index = RepoIndex::parse(&idx[ib..ib + il]).unwrap_or_else(|_| nexo_sys::exit(2630));
+    let Some((_, publicada)) = index.entries().find(|(n, _)| *n == "app-net") else {
+        nexo_sys::exit(2631)
     };
-    t.data[..req.len()].copy_from_slice(req);
-    call!(t, decode_tcp_send_response, 2604);
-    let mut n = 0usize;
-    let start = nexo_sys::time_now();
-    loop {
-        let r = call!(
-            TcpRecvRequest { conn: h.conn },
-            decode_tcp_recv_response,
-            2608
-        );
-        let d = r.data();
-        if !d.is_empty() {
-            if n + d.len() > buf.len() {
-                nexo_sys::exit(2611);
-            }
-            buf[n..n + d.len()].copy_from_slice(d);
-            n += d.len();
-        }
-        if r.closed != 0 && d.is_empty() {
-            break; // FIN visto E fila drenada: `closed` pode vir com bytes ainda por ler
-        }
-        if nexo_sys::time_now() - start > 30_000_000_000 {
-            nexo_rt::log!("utest: repo-net: sem fim de resposta em 30 s ({} bytes)", n);
-            nexo_sys::exit(2612);
-        }
-        if d.is_empty() {
-            nexo_sys::sleep_ns(20_000_000);
-        }
-    }
-    call!(
-        TcpCloseRequest { conn: h.conn },
-        decode_tcp_close_response,
-        2613
-    );
-    if !buf[..n].starts_with(b"HTTP/1.0 200") {
-        nexo_sys::exit(2616);
-    }
-    let Some(hdr) = buf[..n].windows(4).position(|w| w == b"\r\n\r\n") else {
-        nexo_sys::exit(2617)
-    };
-    let body = hdr + 4;
-    let len = n - body;
-    // Content-Length confere o tamanho do corpo (um download truncado falharia so no CRC)
-    if let Some(p) = buf[..hdr]
-        .windows(16)
-        .position(|w| w == b"Content-Length: ")
-    {
-        let mut esperado = 0usize;
-        for &c in &buf[p + 16..hdr] {
-            if !c.is_ascii_digit() {
-                break;
-            }
-            esperado = esperado * 10 + (c - b'0') as usize;
-        }
-        if esperado != len {
-            nexo_rt::log!(
-                "utest: repo-net: corpo com {} bytes, Content-Length {}",
-                len,
-                esperado
-            );
-            nexo_sys::exit(2621);
-        }
-    }
-    // grava no repositorio local e instala pelo caminho oficial
+
+    // 2. a versao instalada vem do manifesto da versao corrente (se ha alguma)
     let mut c = FsClient {
         ch: 1,
         req: [0; 4096],
         reply: [0; 4096],
     };
     let mut fs = InstFs { c: &mut c };
-    use nexo_inst::AppFs;
+    let cur = nexo_inst::current_version(&mut fs, "app-net");
+    let mut igual = false;
+    if let Some(v) = cur {
+        use core::fmt::Write;
+        let mut pb = nexo_rt::Buf::<96>::new();
+        let _ = write!(pb, "/apps/app-net.v{}/manifest.txt", v);
+        let mut mbuf = [0u8; 256];
+        if let Ok(n) = fs.read_file(pb.as_str(), &mut mbuf)
+            && let Ok(m) = Manifest::parse(&mbuf[..n])
+        {
+            igual = m.version == publicada;
+        }
+    }
+    if igual {
+        nexo_rt::log!(
+            "utest: atualizacao em rede ok — app-net ja na versao {} (v{}); nada a fazer",
+            publicada,
+            cur.unwrap_or(0)
+        );
+        nexo_sys::exit(0)
+    }
+
+    // 3. difere (ou nao ha instalacao): baixa o pacote, grava em /repo e instala pelo caminho oficial
+    let t0 = nexo_sys::time_now();
+    let (body, len) = http_get(http_port, b"/repo/app-net.npk", buf, 2640);
+    let ms = (nexo_sys::time_now() - t0) / 1_000_000;
     let _ = fs.mkdir("/repo");
     fs.write_file("/repo/app-net.npk", &buf[body..body + len])
         .unwrap_or_else(|_| nexo_sys::exit(2618));
@@ -4389,9 +4441,11 @@ fn repo_net_client(http_port: u16) -> ! {
         nexo_sys::exit(2620);
     }
     nexo_rt::log!(
-        "utest: repo em rede ok — app-net.npk baixado por HTTP ({} bytes), instalado v{}",
+        "utest: atualizacao em rede ok — app-net instalado v{} (versao {}, {} bytes por HTTP em {} ms)",
+        v,
+        publicada,
         len,
-        v
+        ms
     );
     nexo_sys::exit(0)
 }
