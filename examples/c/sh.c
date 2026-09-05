@@ -9,8 +9,9 @@
  * no canal do fs: a entrada e BOMBEADA antes de qualquer spawn (arquivo -> fila do stdin) e
  * a saida e DRENADA depois de todos sairem (fila do pipe -> arquivo) — na v0 a saida
  * redirecionada cabe na fila do canal (64 mensagens; o flush da libc publica por linha).
- * Sem variaveis, aspas ou job control: e o esqueleto que os utilitarios pedem hoje —
- * cresce conforme a demanda, como o resto da plataforma. */
+ * Aspas simples ou duplas agrupam um argumento com espacos (`grep 'a b'`); o `|` continua
+ * sendo separador de estagios mesmo entre aspas (limite da v0). Sem variaveis nem job
+ * control: e o esqueleto que os utilitarios pedem hoje — cresce conforme a demanda. */
 #include "../../abi/c/nexo.h"
 #include "../../sdk/libc/include/fcntl.h"
 #include "../../sdk/libc/include/stdio.h"
@@ -73,11 +74,23 @@ int main(int argc, char **argv) {
                 puts("sh: argumentos demais");
                 return 2;
             }
-            palavras[nw++] = p;
-            while (*p && *p != ' ')
-                p++;
-            if (*p)
+            if (*p == '\'' || *p == '"') { /* aspas: um argumento com espacos */
+                char q = *p++;
+                palavras[nw++] = p;
+                while (*p && *p != q)
+                    p++;
+                if (!*p) {
+                    puts("sh: aspas sem fechar");
+                    return 2;
+                }
                 *p++ = 0;
+            } else {
+                palavras[nw++] = p;
+                while (*p && *p != ' ')
+                    p++;
+                if (*p)
+                    *p++ = 0;
+            }
         }
         if (nw == 0) {
             puts("sh: estagio vazio");

@@ -86,6 +86,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_grep", test_user_grep),
     ("user_sort", test_user_sort),
     ("user_sh_redir", test_user_sh_redir),
+    ("user_sh_quotes", test_user_sh_quotes),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3482,6 +3483,17 @@ fn test_user_sort() -> TestResult {
         "sh-c",
         b"sh\0-c\0sort | head -n 1\0",
         Some(b"pera\nabacate\nuva\n"),
+    )
+}
+
+/// Aspas no `sh`: `'nexo dentro'` vira UM argumento — o grep recebe o padrao com espaco (sem
+/// aspas, "dentro" seria um arquivo inexistente e o grep sairia 2) e o wc ve so a linha que
+/// casa: "1 3 16" e marcador do cenario boot.
+fn test_user_sh_quotes() -> TestResult {
+    run_c_util(
+        "sh-c",
+        b"sh\0-c\0grep 'nexo dentro' | wc\0",
+        Some(b"com nexo dentro\nnexo fora\n"),
     )
 }
 
