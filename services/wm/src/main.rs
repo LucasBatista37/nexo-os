@@ -75,6 +75,8 @@ struct Attention {
     dnd: bool,
     /// Preferência de acessibilidade: apps devem desligar animações.
     reduce_motion: bool,
+    /// Tema do sistema (0 = escuro, 1 = claro): lido em `prefs`; apps repintam pelo Theme.
+    theme: u8,
     /// Escala global padrão do sistema (num, den): janelas exibidas em buf×num/den; uma
     /// escala por janela (`set_scale`) sobrepõe. Apps leem o par em `prefs` (o "DPI").
     scale: (u32, u32),
@@ -394,6 +396,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         pending: [None; NUM_CONTEXTS as usize],
         dnd: false,
         reduce_motion: false,
+        theme: 0,
         scale: (1, 1),
         auto_tile: false,
         log: [([0; 64], 0); 8],
@@ -1101,11 +1104,21 @@ fn serve(
             let m = wm::SetReduceMotionResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
+        Request::SetTheme(rq) => {
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(ch, wm::SetThemeRequest::METHOD_ID, E_NO_INPUT_OWNER, out);
+                return;
+            }
+            attention.theme = (rq.theme != 0) as u8;
+            let m = wm::SetThemeResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
         Request::Prefs(_) => {
             let resp = wm::PrefsResponse {
                 reduce_motion: attention.reduce_motion as u8,
                 scale_num: attention.scale.0,
                 scale_den: attention.scale.1,
+                theme: attention.theme,
             };
             let m = resp.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);

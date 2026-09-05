@@ -1,9 +1,10 @@
-//! `config` — Configurações (Plano §Fase 6: "criar configurações"). Janela com dois *toggles*
-//! reais: **movimento reduzido** (`set_reduce_motion`) e **não-perturbe** (`set_dnd`). O clique
+//! `config` — Configurações (Plano §Fase 6: "criar configurações"). Janela com três *toggles*
+//! reais: **movimento reduzido** (`set_reduce_motion`), **não-perturbe** (`set_dnd`) e **tema**
+//! (`set_theme`: escuro/claro — a própria janela repinta com o Theme novo na hora). O clique
 //! que aciona o toggle é o que dá o foco à janela — e a posse da entrada é exatamente o que as
 //! APIs mediadas exigem: a mediação do compositor trabalhando a favor do app.
 //! Handle 0 = canal do orquestrador (recebe "sess"; cordão de vida; emite "pronto" e o estado
-//! de cada toggle — "rm1"/"rm0"/"np1"/"np0" — para sincronização).
+//! de cada toggle — "rm1"/"rm0"/"np1"/"np0"/"tm1"/"tm0" — para sincronização).
 #![no_std]
 #![no_main]
 
@@ -30,9 +31,12 @@ fn rm_rect() -> Rect {
 fn np_rect() -> Rect {
     Rect::new(17, 4, 14, 8)
 }
+fn tm_rect() -> Rect {
+    Rect::new(1, 14, 30, 8)
+}
 
 /// Repinta: cada toggle "pressionado" quando ligado.
-fn redraw(base: u64, theme: &Theme, rm: bool, np: bool) {
+fn redraw(base: u64, theme: &Theme, rm: bool, np: bool, tm: bool) {
     // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
     let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize) };
     let mut s = Surface::new(px, W as u32, H as u32, W as u32, PixelFormat::Rgbx8888)
@@ -52,11 +56,18 @@ fn redraw(base: u64, theme: &Theme, rm: bool, np: bool) {
         ButtonState::Normal
     };
     b.draw(&mut s, theme);
+    let mut b = Button::new(tm_rect(), "TM");
+    b.state = if tm {
+        ButtonState::Pressed
+    } else {
+        ButtonState::Normal
+    };
+    b.draw(&mut s, theme);
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(_arg: u64) -> ! {
-    let theme = Theme::dark();
+    let mut theme = Theme::dark();
     let mut buf = [0u8; 256];
     let mut hs = [0u32; 1];
     let sess: Handle = match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
@@ -102,7 +113,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
 
     let mut rm = false;
     let mut np = false;
-    redraw(base, &theme, rm, np);
+    let mut tm = false;
+    redraw(base, &theme, rm, np, tm);
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| fail(29, "enc commit"));
@@ -159,10 +171,26 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 fail(35, "np recusado");
             }
             let _ = nexo_sys::channel_send(PIPE, if np { b"np1" } else { b"np0" }, &[]);
+        } else if tm_rect().contains(ev.x, ev.y) {
+            tm = !tm;
+            let m = wm::SetThemeRequest { theme: tm as u8 }
+                .encode_msg(&mut out)
+                .unwrap_or_else(|_| fail(37, "enc tm"));
+            if nexo_sys::channel_send(sess, &out[..m], &[]) != Status::Ok {
+                fail(38, "send tm");
+            }
+            let ok = matches!(nexo_sys::channel_recv(sess, &mut buf, &mut hs),
+                Ok((n, _)) if wm::decode_set_theme_response(&buf[..n]).is_ok());
+            if !ok {
+                fail(39, "tm recusado");
+            }
+            // o tema do sistema mudou: esta janela repinta com o Theme novo na hora
+            theme = if tm { Theme::light() } else { Theme::dark() };
+            let _ = nexo_sys::channel_send(PIPE, if tm { b"tm1" } else { b"tm0" }, &[]);
         } else {
             continue;
         }
-        redraw(base, &theme, rm, np);
+        redraw(base, &theme, rm, np, tm);
         let m = wm::CommitRequest { id }
             .encode_msg(&mut out)
             .unwrap_or_else(|_| fail(36, "enc commit2"));

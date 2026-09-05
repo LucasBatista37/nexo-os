@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.wm` v1.19 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
+//! Protocolo tipado `nexo.wm` v1.20 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x1b0edd71;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 19;
+pub const VERSION_MINOR: u16 = 20;
 
 /// `nexo.wm.create_surface` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3264,6 +3264,8 @@ pub struct PrefsResponse {
     pub scale_num: u32,
     /// Campo `scale_den`.
     pub scale_den: u32,
+    /// Campo `theme`.
+    pub theme: u8,
 }
 
 impl PrefsResponse {
@@ -3289,6 +3291,11 @@ impl PrefsResponse {
         }
         out[o..o + 4].copy_from_slice(&self.scale_den.to_le_bytes());
         o += 4;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.theme.to_le_bytes());
+        o += 1;
         Ok(o)
     }
     /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
@@ -3310,12 +3317,108 @@ impl PrefsResponse {
         }
         let scale_den = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
         o += 4;
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let theme = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
         let _ = o;
         Ok(PrefsResponse {
             reduce_motion,
             scale_num,
             scale_den,
+            theme,
         })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.set_theme` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetThemeRequest {
+    /// Campo `theme`.
+    pub theme: u8,
+}
+
+impl SetThemeRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 43;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.theme.to_le_bytes());
+        o += 1;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let theme = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
+        let _ = o;
+        Ok(SetThemeRequest { theme })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.set_theme` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetThemeResponse {}
+
+impl SetThemeResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 43;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(SetThemeResponse {})
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
     pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
@@ -4382,6 +4485,8 @@ pub enum Request {
     SetReduceMotion(SetReduceMotionRequest),
     /// `prefs`.
     Prefs(PrefsRequest),
+    /// `set_theme`.
+    SetTheme(SetThemeRequest),
     /// `set_auto_tile`.
     SetAutoTile(SetAutoTileRequest),
     /// `set_global_scale`.
@@ -4562,6 +4667,11 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
                 return Err(ProtoError::Length);
             }
         }
+        Request::SetTheme(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
         Request::SetAutoTile(_) => {
             if !hs.is_empty() {
                 return Err(ProtoError::Length);
@@ -4661,6 +4771,7 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
             SetReduceMotionRequest::decode_payload(p)?,
         )),
         37 => Ok(Request::Prefs(PrefsRequest::decode_payload(p)?)),
+        43 => Ok(Request::SetTheme(SetThemeRequest::decode_payload(p)?)),
         42 => Ok(Request::SetAutoTile(SetAutoTileRequest::decode_payload(p)?)),
         41 => Ok(Request::SetGlobalScale(
             SetGlobalScaleRequest::decode_payload(p)?,
@@ -5549,6 +5660,33 @@ pub fn decode_prefs_response(msg: &[u8]) -> Result<PrefsResponse, ProtoError> {
         return Err(ProtoError::Flags);
     }
     PrefsResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `set_theme` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_set_theme_response(msg: &[u8]) -> Result<SetThemeResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 43 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    SetThemeResponse::decode_payload(p)
 }
 
 /// Decodifica a resposta de `set_auto_tile` (erro remoto vira `ProtoError::Remote`).

@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 79 — tema do sistema em runtime)
+- **`nexo.wm` v1.20**: `set_theme {theme}` (0 = escuro, 1 = claro; exige a posse da entrada, como `set_reduce_motion`) e `prefs` passou a devolver `theme` (campo aditivo no fim). O tema é uma preferência do sistema lida em `prefs`; apps repintam a partir do `Theme` correspondente da nexo-ui.
+- Configurações ganhou o terceiro toggle, **TM**: ao clicar, o app muda o tema do sistema E **repinta a própria janela com o Theme novo na hora** (fundo escuro → claro) — a troca em runtime é visível, não só um bit. Teste `user_config` estendido: `prefs.theme` vai a 1 e volta a 0, e o canto da janela é conferido por pixel nos dois sentidos (`0x14,0x15,0x18` ↔ `0xf4,0xf4,0xf6`). Do item de Configurações pendem o painel de escala e mais painéis.
+
 ### Adicionado (Fase 6, bloco 78 — voltar e rolagem no gerenciador de arquivos)
 - Layout novo do gerenciador: **linha 0 = ".."** (volta ao pai; some na raiz), entradas nas linhas 1..=4 (**páginas de 4**) e **linha 5 = rolagem** ("+N" avança a página; "<<" volta à primeira). A listagem lê até 64 entradas do `list` do fs (antes parava nas 6 que cabiam).
 - Teste `user_arquivos` estendido: entra em `sub`, abre `c.txt`, **volta pelo ".."** ("pasta /fm-teste"), entra em `rol` (seis arquivos com iniciais distintas), vê o "+2" por pixel, **pagina** e abre exatamente a 5ª entrada da ordem própria da listagem. Do item do gerenciador resta nomes longos (janela de 8 colunas).

@@ -7,7 +7,7 @@
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
 # 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
-protocol wm 1.19
+protocol wm 1.20
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -367,6 +367,17 @@ method 37 prefs {
         reduce_motion: u8,
         scale_num: u32,
         scale_den: u32,
+        theme: u8,
+    }
+}
+
+# Tema do sistema (0 = escuro, 1 = claro): preferencia lida em `prefs`; apps repintam a partir
+# do Theme correspondente. Mudar exige a posse da entrada (erro 6), como reduce_motion (v1.20).
+method 43 set_theme {
+    request {
+        theme: u8,
+    }
+    response {
     }
 }
 

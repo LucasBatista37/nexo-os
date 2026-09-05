@@ -2364,7 +2364,39 @@ fn config_driver() -> ! {
     notify(s1, &mut out, &mut buf, &mut hs);
     wm_wait_px(ob, stride, 60, 4, (40, 80, 200), 1349); // o banner aparece (fundo do banner)
 
-    nexo_sys::log("utest: config ok — toggles de RM e nao-perturbe com efeito real");
+    // toggle TM (tema): prefs.theme vira 1 E a propria janela repinta com o Theme claro —
+    // o canto (0,0) local da janela (global 8,8) sai do fundo escuro para o claro; e volta
+    let prefs_theme =
+        |s1: nexo_sys::Handle, out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 1]| -> u8 {
+            let m = nexo_proto::wm::PrefsRequest {}
+                .encode_msg(out)
+                .unwrap_or_else(|_| nexo_sys::exit(2370));
+            if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit(2371);
+            }
+            match nexo_sys::channel_recv(s1, buf, hs) {
+                Ok((n, _)) => {
+                    nexo_proto::wm::decode_prefs_response(&buf[..n])
+                        .unwrap_or_else(|_| nexo_sys::exit(2372))
+                        .theme
+                }
+                _ => nexo_sys::exit(2373),
+            }
+        };
+    wm_wait_px(ob, stride, 8, 8, (0x14, 0x15, 0x18), 1374);
+    wm_click(inj, 24, 26);
+    expect_pipe(pipe, b"tm1", 1375, &mut buf, &mut hs);
+    if prefs_theme(s1, &mut out, &mut buf, &mut hs) != 1 {
+        nexo_sys::exit(2376);
+    }
+    wm_wait_px(ob, stride, 8, 8, (0xf4, 0xf4, 0xf6), 1377);
+    wm_click(inj, 24, 26);
+    expect_pipe(pipe, b"tm0", 1378, &mut buf, &mut hs);
+    if prefs_theme(s1, &mut out, &mut buf, &mut hs) != 0 {
+        nexo_sys::exit(2379);
+    }
+    wm_wait_px(ob, stride, 8, 8, (0x14, 0x15, 0x18), 1380);
+    nexo_sys::log("utest: config ok — toggles de RM, nao-perturbe e TEMA com efeito real");
     nexo_sys::exit(0)
 }
 
