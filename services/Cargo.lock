@@ -425,6 +425,7 @@ dependencies = [
  "nexo-proto",
  "nexo-rt",
  "nexo-sys",
+ "nexo-textgrid",
 ]
 
 [[package]]
