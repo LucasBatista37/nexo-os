@@ -246,13 +246,15 @@ pub fn run(secs: u64) -> bool {
     }
     let errors = ERRORS.load(Ordering::Relaxed);
     kprint!(
-        "[STRESS] {} duracao={}s trocas={} preempcoes={} spawned={} reaped={} lock={}/{} atomic={} alloc={} sleep={} spawn={} filhos={} pages={} cpus={:#b} quadros={}->{} heap={}->{} erros={}\n",
+        "[STRESS] {} duracao={}s trocas={} preempcoes={} spawned={} reaped={} join_dedups={} join_skips={} lock={}/{} atomic={} alloc={} sleep={} spawn={} filhos={} pages={} cpus={:#b} quadros={}->{} heap={}->{} erros={}\n",
         if errors == 0 { "PASS" } else { "FAIL" },
         (crate::time::monotonic_ns() - start) / 1_000_000_000,
         s.switches,
         s.preemptions,
         s.spawned,
         s.reaped,
+        s.join_dedups,
+        s.join_skips,
         locked,
         expected,
         ATOMIC_COUNTER.load(Ordering::Relaxed),

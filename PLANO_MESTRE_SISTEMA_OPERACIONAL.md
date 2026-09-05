@@ -404,7 +404,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] inicializar APIC, timer e interrupções externas — *LAPIC + timer calibrado, I/O APIC com override ISA testado, PIC mascarado*;
 - [x] descobrir CPUs e iniciar multiprocessamento SMP — *ACPI MADT + INIT/SIPI; 4/4 CPUs online no QEMU*;
 - [x] criar threads do kernel e troca de contexto;
-- [x] criar escalonador simples preemptivo — *round-robin com quantum de 10 ms em todas as CPUs*;
+- [x] criar escalonador simples preemptivo — *round-robin com quantum de 10 ms em todas as CPUs; `join` sem duplicata na lista de espera e `finish_switch` só re-enfileira esperadores bloqueados (bloco 94: um despertar espúrio punha a mesma thread duas vezes na fila e duas CPUs na mesma pilha)*;
 - [x] implementar relógio monotônico e timers — *TSC calibrado (ns) + timers de kernel únicos/periódicos com thread `ktimer`*;
 - [x] adicionar locks, atomics e primitivas de sincronização — *SpinLock, IrqLock, Once; regra: locks sempre com IRQs desabilitadas*;
 - [x] criar testes de concorrência e stress em QEMU — *`make stress DURATION=…` e cenário `stress` no CI (15 s)*;
@@ -812,7 +812,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [-] fuzzing — *fuzz-lite determinístico + fuzz de syscalls semanal no CI (`make fuzz`); cobertura guiada e fuzz de rede/FS reais pendentes*;
 - [ ] fault injection;
 - [ ] testes de corte de energia;
-- [-] testes SMP e race conditions — *stress multi-CPU básico*;
+- [-] testes SMP e race conditions — *stress multi-CPU básico; regressão `threads_join_spurious_wake` (despertar espúrio no `join`, bloco 94)*;
 - [ ] testes de longa duração;
 - [ ] matriz de hardware;
 - [ ] performance regression gates;

@@ -54,6 +54,10 @@ const TESTS: &[(&str, TestFn)] = &[
     ("threads_yield", test_threads_yield),
     ("threads_preempt", test_threads_preempt),
     ("threads_sleep_join", test_threads_sleep_join),
+    (
+        "threads_join_spurious_wake",
+        test_threads_join_spurious_wake,
+    ),
     ("threads_spawn_churn", test_threads_spawn_churn),
     ("threads_multi_cpu", test_threads_multi_cpu),
     ("timers", test_timers),
@@ -225,13 +229,15 @@ fn report_memory() {
     let s = sched::stats();
     let cur = sched::current();
     kprint!(
-        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} atual={} estado={:?} pilha_propria={}\n",
+        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} join_dedups={} join_skips={} atual={} estado={:?} pilha_propria={}\n",
         s.alive,
         s.ready,
         s.sleeping,
         s.spawned,
         s.reaped,
         s.preemptions,
+        s.join_dedups,
+        s.join_skips,
         cur.as_ref().map_or("?", |t| t.name),
         cur.as_ref().map(|t| t.state()),
         cur.as_ref().is_some_and(|t| t.stack_bounds().is_some())
@@ -818,6 +824,49 @@ fn test_threads_sleep_join() -> TestResult {
     check!(dt < 2000, "join demorou {dt} ms");
     check!(sched::join(id), "join repetido deve ser verdadeiro");
     check!(!sched::join(usize::MAX), "join de id inexistente");
+    sched::reap();
+    Ok(())
+}
+
+static JOINER_DONE: AtomicBool = AtomicBool::new(false);
+
+fn joiner(target: usize) {
+    let _ = sched::join(target);
+    JOINER_DONE.store(true, Ordering::Release);
+}
+
+/// Regressão do bloco 93: um `unpark` espúrio numa thread bloqueada em `join` (waiter
+/// obsoleto de um `wait_any` acordado pelo `close` de um canal) fazia o `join` re-inserir a
+/// thread na lista de espera; ao morrer o alvo, ela entrava DUAS vezes na fila de prontos e
+/// duas CPUs executavam a mesma pilha (page fault em endereço de heap no lançador).
+fn test_threads_join_spurious_wake() -> TestResult {
+    FLAG.store(false, Ordering::Relaxed);
+    JOINER_DONE.store(false, Ordering::Relaxed);
+    let s0 = sched::stats();
+    let b = sched::spawn("sleeper", sleeper, 60);
+    let a = sched::spawn("joiner", joiner, b);
+    sched::sleep_ms(5);
+    // despertares espúrios enquanto o alvo ainda dorme: cada um faz o joiner dar uma volta
+    // a mais no `join` — e ele NÃO pode se duplicar na lista de espera
+    for _ in 0..5 {
+        sched::unpark(a);
+        sched::sleep_ms(2);
+    }
+    check!(
+        !JOINER_DONE.load(Ordering::Acquire),
+        "joiner terminou antes do alvo"
+    );
+    let s1 = sched::stats();
+    check!(
+        s1.join_dedups > s0.join_dedups,
+        "nenhuma volta espuria detectada (dedups {} -> {})",
+        s0.join_dedups,
+        s1.join_dedups
+    );
+    check!(sched::join(a), "join do joiner");
+    check!(JOINER_DONE.load(Ordering::Acquire), "joiner nao terminou");
+    check!(FLAG.load(Ordering::Acquire), "alvo nao terminou");
+    check!(sched::join(b), "join do alvo");
     sched::reap();
     Ok(())
 }

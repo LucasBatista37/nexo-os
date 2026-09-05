@@ -126,6 +126,8 @@ struct Sched {
     preemptions: u64,
     spawned: u64,
     reaped: u64,
+    join_dedups: u64,
+    join_skips: u64,
 }
 
 const NONE_THREAD: Option<Arc<Thread>> = None;
@@ -142,6 +144,8 @@ static SCHED: SpinLock<Sched> = SpinLock::new(Sched {
     preemptions: 0,
     spawned: 0,
     reaped: 0,
+    join_dedups: 0,
+    join_skips: 0,
 });
 static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -163,6 +167,10 @@ pub struct Stats {
     pub ready: usize,
     /// Dormindo.
     pub sleeping: usize,
+    /// Voltas de `join` em que a thread já estava na lista de espera (despertar espúrio).
+    pub join_dedups: u64,
+    /// Esperadores de uma thread morta que NÃO estavam bloqueados (não são re-enfileirados).
+    pub join_skips: u64,
 }
 
 /// Estatísticas instantâneas.
@@ -177,6 +185,8 @@ pub fn stats() -> Stats {
             alive: g.all.len(),
             ready: g.run_queue.len(),
             sleeping: g.sleepers.len(),
+            join_dedups: g.join_dedups,
+            join_skips: g.join_skips,
         }
     })
 }
@@ -518,9 +528,18 @@ fn finish_switch() {
             };
             prev.finished.store(true, Ordering::Release);
             for w in waiters {
+                // Só quem está bloqueado volta à fila: um esperador acordado de forma espúria
+                // (unpark obsoleto) já está pronto ou rodando — re-enfileirá-lo poria a mesma
+                // pilha em duas CPUs. Ele revê `finished` na própria volta do `join`.
                 // SAFETY: lock detido.
-                unsafe { w.inner().state = State::Ready };
-                g.run_queue.push(w);
+                let blocked = unsafe { w.inner().state == State::Blocked };
+                if blocked {
+                    // SAFETY: lock detido.
+                    unsafe { w.inner().state = State::Ready };
+                    g.run_queue.push(w);
+                } else {
+                    g.join_skips += 1;
+                }
             }
             g.dead.push(prev);
         }
@@ -578,7 +597,7 @@ pub fn exit_current() -> ! {
 pub fn join(id: ThreadId) -> bool {
     loop {
         let (found, done) = cpu::without_interrupts(|| {
-            let g = SCHED.lock();
+            let mut g = SCHED.lock();
             let Some(t) = g.all.iter().find(|t| t.id == id).cloned() else {
                 return (false, true);
             };
@@ -591,8 +610,16 @@ pub fn join(id: ThreadId) -> bool {
             if cur.is_idle || Arc::ptr_eq(&cur, &t) {
                 return (true, false);
             }
+            // Uma volta a mais (despertar espúrio) não pode duplicar a entrada: a thread
+            // morta acordaria o esperador duas vezes.
             // SAFETY: lock detido.
-            unsafe { t.inner().waiters.push(cur.clone()) };
+            let already = unsafe { t.inner().waiters.iter().any(|w| Arc::ptr_eq(w, &cur)) };
+            if already {
+                g.join_dedups += 1;
+            } else {
+                // SAFETY: lock detido.
+                unsafe { t.inner().waiters.push(cur.clone()) };
+            }
             schedule_locked(g, State::Blocked);
             (true, false)
         });
