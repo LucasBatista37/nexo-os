@@ -19,6 +19,7 @@ clang $CFLAGS -c "$ROOT/sdk/libc/src/string.c" -o "$ROOT/build/libc-string.o"
 clang $CFLAGS -c "$ROOT/sdk/libc/src/stdio.c" -o "$ROOT/build/libc-stdio.o"
 clang $CFLAGS -c "$ROOT/sdk/libc/src/stdlib.c" -o "$ROOT/build/libc-stdlib.o"
 clang $CFLAGS -c "$ROOT/sdk/libc/src/fd.c" -o "$ROOT/build/libc-fd.o"
+clang $CFLAGS -c "$ROOT/sdk/libc/src/socket.c" -o "$ROOT/build/libc-socket.o"
 "$LLD" -flavor gnu --no-pie -e _start -o "$OUT" "$ROOT/build/hello-c.o" \
        "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" "$ROOT/build/libc-stdlib.o" \
        "$ROOT/build/libc-fd.o"
@@ -35,6 +36,11 @@ clang $CFLAGS -c "$ROOT/examples/c/wc.c" -o "$ROOT/build/wc-c.o"
        "$ROOT/build/libc-crt0.o" "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" \
        "$ROOT/build/libc-stdlib.o" "$ROOT/build/libc-fd.o"
 echo "[c-demo] $ROOT/build/wc-c.elf ($(wc -c < "$ROOT/build/wc-c.elf" | tr -d ' ') bytes)"
+clang $CFLAGS -c "$ROOT/examples/c/fetch.c" -o "$ROOT/build/fetch-c.o"
+"$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/fetch-c.elf" "$ROOT/build/fetch-c.o" \
+       "$ROOT/build/libc-crt0.o" "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" \
+       "$ROOT/build/libc-stdlib.o" "$ROOT/build/libc-fd.o" "$ROOT/build/libc-socket.o"
+echo "[c-demo] $ROOT/build/fetch-c.elf ($(wc -c < "$ROOT/build/fetch-c.elf" | tr -d ' ') bytes)"
 for UTIL in cat ls cp rm mv echo head mkdir sh grep sort; do
   clang $CFLAGS -c "$ROOT/examples/c/$UTIL.c" -o "$ROOT/build/$UTIL-c.o"
   "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/$UTIL-c.elf" "$ROOT/build/$UTIL-c.o" \

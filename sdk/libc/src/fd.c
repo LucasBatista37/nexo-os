@@ -12,6 +12,11 @@
 
 #define FD_MAX 16
 #define FD_BASE 3 /* 0..2: read(0) = canal de stdin no handle 2; write(1/2) = stdio em linhas */
+/* Descritores >= 64 sao sockets (socket.c); os ganchos sao fracos para quem nao linka sockets. */
+#define SOCK_BASE 64
+extern ssize_t nexo_sock_read(int fd, void *buf, size_t n) __attribute__((weak));
+extern ssize_t nexo_sock_write(int fd, const void *buf, size_t n) __attribute__((weak));
+extern int nexo_sock_close(int fd) __attribute__((weak));
 
 typedef struct {
     int usado;
@@ -141,6 +146,8 @@ static ssize_t le_stdin(void *buf, size_t n) {
 ssize_t read(int fd, void *buf, size_t n) {
     if (fd == 0)
         return le_stdin(buf, n);
+    if (fd >= SOCK_BASE)
+        return nexo_sock_read ? nexo_sock_read(fd, buf, n) : -1;
     arq *a = pega(fd);
     if (!a)
         return -1;
@@ -168,6 +175,8 @@ ssize_t write(int fd, const void *buf, size_t n) {
         nexo_stdio_write((const char *)buf, n);
         return (ssize_t)n;
     }
+    if (fd >= SOCK_BASE)
+        return nexo_sock_write ? nexo_sock_write(fd, buf, n) : -1;
     arq *a = pega(fd);
     if (!a)
         return -1;
@@ -194,6 +203,8 @@ ssize_t write(int fd, const void *buf, size_t n) {
 }
 
 int close(int fd) {
+    if (fd >= SOCK_BASE)
+        return nexo_sock_close ? nexo_sock_close(fd) : -1;
     arq *a = pega(fd);
     if (!a)
         return -1;

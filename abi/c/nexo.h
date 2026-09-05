@@ -36,6 +36,7 @@ static inline uint64_t nexo_log(const char *msg, uint64_t len) {
 
 /* Cede a CPU. */
 static inline void nexo_yield(void) { nexo_syscall3(NEXO_SYS_YIELD, 0, 0, 0); }
+static inline void nexo_sleep_ns(uint64_t ns) { nexo_syscall3(NEXO_SYS_SLEEP, ns, 0, 0); }
 
 /* Segundos Unix (UTC) do relogio de parede; 0 = sem RTC. */
 static inline uint64_t nexo_wall_epoch(void) {

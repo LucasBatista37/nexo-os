@@ -21,6 +21,8 @@ mkdir -p "$TC/include/nexo" "$TC/lib" "$TC/bin"
 "$ROOT/tools/nexo-cheaders" >/dev/null
 cp "$ROOT/abi/c/nexo.h" "$ROOT/abi/c/nexo_syscalls.h" "$TC/include/nexo/"
 cp "$ROOT"/sdk/libc/include/*.h "$TC/include/"
+# subdiretorios POSIX (sys/stat.h, sys/socket.h) tambem entram no sysroot
+cp -R "$ROOT/sdk/libc/include/sys" "$TC/include/"
 # nexo.h referencia nexo_syscalls.h no mesmo diretorio; stdio/stdlib/string sao planos
 sed -i.bak 's#"\.\./\.\./abi/c/nexo\.h"#<nexo/nexo.h>#' "$TC/include/"*.h 2>/dev/null || true
 rm -f "$TC/include/"*.bak
@@ -28,22 +30,27 @@ rm -f "$TC/include/"*.bak
 CFLAGS="--target=x86_64-unknown-none-elf -ffreestanding -fno-stack-protector -fno-builtin \
         -mno-red-zone -mno-sse -mno-sse2 -mno-mmx -mno-avx -msoft-float \
         -fomit-frame-pointer -O2"
-for f in string stdio stdlib; do
+for f in string stdio stdlib fd socket; do
   clang $CFLAGS -I "$ROOT/sdk/libc/include" -c "$ROOT/sdk/libc/src/$f.c" -o "$TC/lib/$f.o"
 done
 clang++ $CFLAGS -fno-exceptions -fno-rtti -c "$ROOT/sdk/libc/src/cxx.cpp" -o "$TC/lib/cxx.o"
-"$AR" rcs "$TC/lib/libnexo.a" "$TC/lib/string.o" "$TC/lib/stdio.o" "$TC/lib/stdlib.o" "$TC/lib/cxx.o"
+"$AR" rcs "$TC/lib/libnexo.a" "$TC/lib/string.o" "$TC/lib/stdio.o" "$TC/lib/stdlib.o" \
+      "$TC/lib/fd.o" "$TC/lib/socket.o" "$TC/lib/cxx.o"
 rm -f "$TC/lib"/*.o
+# crt0 (main/argv/stdin/stdout da convencao) vai como objeto AVULSO, compilado depois da
+# limpeza: programas com _start proprio nao o linkam; programas com main() passam
+# "$TC/lib/crt0.o" ao nexo-cc (que aceita .o entre as fontes)
+clang $CFLAGS -I "$ROOT/sdk/libc/include" -c "$ROOT/sdk/libc/src/crt0.c" -o "$TC/lib/crt0.o"
 
 cat > "$TC/bin/nexo-cc" <<WRAP
 #!/bin/sh
 # nexo-cc — compila e linka um programa C para o Nexo OS usando este sysroot.
 set -eu
 TCDIR="\$(cd "\$(dirname "\$0")/.." && pwd)"
-SAIDA="a.elf"; FONTES=""
-while [ \$# -gt 0 ]; do case "\$1" in -o) SAIDA="\$2"; shift 2;; *) FONTES="\$FONTES \$1"; shift;; esac; done
+SAIDA="a.elf"; FONTES=""; OBJS=""
+while [ \$# -gt 0 ]; do case "\$1" in -o) SAIDA="\$2"; shift 2;; *.o) OBJS="\$OBJS \$1"; shift;; *) FONTES="\$FONTES \$1"; shift;; esac; done
 clang $CFLAGS -I "\$TCDIR/include" -c \$FONTES -o "\$SAIDA.o"
-"$LLD" -flavor gnu --no-pie -e _start -o "\$SAIDA" "\$SAIDA.o" "\$TCDIR/lib/libnexo.a"
+"$LLD" -flavor gnu --no-pie -e _start -o "\$SAIDA" "\$SAIDA.o" \$OBJS "\$TCDIR/lib/libnexo.a"
 rm -f "\$SAIDA.o"
 WRAP
 sed "s/^clang \$CFLAGS -I/clang++ $CFLAGS -fno-exceptions -fno-rtti -I/" "$TC/bin/nexo-cc" \
@@ -81,6 +88,25 @@ void _start(uint64_t arg) {
 SRC
 "$TC/bin/nexo-cc" -o "$ROOT/build/tc-teste.elf" "$TESTC"
 [ -s "$ROOT/build/tc-teste.elf" ] || { echo "[toolchain] auto-teste FALHOU"; exit 1; }
+# auto-teste 2: main() + arquivos + sockets, linkado com o crt0.o do pacote
+TESTC2="$ROOT/build/tc-teste2.c"
+cat > "$TESTC2" <<'SRC'
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/socket.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    (void)argv;
+    nexo_libc_use_fs(0);
+    nexo_libc_use_sock(1);
+    int fd = open("/x", O_RDONLY);
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    printf("main com %d args: fd %d sock %d\n", argc, fd, s);
+    return 0;
+}
+SRC
+"$TC/bin/nexo-cc" -o "$ROOT/build/tc-teste2.elf" "$TESTC2" "$TC/lib/crt0.o"
+[ -s "$ROOT/build/tc-teste2.elf" ] || { echo "[toolchain] auto-teste 2 (main+crt0) FALHOU"; exit 1; }
 
 tar -czf "$ROOT/build/nexo-toolchain.tar.gz" -C "$ROOT/build" toolchain
 echo "[toolchain] build/toolchain + nexo-toolchain.tar.gz ($(wc -c < "$ROOT/build/nexo-toolchain.tar.gz" | tr -d ' ') bytes; auto-teste compilou)"

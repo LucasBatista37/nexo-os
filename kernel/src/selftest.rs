@@ -1918,6 +1918,44 @@ pub fn net_test_mode() {
     kinfo!("[NET] fase 3: repositorio em rede (HTTP -> /repo -> instalacao)");
     let code = crate::process::wait_and_reap(&client3);
     kinfo!("[NET] fase 3 (repo em rede) terminou com {code}");
+    // Fase 4: um programa C (fetch, sys/socket.h da nexo-libc sobre o nexo.sock gerado do
+    // mesmo IDL) faz um GET no host e imprime o corpo — sockets BSD em C de ponta a ponta.
+    if crate::initrd::find("fetch-c").is_none() {
+        kinfo!("[NET] fase 4 pulada: fetch-c ausente do initrd (host sem clang)");
+        return;
+    }
+    let (na4, nb4) = ChannelEnd::create_pair();
+    let (sa4, sb4) = ChannelEnd::create_pair();
+    let g4 = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let _drv4 = crate::process::spawn_named("netdev", 0, alloc::vec![g4, channel_handle(na4)])
+        .expect("netdev 4");
+    let _netd4 = crate::process::spawn_named(
+        "netd",
+        0,
+        alloc::vec![channel_handle(nb4), channel_handle(sa4)],
+    )
+    .expect("netd 4");
+    let (argv_tx, argv_rx) = ChannelEnd::create_pair();
+    let argv = alloc::format!("fetch\010.0.2.2\0{http_port}\0/nexo.txt\0");
+    argv_tx
+        .send(crate::ipc::Message {
+            data: argv.into_bytes(),
+            handles: alloc::vec![],
+        })
+        .expect("argv do fetch");
+    let client4 = crate::process::spawn_named(
+        "fetch-c",
+        0,
+        alloc::vec![channel_handle(sb4), channel_handle(argv_rx)],
+    )
+    .expect("fetch-c");
+    kinfo!("[NET] fase 4: fetch em C (sockets da nexo-libc)");
+    let code = crate::process::wait_and_reap(&client4);
+    drop(argv_tx);
+    kinfo!("[NET] fase 4 (fetch em C) terminou com {code}");
 }
 
 /// `fs-churn=1` na linha de comando: blockdev + fs + utest(10) escrevendo sem parar, para o

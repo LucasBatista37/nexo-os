@@ -93,9 +93,10 @@ Lições novas:
 ## Estado e próximos passos
 
 - Os `[ ]` restantes do plano são todos gated: TLS/cripto (decisão do usuário), hardware real,
-  usuários externos, releases e governança. O executável está nas pendências dos `[-]`:
-  documentos no visor (próximo), nomes longos no gerenciador, painel de escala nas
-  Configurações, aspas/variáveis no sh, regex no grep, documentos/permissões temporárias por
-  Contexto.
+  usuários externos, releases e governança. Do executável nos `[-]`, o segundo dia fechou
+  visor, gerenciador, aspas e regex, permissões temporárias e o repositório em rede (fica só a
+  assinatura); restam o painel de escala nas Configurações (privilégio do shell — precisa de
+  mediação pelo orquestrador), variáveis no sh e documentos por Contexto. Em curso: sockets
+  BSD na libc C (`sys/socket.h` sobre o `nexo.sock` gerado) com um `fetch` HTTP em C.
 - Stress de 7 dias (gate F1 estendido) em execução desde 2026-09-01 19:29; relatório previsto
   para 2026-09-08.

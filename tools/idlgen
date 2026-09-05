@@ -386,7 +386,7 @@ def generate(path: pathlib.Path) -> str:
 # ---------------------------------------------------------------------------
 # Backend C (ADR-0014/Fase 6): headers gerados para clientes C — mesmo fio do
 # Rust (NXIP + payload little-endian), encode de pedido + decode de resposta.
-C_PROTOS = {"fs"}
+C_PROTOS = {"fs", "sock"}
 C_SCALARS = {"u8": ("uint8_t", 1), "u16": ("uint16_t", 2), "u32": ("uint32_t", 4),
              "u64": ("uint64_t", 8), "i32": ("int32_t", 4), "i64": ("int64_t", 8)}
 

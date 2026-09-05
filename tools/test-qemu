@@ -784,6 +784,8 @@ def run_net_scenario(timeout: float) -> bool:
                 r"utest: http ok — GET /nexo\.txt devolveu 200 e o corpo esperado \(\d+ bytes\)",
                 r"utest: atualizacao em rede ok — app-net (instalado v\d+ \(versao 1\.0, \d+ bytes por HTTP em \d+ ms\)|ja na versao 1\.0 \(v\d+\); nada a fazer)",
                 r"\[NET\] fase 3 \(repo em rede\) terminou com 0",
+                r"fetch-c\] nexo-http-ok",
+                r"\[NET\] fase 4 \(fetch em C\) terminou com 0",
                 r"\[NET\] fase 2 \(netd\) terminou com 0",
                 r"\[NET\] teste de rede terminou com 0",
                 r"NEXO: boot completo"]:
