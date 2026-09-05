@@ -85,6 +85,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_sh_fs", test_user_sh_fs),
     ("user_grep", test_user_grep),
     ("user_sort", test_user_sort),
+    ("user_sh_redir", test_user_sh_redir),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3482,6 +3483,22 @@ fn test_user_sort() -> TestResult {
         b"sh\0-c\0sort | head -n 1\0",
         Some(b"pera\nabacate\nuva\n"),
     )
+}
+
+/// Redirecoes do sh sem concorrencia no canal do fs (bomba antes do spawn, dreno depois dos
+/// waits): `>` grava de verdade — o wc confere "1 3 19 /sh-teste.txt" de fora (marcador) —
+/// e `<` alimenta um pipeline: `sort < /c-arquivo.txt | wc` fecha a linha sem `\n` do
+/// arquivo e o wc ve "1 5 27" (marcador). Faxina tolerante e limpeza no fim.
+fn test_user_sh_redir() -> TestResult {
+    run_c_util_codes("rm-c", b"rm\0/sh-teste.txt\0", None, &[0, 1])?;
+    run_c_util(
+        "sh-c",
+        b"sh\0-c\0echo persistido pelo sh > /sh-teste.txt\0",
+        None,
+    )?;
+    run_c_util("wc-c", b"wc\0/sh-teste.txt\0", None)?;
+    run_c_util("sh-c", b"sh\0-c\0sort < /c-arquivo.txt | wc\0", None)?;
+    run_c_util("rm-c", b"rm\0/sh-teste.txt\0", None)
 }
 
 /// PIPELINE de verdade: `cat | wc` — o stdout do cat e um CANAL (handle 3 da convencao,
