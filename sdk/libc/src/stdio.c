@@ -30,6 +30,11 @@ static int stdout_canal(void) {
     return modo == 1;
 }
 
+/* Fixa o destino da saida ANTES do main: a convencao de handles e posicional e vale no
+ * arranque — um programa que cria/transfere handles reutiliza os slots 2/3, e uma sonda
+ * tardia acharia o ocupante novo. O crt0 chama; _start proprio pode chamar tambem. */
+void nexo_stdio_init(void) { (void)stdout_canal(); }
+
 void nexo_stdio_flush(void) {
     if (!pend_n)
         return;

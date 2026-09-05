@@ -81,6 +81,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_head", test_user_head),
     ("user_mkdir", test_user_mkdir),
     ("user_pipe", test_user_pipe),
+    ("user_sh", test_user_sh),
+    ("user_sh_fs", test_user_sh_fs),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3442,6 +3444,19 @@ fn test_user_mkdir() -> TestResult {
     run_c_util("mkdir-c", b"mkdir\0/mk-teste\0", None)?;
     run_c_util("ls-c", b"ls\0/\0", None)?;
     run_c_util("rm-c", b"rm\0/mk-teste\0", None)
+}
+
+/// O mini `sh` monta um pipeline de TRES estagios sozinho: `sh -c "echo linha do sh | cat |
+/// wc"` — o sh cria os canais, manda o argv de cada estagio, lanca os tres binarios do
+/// initrd (process_spawn de ring 3) e espera; "1 3 12" do wc e marcador do cenario boot.
+fn test_user_sh() -> TestResult {
+    run_c_util("sh-c", b"sh\0-c\0echo linha do sh | cat | wc\0", None)
+}
+
+/// O `sh` empresta a capacidade: o canal do fs (h0) e DUPLICADO para o estagio — `sh -c
+/// "wc /c-arquivo.txt"` so sai 0 se o wc abriu o arquivo REAL pelo handle duplicado.
+fn test_user_sh_fs() -> TestResult {
+    run_c_util("sh-c", b"sh\0-c\0wc /c-arquivo.txt\0", None)
 }
 
 /// PIPELINE de verdade: `cat | wc` — o stdout do cat e um CANAL (handle 3 da convencao,

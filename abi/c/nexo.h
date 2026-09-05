@@ -77,4 +77,57 @@ static inline uint64_t nexo_channel_recv(uint32_t ch, void *buf, uint64_t cap, u
     return r.status;
 }
 
+/* Cria um canal; com NEXO_STATUS_OK escreve as duas extremidades. */
+static inline uint64_t nexo_channel_create(uint32_t *a, uint32_t *b) {
+    nexo_ret r = nexo_syscall3(NEXO_SYS_CHANNEL_CREATE, 0, 0, 0);
+    if (r.status == NEXO_STATUS_OK) {
+        *a = (uint32_t)r.value;
+        *b = (uint32_t)(r.value >> 32);
+    }
+    return r.status;
+}
+
+/* Fecha um handle deste processo. */
+static inline uint64_t nexo_handle_close(uint32_t h) {
+    return nexo_syscall3(NEXO_SYS_HANDLE_CLOSE, h, 0, 0).status;
+}
+
+/* Direitos e tipo de um handle (tambem serve de sonda de existencia). */
+static inline uint64_t nexo_handle_info(uint32_t h, uint32_t *rights, uint32_t *kind) {
+    nexo_ret r = nexo_syscall3(NEXO_SYS_HANDLE_INFO, h, 0, 0);
+    if (r.status == NEXO_STATUS_OK) {
+        *rights = (uint32_t)r.value;
+        *kind = (uint32_t)(r.value >> 32);
+    }
+    return r.status;
+}
+
+/* Duplica um handle com `rights` (subconjunto dos atuais). */
+static inline uint64_t nexo_handle_duplicate(uint32_t h, uint32_t rights, uint32_t *out) {
+    nexo_ret r = nexo_syscall3(NEXO_SYS_HANDLE_DUPLICATE, h, rights, 0);
+    if (r.status == NEXO_STATUS_OK)
+        *out = (uint32_t)r.value;
+    return r.status;
+}
+
+/* Lanca um programa do initrd por nome; `handles` viram os handles iniciais do filho (saem
+ * da tabela deste processo). Com NEXO_STATUS_OK escreve o handle do processo. */
+static inline uint64_t nexo_process_spawn(const char *name, uint64_t name_len, uint64_t arg,
+                                          const uint32_t *handles, uint64_t n_handles,
+                                          uint32_t *proc) {
+    nexo_ret r = nexo_syscall5(NEXO_SYS_PROCESS_SPAWN, (uint64_t)name, name_len, arg,
+                               (uint64_t)handles, n_handles);
+    if (r.status == NEXO_STATUS_OK)
+        *proc = (uint32_t)r.value;
+    return r.status;
+}
+
+/* Espera um processo terminar; com NEXO_STATUS_OK escreve o codigo de saida. */
+static inline uint64_t nexo_process_wait(uint32_t proc, int64_t *code) {
+    nexo_ret r = nexo_syscall3(NEXO_SYS_PROCESS_WAIT, proc, 0, 0);
+    if (r.status == NEXO_STATUS_OK)
+        *code = (int64_t)r.value;
+    return r.status;
+}
+
 #endif /* NEXO_H */

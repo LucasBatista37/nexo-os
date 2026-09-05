@@ -109,6 +109,14 @@ static uint8_t ent[4096];
 static size_t ent_n, ent_pos;
 static int ent_eof;
 
+/* Fixa a existencia do stdin ANTES do main (mesma razao do nexo_stdio_init: os slots da
+ * convencao sao reutilizaveis depois que o programa mexe na tabela de handles). */
+void nexo_fd_init(void) {
+    uint32_t rights, kind;
+    if (nexo_handle_info(STDIN_HANDLE, &rights, &kind) != NEXO_STATUS_OK)
+        ent_eof = 1;
+}
+
 static ssize_t le_stdin(void *buf, size_t n) {
     while (ent_pos == ent_n && !ent_eof) {
         uint64_t nb = 0, nh = 0;

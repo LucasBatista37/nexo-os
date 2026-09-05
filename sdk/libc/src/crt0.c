@@ -11,6 +11,8 @@
 extern int main(int argc, char **argv);
 extern void nexo_run_ctors(void) __attribute__((weak));
 extern void nexo_stdio_flush(void) __attribute__((weak));
+extern void nexo_stdio_init(void) __attribute__((weak));
+extern void nexo_fd_init(void) __attribute__((weak));
 
 #define ARGV_MAX 16
 #define ARGS_BYTES 512
@@ -19,6 +21,11 @@ void _start(uint64_t arg) {
     (void)arg;
     if (nexo_run_ctors)
         nexo_run_ctors();
+    /* as sondas de stdin/stdout valem no ARRANQUE — antes de main reutilizar slots */
+    if (nexo_stdio_init)
+        nexo_stdio_init();
+    if (nexo_fd_init)
+        nexo_fd_init();
     static char bloco[ARGS_BYTES];
     static char *argv[ARGV_MAX + 1];
     int argc = 0;

@@ -21,6 +21,7 @@ ssize_t write(int fd, const void *buf, size_t n);
 int close(int fd);
 off_t lseek(int fd, off_t off, int whence);
 int unlink(const char *path);
+void nexo_fd_init(void); /* fixa a existencia do stdin no arranque (o crt0 chama) */
 
 #ifdef __cplusplus
 }

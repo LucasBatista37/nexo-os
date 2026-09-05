@@ -18,6 +18,7 @@ int vprintf(const char *fmt, va_list ap);
 int snprintf(char *dst, size_t cap, const char *fmt, ...);
 int vsnprintf(char *dst, size_t cap, const char *fmt, va_list ap);
 void nexo_stdio_flush(void);
+void nexo_stdio_init(void); /* fixa o destino da saida no arranque (o crt0 chama) */
 void nexo_stdio_write(const char *s, size_t n); /* bytes crus no buffer de linhas */
 int rename(const char *from, const char *to);   /* nexo.fs; destino nao pode existir */
 
