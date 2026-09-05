@@ -15,6 +15,8 @@ do repositório:
 | `nexo-inst` | instalação transacional, revogação e coleta de versões |
 | `nexo-img` | decodificar imagens (PPM P6; entrada hostil sem pânico) |
 | `nexo-cal` | datas civis (epoch ↔ ano/mês/dia, dia da semana) |
+| `nexo-textgrid` | grade de texto (quebra, rolagem, `scrolled`) — a do terminal, do editor e do visor |
+| `sdk/libc` (**C**) | nexo-libc: string/stdio (`printf`)/stdlib (heap, `atoi`)/fcntl+unistd (fd)/dirent/`rename`/`mkdir` |
 
 ## Começando
 
@@ -50,6 +52,37 @@ tools/nexo-pack build --manifest services/meuapp/manifest.txt \
    (ex.: o visor recebe `"abre <caminho>"` + o canal). Instalações ficam em
    `/apps/<nome>.v<N>/`; o ponteiro `/apps/<nome>.cur` guarda `v<N>` (com o prefixo `v`).
 
+## Programas em C, a nexo-libc e a convenção de processos
+
+O toolchain C/C++ é `clang --target=x86_64-unknown-none-elf` + `rust-lld`; `make toolchain`
+empacota o sysroot (`include/nexo/`, headers da libc, `lib/libnexo.a`, wrappers `nexo-cc`/
+`nexo-c++`) e compila um programa de fora como auto-teste. Os headers `abi/c/nexo.h` (syscalls,
+canais, handles, spawn/wait) e `abi/c/proto/fs.h` (o `nexo.fs` gerado do MESMO IDL do Rust) são
+a ABI; SSE é opt-in por programa (o kernel salva o estado por thread).
+
+Um programa C com `main(argc, argv)` (linka o `crt0.c` da libc) segue a **convenção de
+processos** de quatro handles — posicional e válida **no arranque**:
+
+| Handle | Papel |
+|---|---|
+| 0 | serviço principal (ex.: o canal `nexo.fs`; `nexo_libc_use_fs(0)` liga a camada fd a ele) |
+| 1 | argv: UMA mensagem já enviada, argumentos separados por `\0` (argv[0] incluso); sem ela, `argc = 0` |
+| 2 | stdin (opcional): cada mensagem é um pedaço; fila vazia com a outra ponta viva bloqueia; `PeerClosed` = EOF |
+| 3 | stdout (opcional): bytes fiéis por canal (`\n` incluso) — um pipe; sem ele, a saída vai ao log do kernel em linhas |
+
+Regras que os testes pagaram para aprender: o crt0 fixa stdin/stdout **antes** do `main`
+(`nexo_stdio_init`/`nexo_fd_init`) porque um programa que cria ou transfere handles reutiliza os
+slots 2/3 — sondar tarde acha o ocupante novo; a saída sem `\n` final é publicada no `exit`
+(`nexo_stdio_flush`); a sonda do stdout é uma mensagem vazia (consumidores ignoram).
+
+Onze utilitários portados vivem em `examples/c/` (`wc cat ls cp rm mv echo head mkdir grep sort`)
+e o mini `sh` (`sh -c "cmd [args] [| cmd...]"`, com `< arq`/`> arq`, aspas e até 4 estágios)
+monta pipelines de verdade em ring 3: cria os canais, manda o argv de cada estágio, duplica o
+h0 para cada um, lança `<cmd>-c` do initrd e espera. Nunca use o serviço do h0 enquanto um
+filho segura o handle duplicado (as respostas iriam ao leitor errado): o sh bombeia a entrada
+antes do spawn e drena a saída depois dos waits. No shell de diagnóstico, um nome não-builtin
+roda o utilitário do initrd com o vfs duplicado (`wc /disk/arquivo.txt`).
+
 ## Exemplos no repositório
 
 - `services/calc` — app completo: botões `nexo-ui` + eventos `pointer` + clipboard mediado.
@@ -63,6 +96,8 @@ tools/nexo-pack build --manifest services/meuapp/manifest.txt \
 - `services/config` — toggles com efeito real nas mediações (`set_reduce_motion`/`set_dnd`).
 - `services/lanc` — o lançador com consentimento: leia-o para entender o que o SEU manifesto
   causa na prática.
+- `examples/c/hello.c`, `fstest.c`, `hello-cpp.cpp` — a libc, o fs pelo protocolo gerado e o
+  runtime C++; `examples/c/sh.c` — a convenção de processos inteira num só programa.
 
 ## Depuração
 
@@ -77,4 +112,8 @@ Lições que os testes deste repositório pagaram para aprender (herde-as de gra
 - Pixels que **rolam** (terminal) não servem de sinal de encerramento — sincronize fim de vida
   por mensagens no canal do orquestrador (ex.: o term envia `"fim"`).
 - O disco de dados persiste entre boots: testes de instalação devem ser **idempotentes**
-  (versões relativas, nunca absolutas).
+  (versões relativas, nunca absolutas) e usar prefixos exclusivos (`/fm-teste`, `/sh-teste.txt`);
+  um passo de faxina tolerante no início absorve restos de um boot interrompido.
+- Ordem de saída não é testável por marcadores soltos: verifique por **composição**
+  (`sort | head -n 1` só emite a primeira linha se a ordenação aconteceu).
+- Ao prever rolagem numa grade de texto, conte linhas de **grade** (com quebra), não linhas lógicas.
