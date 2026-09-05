@@ -2731,16 +2731,22 @@ fn consent_driver(elf_len: usize) -> ! {
         }
         nexo_sys::sleep_ns(10_000_000);
     }
-    expect_pipe(b"expirou", 2514, &mut buf, &mut hs);
+    // REVOGACAO FINA: o lanc fecha o proxy da sessao ("revogado") e so 200 ms depois corta
+    // o cordao de vida ("expirou"); a janela "calc" some ENTRE os dois — o app perdeu a
+    // capacidade ainda vivo
+    expect_pipe(b"revogado", 2514, &mut buf, &mut hs);
     let start = nexo_sys::time_now();
     while find_title(b"calc", &mut out, &mut buf, &mut hs) {
         if nexo_sys::time_now() - start > 10_000_000_000 {
-            nexo_sys::exit(2515); // a janela de um app expirado continua viva
+            nexo_sys::exit(2515); // a janela sobreviveu a revogacao da sessao
         }
         nexo_sys::sleep_ns(10_000_000);
     }
+    expect_pipe(b"expirou", 2516, &mut buf, &mut hs);
 
-    nexo_sys::log("utest: consentimento ok — permitir lanca, negar nao executa, por tempo expira");
+    nexo_sys::log(
+        "utest: consentimento ok — permitir lanca, negar nao executa, por tempo REVOGA e expira",
+    );
     nexo_sys::exit(0)
 }
 

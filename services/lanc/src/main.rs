@@ -2,7 +2,9 @@
 //! e consentimento"). Antes de executar um app instalado, mostra uma janela com as permissões
 //! que o manifesto declara (uma célula de acento por permissão) e os botões **Permitir** e
 //! **Negar** (e **Permitir por tempo**: a concessão vale por um prazo; ao expirar o lançador
-//! corta o cordão de vida e o app encerra) — e só concede as capacidades depois do clique. O clique é entregue
+//! **revoga a capacidade** fechando o proxy da sessão de janelas — o app perde as janelas ainda
+//! vivo — e só depois corta o cordão de vida) — e só concede as capacidades depois do clique. A
+//! sessão de janelas chega ao app por um **proxy** retransmitido pelo lançador. O clique é entregue
 //! pelo compositor à janela sob o cursor: a decisão vem do usuário, não do app. Negar significa
 //! que o app nem é executado.
 //! Handle 0 = canal do orquestrador: recebe "sess" (sessão do compositor), depois
@@ -30,6 +32,17 @@ static mut ELF_BUF: [u8; ELF_MAX] = [0; ELF_MAX];
 fn fail(code: i64, what: &str) -> ! {
     log!("lanc: falha: {}", what);
     nexo_sys::exit(code)
+}
+
+/// Retransmite tudo o que estiver enfileirado em `de` para `para` — mensagens E handles (um
+/// `create_surface` devolve um MemoryObject; ele atravessa o proxy). Para quando a fila
+/// esvazia ou a ponta morreu (a revogacao/encerramento cuida do resto).
+fn relay(de: Handle, para: Handle) {
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 2];
+    while let Ok((n, k)) = nexo_sys::channel_try_recv(de, &mut msg, &mut hs) {
+        let _ = nexo_sys::channel_send(para, &msg[..n], &hs[..k]);
+    }
 }
 
 fn permit_rect() -> Rect {
@@ -224,36 +237,57 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut fs: Option<Fs> = None;
     let mut app: Option<(Handle, Handle)> = None; // (pipe do app, processo)
     let mut prazo: Option<u64> = None; // permissao temporaria: instante em que expira
+    // Capacidade de janelas EMPRESTADA por proxy: (ponta do lancador voltada ao app, sessao
+    // real com o wm). O app so conhece a outra ponta do proxy; o lancador retransmite nos dois
+    // sentidos (mensagens e handles) e REVOGA fechando as duas pontas que segura.
+    let mut proxy: Option<(Handle, Handle)> = None;
     // SAFETY: unico acesso, processo de uma so thread.
     let elf_buf = unsafe { &mut *core::ptr::addr_of_mut!(ELF_BUF) };
 
     'pedidos: loop {
-        // Com uma permissao temporaria em curso, o lancador nao pode bloquear: sonda o
-        // orquestrador e o relogio; ao expirar, corta o cordao de vida do app e avisa.
-        let (n, nh) = if let Some(fim) = prazo {
-            loop {
-                match nexo_sys::channel_try_recv(PIPE, &mut buf, &mut hs) {
+        // Laco de eventos: retransmite o proxy da capacidade (se houver), atende o
+        // orquestrador e vigia o prazo da permissao temporaria. Sem proxy nem prazo, bloqueia
+        // no orquestrador como sempre.
+        let (n, nh) = loop {
+            if let Some((pa, real)) = proxy {
+                relay(pa, real);
+                relay(real, pa);
+            }
+            match nexo_sys::channel_try_recv(PIPE, &mut buf, &mut hs) {
+                Ok(v) => break v,
+                Err(Status::WouldBlock) => {}
+                Err(_) => nexo_sys::exit(0), // cordão de vida
+            }
+            if let Some(fim) = prazo
+                && nexo_sys::time_now() >= fim
+            {
+                // 1. REVOGA a capacidade: fecha o proxy — o app perde a sessao de janelas
+                //    enquanto ainda esta vivo (o wm recolhe as janelas dele)
+                if let Some((pa, real)) = proxy.take() {
+                    let _ = nexo_sys::handle_close(pa);
+                    let _ = nexo_sys::handle_close(real);
+                }
+                log!("lanc: permissao temporaria EXPIROU — capacidade de janelas REVOGADA");
+                let _ = nexo_sys::channel_send(PIPE, b"revogado", &[]);
+                nexo_sys::sleep_ns(200_000_000);
+                // 2. so entao corta o cordao de vida e recolhe o processo
+                if let Some((app_pipe, child)) = app.take() {
+                    let _ = nexo_sys::handle_close(app_pipe);
+                    let _ = nexo_sys::process_wait(child);
+                }
+                prazo = None;
+                let _ = nexo_sys::channel_send(PIPE, b"expirou", &[]);
+                continue 'pedidos;
+            }
+            if prazo.is_some() {
+                nexo_sys::sleep_ns(20_000_000);
+            } else if let Some((pa, real)) = proxy {
+                let _ = nexo_sys::channel_wait_any(&[PIPE, pa, real]);
+            } else {
+                match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
                     Ok(v) => break v,
-                    Err(Status::WouldBlock) => {
-                        if nexo_sys::time_now() >= fim {
-                            if let Some((app_pipe, child)) = app.take() {
-                                let _ = nexo_sys::handle_close(app_pipe);
-                                let _ = nexo_sys::process_wait(child);
-                            }
-                            prazo = None;
-                            log!("lanc: permissao temporaria EXPIROU — app encerrado");
-                            let _ = nexo_sys::channel_send(PIPE, b"expirou", &[]);
-                            continue 'pedidos;
-                        }
-                        nexo_sys::sleep_ns(20_000_000);
-                    }
                     Err(_) => nexo_sys::exit(0), // cordão de vida
                 }
-            }
-        } else {
-            match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
-                Ok(v) => v,
-                Err(_) => nexo_sys::exit(0), // cordão de vida
             }
         };
         if n > 5 && &buf[..5] == b"abre " {
@@ -352,9 +386,14 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     }
                     break;
                 }
-                if nexo_sys::channel_send(app_pipe, b"sess", &[app_sess]) != Status::Ok {
+                // o app recebe uma ponta de PROXY; a sessao real fica com o lancador, que
+                // retransmite — e pode revogar fechando o proxy (sem matar o app)
+                let (pa, pb) =
+                    nexo_sys::channel_create().unwrap_or_else(|_| fail(45, "proxy da sessao"));
+                if nexo_sys::channel_send(app_pipe, b"sess", &[pb]) != Status::Ok {
                     fail(42, "send sess ao app");
                 }
+                proxy = Some((pa, app_sess));
             }
             if decisao == 2 {
                 prazo = Some(nexo_sys::time_now() + PRAZO_NS);
@@ -376,6 +415,10 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             let _ = nexo_sys::handle_close(app_pipe); // cordão de vida do app
             if nexo_sys::process_wait(child) != Ok(0) {
                 fail(44, "app nao saiu limpo");
+            }
+            if let Some((pa, real)) = proxy.take() {
+                let _ = nexo_sys::handle_close(pa);
+                let _ = nexo_sys::handle_close(real);
             }
             let _ = nexo_sys::channel_send(PIPE, b"fim", &[]);
         }
