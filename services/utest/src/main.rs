@@ -2487,20 +2487,81 @@ fn config_driver() -> ! {
                 _ => nexo_sys::exit(2373),
             }
         };
-    wm_wait_px(ob, stride, 8, 8, (0x14, 0x15, 0x18), 1374);
+    wm_wait_px(ob, stride, 8, 8, (0x14, 0x15, 0x18), 2374);
     wm_click(inj, 24, 26);
     expect_pipe(pipe, b"tm1", 1375, &mut buf, &mut hs);
     if prefs_theme(s1, &mut out, &mut buf, &mut hs) != 1 {
         nexo_sys::exit(2376);
     }
-    wm_wait_px(ob, stride, 8, 8, (0xf4, 0xf4, 0xf6), 1377);
+    wm_wait_px(ob, stride, 8, 8, (0xf4, 0xf4, 0xf6), 2377);
     wm_click(inj, 24, 26);
     expect_pipe(pipe, b"tm0", 1378, &mut buf, &mut hs);
     if prefs_theme(s1, &mut out, &mut buf, &mut hs) != 0 {
         nexo_sys::exit(2379);
     }
-    wm_wait_px(ob, stride, 8, 8, (0x14, 0x15, 0x18), 1380);
-    nexo_sys::log("utest: config ok — toggles de RM, nao-perturbe e TEMA com efeito real");
+    wm_wait_px(ob, stride, 8, 8, (0x14, 0x15, 0x18), 2380);
+
+    // toggle ES (escala): o app PEDE "escala 1 2" — o driver faz o papel do shell (sessao
+    // bootstrap) e aplica set_global_scale; prefs reflete (1/2) e a janela das Configuracoes
+    // encolhe a metade na saida composta: o ponto (39,41), que era fundo da janela, vira o
+    // PRETO do compositor (a escala e global: o fundo azul do driver tambem encolhe para
+    // 32x24). O segundo clique (na janela encolhida: (16,22) -> local (16,28))
+    // pede "escala 1 1" e tudo volta.
+    let prefs_scale = |s1: nexo_sys::Handle,
+                       out: &mut [u8; 256],
+                       buf: &mut [u8; 256],
+                       hs: &mut [u32; 1]|
+     -> (u32, u32) {
+        let m = nexo_proto::wm::PrefsRequest {}
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(2580));
+        if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(2581);
+        }
+        match nexo_sys::channel_recv(s1, buf, hs) {
+            Ok((n, _)) => {
+                let p = nexo_proto::wm::decode_prefs_response(&buf[..n])
+                    .unwrap_or_else(|_| nexo_sys::exit(2582));
+                (p.scale_num, p.scale_den)
+            }
+            _ => nexo_sys::exit(2583),
+        }
+    };
+    let aplica_escala = |s1: nexo_sys::Handle,
+                         num: u32,
+                         den: u32,
+                         out: &mut [u8; 256],
+                         buf: &mut [u8; 256],
+                         hs: &mut [u32; 1]| {
+        let m = nexo_proto::wm::SetGlobalScaleRequest { num, den }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(2584));
+        if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(2585);
+        }
+        match nexo_sys::channel_recv(s1, buf, hs) {
+            Ok((n, _)) if nexo_proto::wm::decode_set_global_scale_response(&buf[..n]).is_ok() => {}
+            _ => nexo_sys::exit(2586),
+        }
+    };
+    wm_wait_px(ob, stride, 39, 41, (0x14, 0x15, 0x18), 2587);
+    wm_click(inj, 24, 36);
+    expect_pipe(pipe, b"escala 1 2", 2588, &mut buf, &mut hs);
+    aplica_escala(s1, 1, 2, &mut out, &mut buf, &mut hs);
+    if prefs_scale(s1, &mut out, &mut buf, &mut hs) != (1, 2) {
+        nexo_sys::exit(2589);
+    }
+    wm_wait_px(ob, stride, 39, 41, (0, 0, 0), 2590);
+    wm_click(inj, 16, 22);
+    expect_pipe(pipe, b"escala 1 1", 2591, &mut buf, &mut hs);
+    aplica_escala(s1, 1, 1, &mut out, &mut buf, &mut hs);
+    if prefs_scale(s1, &mut out, &mut buf, &mut hs) != (1, 1) {
+        nexo_sys::exit(2592);
+    }
+    wm_wait_px(ob, stride, 39, 41, (0x14, 0x15, 0x18), 2593);
+    nexo_sys::log(
+        "utest: config ok — toggles de RM, nao-perturbe, TEMA e ESCALA (mediada) com efeito real",
+    );
     nexo_sys::exit(0)
 }
 

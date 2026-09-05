@@ -1,10 +1,12 @@
-//! `config` — Configurações (Plano §Fase 6: "criar configurações"). Janela com três *toggles*
-//! reais: **movimento reduzido** (`set_reduce_motion`), **não-perturbe** (`set_dnd`) e **tema**
-//! (`set_theme`: escuro/claro — a própria janela repinta com o Theme novo na hora). O clique
+//! `config` — Configurações (Plano §Fase 6: "criar configurações"). Janela com quatro *toggles*
+//! reais: **movimento reduzido** (`set_reduce_motion`), **não-perturbe** (`set_dnd`), **tema**
+//! (`set_theme`: escuro/claro — a própria janela repinta com o Theme novo na hora) e
+//! **escala** (pedido MEDIADO "escala n d" ao orquestrador: a escala global é privilégio do
+//! shell, que a aplica com `set_global_scale`). O clique
 //! que aciona o toggle é o que dá o foco à janela — e a posse da entrada é exatamente o que as
 //! APIs mediadas exigem: a mediação do compositor trabalhando a favor do app.
 //! Handle 0 = canal do orquestrador (recebe "sess"; cordão de vida; emite "pronto" e o estado
-//! de cada toggle — "rm1"/"rm0"/"np1"/"np0"/"tm1"/"tm0" — para sincronização).
+//! de cada toggle — "rm1"/"rm0"/"np1"/"np0"/"tm1"/"tm0"/"escala n d" — para sincronização).
 #![no_std]
 #![no_main]
 
@@ -17,7 +19,7 @@ use nexo_ui::{Button, ButtonState, Theme};
 
 const PIPE: Handle = 0;
 const W: i32 = 32;
-const H: i32 = 24;
+const H: i32 = 34;
 
 fn fail(code: i64, what: &str) -> ! {
     log!("config: falha: {}", what);
@@ -34,9 +36,14 @@ fn np_rect() -> Rect {
 fn tm_rect() -> Rect {
     Rect::new(1, 14, 30, 8)
 }
+/// Escala do sistema: o app NAO tem o privilegio (set_global_scale e do shell); pede ao
+/// orquestrador "escala <num> <den>" e quem tem a sessao bootstrap aplica.
+fn es_rect() -> Rect {
+    Rect::new(1, 24, 30, 8)
+}
 
 /// Repinta: cada toggle "pressionado" quando ligado.
-fn redraw(base: u64, theme: &Theme, rm: bool, np: bool, tm: bool) {
+fn redraw(base: u64, theme: &Theme, rm: bool, np: bool, tm: bool, es: bool) {
     // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
     let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize) };
     let mut s = Surface::new(px, W as u32, H as u32, W as u32, PixelFormat::Rgbx8888)
@@ -58,6 +65,13 @@ fn redraw(base: u64, theme: &Theme, rm: bool, np: bool, tm: bool) {
     b.draw(&mut s, theme);
     let mut b = Button::new(tm_rect(), "TM");
     b.state = if tm {
+        ButtonState::Pressed
+    } else {
+        ButtonState::Normal
+    };
+    b.draw(&mut s, theme);
+    let mut b = Button::new(es_rect(), "ES");
+    b.state = if es {
         ButtonState::Pressed
     } else {
         ButtonState::Normal
@@ -114,7 +128,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut rm = false;
     let mut np = false;
     let mut tm = false;
-    redraw(base, &theme, rm, np, tm);
+    let mut es = false;
+    redraw(base, &theme, rm, np, tm, es);
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| fail(29, "enc commit"));
@@ -187,10 +202,16 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             // o tema do sistema mudou: esta janela repinta com o Theme novo na hora
             theme = if tm { Theme::light() } else { Theme::dark() };
             let _ = nexo_sys::channel_send(PIPE, if tm { b"tm1" } else { b"tm0" }, &[]);
+        } else if es_rect().contains(ev.x, ev.y) {
+            // escala do sistema: pedido MEDIADO — o orquestrador (shell) e quem tem o
+            // privilegio de set_global_scale; 1/2 = mais conteudo na tela, 1/1 = padrao
+            es = !es;
+            let _ =
+                nexo_sys::channel_send(PIPE, if es { b"escala 1 2" } else { b"escala 1 1" }, &[]);
         } else {
             continue;
         }
-        redraw(base, &theme, rm, np, tm);
+        redraw(base, &theme, rm, np, tm, es);
         let m = wm::CommitRequest { id }
             .encode_msg(&mut out)
             .unwrap_or_else(|_| fail(36, "enc commit2"));

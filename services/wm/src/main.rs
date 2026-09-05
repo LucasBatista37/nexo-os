@@ -188,6 +188,15 @@ fn fail(code: i64, what: &str) -> ! {
     nexo_sys::exit(code)
 }
 
+/// Ponteiro em coordenadas do BUFFER da janela: o retângulo exibido pode estar escalado
+/// (escala por janela ou global) e o app só conhece o seu buffer — sem esta conversão um
+/// clique sob escala caía na célula errada (o teste do painel de escala pegou).
+fn to_buf_coords(s: &Slot, px: i32, py: i32) -> (i32, i32) {
+    let x = (px - s.rect.x) * s.buf_w / s.rect.w.max(1);
+    let y = (py - s.rect.y) * s.buf_h / s.rect.h.max(1);
+    (x, y)
+}
+
 /// Página(s) de um MemoryObject como fatia de bytes (mapeada USER|RW neste processo).
 fn as_slice<'a>(base: u64, len: u64) -> &'a [u8] {
     // SAFETY: `base..base+len` foi mapeado por `memory_map` neste processo (USER|RW).
@@ -556,12 +565,14 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                         active_ctx,
                                         &attention,
                                     );
-                                    // entrega o clique (coordenadas locais) à janela clicada
+                                    // entrega o clique em coordenadas do BUFFER da janela
+                                    // (o retângulo exibido pode estar escalado)
                                     if let Some(sess) = sessions[surfaces[i].owner] {
+                                        let (lx, ly) = to_buf_coords(&surfaces[i], px, py);
                                         let ev = wm::PointerEvent {
                                             surface: i as u32,
-                                            x: px - surfaces[i].rect.x,
-                                            y: py - surfaces[i].rect.y,
+                                            x: lx,
+                                            y: ly,
                                         };
                                         let m = ev.encode_msg(&mut out).unwrap_or(0);
                                         let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
