@@ -324,6 +324,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Documentação (bloco 92 — ADR-0017)
+- **ADR-0017 — Convenção de processos (h0..h3) e a nexo-libc**: a decisão que nasceu nos blocos 65–89 registrada como ADR (quatro handles posicionais válidos no arranque; argv numa mensagem; stdin/stdout por canal com `PeerClosed` = EOF; crt0 fixa as sondas antes do `main`; libc mínima sobre protocolos gerados do mesmo IDL; composição é papel de quem lança; o que fica de fora — `fork`, ambiente, sinais, threads em C — e por quê). O índice de ADRs ganhou as linhas que faltavam (0015, 0016).
+
 ### Adicionado (Fase 5, bloco 91 — documentos por Contexto)
 - **`nexo.wm` v1.21**: `set_document {id, path}` (só a sessão dona) — cada janela declara o documento que mostra — e `surface_info` passou a devolver `document` ao lado do `context` de cada janela (campo aditivo). "Documentos por Contexto" é exatamente essa enumeração: o shell filtra as janelas do Contexto ativo e tem os documentos abertos nele, sem o compositor precisar entender arquivos.
 - Editor e visor declaram o caminho que abriram. Teste `user_editor`: a janela "editor" aparece na enumeração com `document = /nota.txt` e `context = 0`. Do item dos Contextos pende só a revogação fina por capacidade.

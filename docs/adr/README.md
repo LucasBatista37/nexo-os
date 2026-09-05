@@ -16,5 +16,8 @@
 | [0012](ADR-0012-licenca-e-dependencias.md) | Licença do projeto e política de dependências | aceita (provisória) |
 | [0013](ADR-0013-shell-grafico-e-contextos.md) | Shell gráfico e conceito de Contextos | aceita (direção) |
 | [0014](ADR-0014-compatibilidade-posix-linux-web.md) | Estratégia de compatibilidade POSIX/Linux/Web | aceita |
+| [0015](ADR-0015-drivers-em-modo-usuario.md) | Drivers em modo usuário (capabilities de dispositivo) | aceita |
+| [0016](ADR-0016-nexofs-v0.md) | NexoFS v0: sistema de arquivos persistente de teste | aceita (formato instável) |
+| [0017](ADR-0017-convencao-de-processos-e-libc.md) | Convenção de processos (h0..h3) e a nexo-libc | aceita |
 
 Novas decisões: copie [TEMPLATE.md](TEMPLATE.md). "Aceita (direção)" = princípios fixados; detalhes de implementação virão por RFC na fase indicada.
