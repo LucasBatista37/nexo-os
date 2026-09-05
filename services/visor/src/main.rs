@@ -2,19 +2,28 @@
 //! documentos básicos"). Recebe do orquestrador uma sessão do compositor e um canal `nexo.fs`
 //! com o caminho a abrir ("abre <caminho>"), lê o arquivo, decodifica com `nexo-img` (PPM P6,
 //! validação hostil sem pânico) e apresenta a imagem numa janela do tamanho exato dela.
+//! **Documentos básicos**: um arquivo que NÃO é PPM é apresentado como texto simples numa grade
+//! de glifos 6×4 (`nexo-textgrid`, a mesma do terminal e do editor) — bytes não imprimíveis
+//! são ignorados pela grade, então qualquer arquivo abre sem pânico.
 //! Handle 0 = canal do orquestrador (recebe "sess" e "abre"; cordão de vida; emite "pronto").
 #![no_std]
 #![no_main]
 
+use nexo_gfx::text::draw_glyph;
+use nexo_gfx::{Color, PixelFormat, Surface};
 use nexo_img::Ppm;
 use nexo_proto::wm;
 use nexo_rt::log;
 use nexo_sys::Handle;
 use nexo_sys::abi::Status;
+use nexo_textgrid::Grid;
 
 const PIPE: Handle = 0;
 /// Tamanho máximo de arquivo de imagem aceito.
 const IMG_MAX: usize = 16384;
+/// Grade do documento de texto (cabe na saída de 64×48 a partir de (8,8)).
+const TXT_COLS: usize = 6;
+const TXT_ROWS: usize = 4;
 
 static mut IMG_BUF: [u8; IMG_MAX] = [0; IMG_MAX];
 
@@ -116,14 +125,19 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         }
         off += dl;
     }
-    let img = Ppm::parse(&img_buf[..size]).unwrap_or_else(|_| fail(27, "ppm invalido"));
+    // PPM valido = imagem; qualquer outra coisa = documento basico (texto)
+    let img = Ppm::parse(&img_buf[..size]).ok();
+    let (w, h) = match &img {
+        Some(i) => (i.w as i32, i.h as i32),
+        None => ((TXT_COLS * 8) as i32, (TXT_ROWS * 8) as i32),
+    };
 
-    // janela do tamanho exato da imagem
+    // janela do tamanho exato da imagem (ou da grade de texto)
     let req = wm::CreateSurfaceRequest {
         x: 8,
         y: 8,
-        w: img.w as i32,
-        h: img.h as i32,
+        w,
+        h,
         z: 10,
         display: 0,
     };
@@ -154,18 +168,42 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
     let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
 
-    // blit RGB -> RGBX
-    let stride = img.w as usize * 4;
+    let stride = w as usize * 4;
     // SAFETY: base .. base+w*h*4 foi mapeada por memory_map (USER|RW) neste processo.
-    let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, stride * img.h as usize) };
-    for y in 0..img.h {
-        for x in 0..img.w {
-            let (r, g, b) = img.pixel(x, y);
-            let o = y as usize * stride + x as usize * 4;
-            px[o] = r;
-            px[o + 1] = g;
-            px[o + 2] = b;
-            px[o + 3] = 0;
+    let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, stride * h as usize) };
+    if let Some(img) = &img {
+        // blit RGB -> RGBX
+        for y in 0..img.h {
+            for x in 0..img.w {
+                let (r, g, b) = img.pixel(x, y);
+                let o = y as usize * stride + x as usize * 4;
+                px[o] = r;
+                px[o + 1] = g;
+                px[o + 2] = b;
+                px[o + 3] = 0;
+            }
+        }
+    } else {
+        // documento basico: o texto passa pela grade e cada celula vira um glifo
+        let mut grid: Grid<TXT_COLS, TXT_ROWS> = Grid::new();
+        grid.feed_all(&img_buf[..size]);
+        let mut s = Surface::new(px, w as u32, h as u32, w as u32, PixelFormat::Rgbx8888)
+            .unwrap_or_else(|| fail(36, "superficie"));
+        s.clear(Color::rgb(0x14, 0x15, 0x18));
+        for (r, row) in grid.cells.iter().enumerate() {
+            for (c, &ch) in row.iter().enumerate() {
+                if ch != b' ' {
+                    draw_glyph(
+                        &mut s,
+                        ch as char,
+                        (c * 8) as i32,
+                        (r * 8) as i32,
+                        1,
+                        Color::rgb(255, 255, 255),
+                        None,
+                    );
+                }
+            }
         }
     }
     let m = wm::CommitRequest { id }
@@ -173,7 +211,12 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         .unwrap_or_else(|_| fail(35, "enc commit"));
     let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
     let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
-    log!("visor: pronto ({}x{} px)", img.w, img.h);
+    log!(
+        "visor: pronto ({}x{} px, {})",
+        w,
+        h,
+        if img.is_some() { "imagem" } else { "texto" }
+    );
     let _ = nexo_sys::channel_send(PIPE, b"pronto", &[]);
 
     loop {

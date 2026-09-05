@@ -943,9 +943,11 @@ fn term_driver() -> ! {
     nexo_sys::exit(0)
 }
 
-/// Modo 53: visualizador de imagens. Escreve um PPM P6 com quadrantes coloridos no NexoFS
-/// real (idempotente entre boots), entrega ao visor uma sessao do compositor e o canal do fs
-/// com "abre <caminho>", e confere os quatro quadrantes na saida composta.
+/// Modo 53: visualizador de imagens e documentos. Escreve um PPM P6 com quadrantes coloridos
+/// no NexoFS real (idempotente entre boots), entrega ao visor uma sessao do compositor e o
+/// canal do fs com "abre <caminho>", confere os quatro quadrantes na saida composta; depois
+/// escreve um .txt, sobe um SEGUNDO visor (spawn do proprio driver, com o fs duplicado) e
+/// confere os glifos do documento de texto por pixel.
 fn visor_driver() -> ! {
     let s1: nexo_sys::Handle = 0;
     let pipe: nexo_sys::Handle = 1;
@@ -1001,6 +1003,10 @@ fn visor_driver() -> ! {
     if nexo_sys::channel_send(pipe, b"sess", &[mine]) != Status::Ok {
         nexo_sys::exit(1415);
     }
+    // o handle do fs vai embora no "abre": um DUPLICADO fica para o documento de texto
+    let fs2 = nexo_sys::handle_info(2)
+        .and_then(|(r, _)| nexo_sys::handle_duplicate(2, r))
+        .unwrap_or_else(|_| nexo_sys::exit(2490));
     if nexo_sys::channel_send(pipe, b"abre /visor-teste.ppm", &[2]) != Status::Ok {
         nexo_sys::exit(1416);
     }
@@ -1027,7 +1033,55 @@ fn visor_driver() -> ! {
     wm_wait_px(ob, stride, 8 + 3, 8 + 9, (0, 0, 200), 1425);
     wm_wait_px(ob, stride, 8 + 12, 8 + 9, (255, 255, 255), 1426);
 
-    nexo_sys::log("utest: visor ok — PPM do NexoFS decodificado e apresentado");
+    // DOCUMENTO BASICO (texto): escreve /visor-teste.txt, encerra o 1o visor pelo cordao de
+    // vida (a janela some: o ponto volta ao fundo preto) e abre um 2o visor com o texto —
+    // 'a' na celula (0,0), 'd' na (1,1), fundo escuro numa celula vazia
+    {
+        let mut fsc2 = FsClient {
+            ch: fs2,
+            req: [0; 4096],
+            reply: [0; 4096],
+        };
+        use nexo_inst::AppFs;
+        let mut afs = InstFs { c: &mut fsc2 };
+        afs.write_file("/visor-teste.txt", b"ab\ncd")
+            .unwrap_or_else(|_| nexo_sys::exit(2491));
+    }
+    nexo_sys::handle_close(pipe);
+    wm_wait_px(ob, stride, 8 + 3, 8 + 3, (0, 0, 0), 2492);
+    let (pipe2, pipe2_theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(2493));
+    let visor2 = nexo_sys::process_spawn("visor", 0, &[pipe2_theirs])
+        .unwrap_or_else(|_| nexo_sys::exit(2494));
+    let (mine2, theirs2) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(2495));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs2 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(2496));
+    if nexo_sys::channel_send(s1, &out[..m], &[theirs2]) != Status::Ok {
+        nexo_sys::exit(2497);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(2498),
+    }
+    if nexo_sys::channel_send(pipe2, b"sess", &[mine2]) != Status::Ok {
+        nexo_sys::exit(2499);
+    }
+    if nexo_sys::channel_send(pipe2, b"abre /visor-teste.txt", &[fs2]) != Status::Ok {
+        nexo_sys::exit(2500);
+    }
+    match nexo_sys::channel_recv(pipe2, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pronto" => {}
+        _ => nexo_sys::exit(2501),
+    }
+    let (ax, ay) = glyph_diff_pixel(b'a', b' ').unwrap_or_else(|| nexo_sys::exit(2502));
+    wm_wait_px(ob, stride, 8 + ax, 8 + ay, (255, 255, 255), 2503);
+    let (dx, dy) = glyph_diff_pixel(b'd', b' ').unwrap_or_else(|| nexo_sys::exit(2504));
+    wm_wait_px(ob, stride, 8 + 8 + dx, 8 + 8 + dy, (255, 255, 255), 2505);
+    wm_wait_px(ob, stride, 8 + 40, 8 + 24, (0x14, 0x15, 0x18), 2506);
+    // encerra o 2o visor antes de sair (o teste do kernel confere vazamentos)
+    nexo_sys::handle_close(pipe2);
+    let _ = nexo_sys::process_wait(visor2);
+    nexo_sys::log("utest: visor ok — PPM apresentado e documento de TEXTO num segundo visor");
     nexo_sys::exit(0)
 }
 
