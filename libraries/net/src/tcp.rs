@@ -97,6 +97,9 @@ pub struct TcpSocket {
     pend: [TxPend; TX_SLOTS],
     rx: [u8; RX_CAP],
     rx_len: usize,
+    /// A janela anunciada ficou menor que um segmento: o par pode ter parado (persist timer)
+    /// e precisa de uma atualização de janela quando a aplicação drenar a fila.
+    win_low: bool,
 }
 
 impl TcpSocket {
@@ -115,6 +118,7 @@ impl TcpSocket {
             pend: [PEND_FREE; TX_SLOTS],
             rx: [0; RX_CAP],
             rx_len: 0,
+            win_low: false,
         }
     }
 
@@ -247,6 +251,7 @@ impl TcpSocket {
                             self.rx[self.rx_len..self.rx_len + take].copy_from_slice(seg.payload);
                             self.rx_len += take;
                             self.rcv_nxt = self.rcv_nxt.wrapping_add(take as u32);
+                            self.win_low |= (self.window() as usize) < MSS;
                             return Some(self.ack_seg());
                         }
                     }
@@ -269,6 +274,7 @@ impl TcpSocket {
                         self.rx[self.rx_len..self.rx_len + take].copy_from_slice(seg.payload);
                         self.rx_len += take;
                         self.rcv_nxt = self.rcv_nxt.wrapping_add(take as u32);
+                        self.win_low |= (self.window() as usize) < MSS;
                         advanced = true;
                     }
                     // sem espaço: não confirma; o par retransmite
@@ -422,6 +428,20 @@ impl TcpSocket {
         self.rx.copy_within(take..self.rx_len, 0);
         self.rx_len -= take;
         take
+    }
+
+    /// Atualização de janela (RFC 1122 §4.2.3.3): se a janela anunciada tinha ficado menor
+    /// que um segmento, o par pode estar parado no *persist timer* (sondas de 1 byte a cada
+    /// segundos); depois de a aplicação drenar a fila (`take_rx`), um ACK com a janela
+    /// corrente destrava a transmissão. Devolve `None` enquanto não há espaço para um
+    /// segmento inteiro ou se nada precisa ser anunciado.
+    pub fn window_update(&mut self) -> Option<TxSeg> {
+        if self.win_low && (self.window() as usize) >= MSS {
+            self.win_low = false;
+            Some(self.ack_seg())
+        } else {
+            None
+        }
     }
 
     fn ack_seg(&self) -> TxSeg {
@@ -667,6 +687,38 @@ mod tests {
         assert!(s.on_segment(&seg(seqn, 1001, TCP_ACK, &big), 0).is_none());
         let mut sink = [0u8; RX_CAP];
         assert_eq!(s.take_rx(&mut sink), acked);
+    }
+
+    /// Janela cheia -> a aplicação drena -> a máquina pede um ACK de atualização de janela (sem
+    /// ele o par fica no persist timer: foi o que fez um download de 24 KiB levar 30 s).
+    #[test]
+    fn window_update_after_drain_unblocks_zero_window() {
+        let mut s = established(0);
+        let big = [7u8; MSS];
+        let mut seqn = 5001u32;
+        let mut acked = 0;
+        while acked + MSS <= RX_CAP {
+            s.on_segment(&seg(seqn, 1001, TCP_ACK, &big), 0).unwrap();
+            seqn = seqn.wrapping_add(MSS as u32);
+            acked += MSS;
+        }
+        assert!(
+            (s.window() as usize) < MSS,
+            "janela ainda comporta um segmento"
+        );
+        assert!(
+            s.window_update().is_none(),
+            "sem drenar nao ha o que anunciar"
+        );
+        let mut sink = [0u8; RX_CAP];
+        assert_eq!(s.take_rx(&mut sink), acked);
+        let up = s
+            .window_update()
+            .expect("drenou: precisa anunciar a janela nova");
+        assert_eq!(up.flags, TCP_ACK);
+        assert_eq!(up.ack, seqn);
+        assert_eq!(up.payload_len, 0);
+        assert!(s.window_update().is_none(), "anuncia uma vez so");
     }
 
     /// Fuzz de estados: sequências aleatórias de segmentos/ações contra a máquina, checando que

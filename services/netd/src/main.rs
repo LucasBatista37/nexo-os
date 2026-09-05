@@ -821,6 +821,11 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
                 closed: (c.peer_closed || c.reset || c.state == nsk::tcp::State::Closed) as u8,
             };
             resp.data_len = c.take_rx(&mut resp.data) as u32;
+            // a aplicacao abriu espaco: se a janela tinha ficado pequena, o par pode estar
+            // no persist timer — anuncia a janela nova agora, sem esperar o proximo segmento
+            if let Some(seg) = c.window_update() {
+                emit_seg(c, seg);
+            }
             resp.encode_msg(out).unwrap_or(0)
         }
         Request::UdpAvail(rq) => {
