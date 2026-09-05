@@ -2,8 +2,9 @@
 //! abre um arquivo do `nexo.fs`, mostra o texto numa grade de glifos (`nexo-textgrid`, a mesma
 //! do terminal) e edita com **cursor livre** — setas ESQ/DIR movem o cursor, imprimíveis
 //! INSEREM na posição, backspace remove à esquerda, Enter quebra linha; **F2 salva**
-//! (truncate + write no arquivo real). A janela é a prova: a grade é uma função pura do
-//! par (texto, cursor), repintada a cada edição.
+//! (truncate + write no arquivo real); textos maiores que a janela **rolam** para o cursor
+//! ficar sempre visível. A janela é a prova: a grade é uma função pura da tripla (texto,
+//! cursor, primeira linha visível), repintada a cada edição.
 //! Handle 0 = canal do orquestrador: "sess" (sessão wm), depois "abre <caminho>" + canal
 //! `nexo.fs`; responde "pronto"; a cada salvamento emite "salvo"; em "fecha" devolve o canal
 //! do fs ("fs" + handle) e encerra — as capacidades voltam para quem as emprestou.
@@ -133,15 +134,53 @@ impl Fs {
     }
 }
 
-/// Repinta: a grade é reconstruída do texto (função pura), com o cursor de acento na célula
-/// correspondente a `cur` — alimentar `text[..cur]` primeiro captura a posição exata, e o
-/// resto do texto segue na MESMA grade (o estado de alimentação é contínuo).
-fn redraw(base: u64, text: &[u8], cur: usize) {
+/// Linha ABSOLUTA do cursor (índice `cur` no texto), pelas mesmas regras de quebra da grade.
+fn linha_do_cursor(text: &[u8], cur: usize) -> usize {
+    let mut g = Grid::new();
+    g.feed_all(&text[..cur.min(text.len())]);
+    g.scrolled + g.cy
+}
+
+/// Ajusta a primeira linha visível para o cursor caber na janela (rolagem mínima).
+fn enquadra(topo: usize, linha: usize) -> usize {
+    if linha < topo {
+        linha
+    } else if linha >= topo + ROWS {
+        linha + 1 - ROWS
+    } else {
+        topo
+    }
+}
+
+/// Repinta a janela de ROWS linhas a partir da linha lógica `topo`: alimenta o texto até a
+/// última linha visível, parando ANTES da quebra que abriria a linha `topo + ROWS` — assim a
+/// grade rola exatamente `topo` vezes e mostra as linhas [topo, topo+ROWS). O cursor é
+/// capturado como (coluna, linha ABSOLUTA) ao passar por `cur` e desenhado em linha − topo.
+fn redraw(base: u64, text: &[u8], cur: usize, topo: usize) {
     let mut grid = Grid::new();
     let cur = cur.min(text.len());
-    grid.feed_all(&text[..cur]);
-    let (ccx, ccy) = (grid.cx, grid.cy);
-    grid.feed_all(&text[cur..]);
+    let mut cursor = (0usize, 0usize);
+    let mut i = 0;
+    loop {
+        if i == cur {
+            cursor = (grid.cx, grid.scrolled + grid.cy);
+        }
+        if i == text.len() {
+            break;
+        }
+        let b = text[i];
+        let ultima = grid.scrolled + grid.cy + 1 == topo + ROWS;
+        let imprimivel = (0x20..=0x7e).contains(&b);
+        if ultima && (b == b'\n' || (imprimivel && grid.cx + 1 == COLS)) {
+            if imprimivel {
+                grid.cells[grid.cy][grid.cx] = b; // a célula entra; a quebra ficaria fora
+            }
+            break;
+        }
+        grid.feed(b);
+        i += 1;
+    }
+    let (ccx, ccy) = (cursor.0, cursor.1.saturating_sub(topo).min(ROWS - 1));
     // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
     let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize) };
     let mut s = Surface::new(px, W as u32, H as u32, W as u32, PixelFormat::Rgbx8888)
@@ -236,7 +275,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
 
     let mut cur = len; // cursor livre: comeca no fim do texto
-    redraw(base, &text[..len], cur);
+    let mut topo = enquadra(0, linha_do_cursor(&text[..len], cur)); // rolagem: o fim fica visivel
+    redraw(base, &text[..len], cur, topo);
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| fail(33, "enc commit"));
@@ -312,7 +352,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             }
         }
         if dirty {
-            redraw(base, &text[..len], cur);
+            topo = enquadra(topo, linha_do_cursor(&text[..len], cur));
+            redraw(base, &text[..len], cur, topo);
             let m = wm::CommitRequest { id }
                 .encode_msg(&mut out)
                 .unwrap_or_else(|_| fail(35, "enc commit2"));

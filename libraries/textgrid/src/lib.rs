@@ -10,8 +10,11 @@ pub struct Grid<const C: usize, const R: usize> {
     pub cells: [[u8; C]; R],
     /// Coluna do cursor.
     pub cx: usize,
-    /// Linha do cursor.
+    /// Linha do cursor (na grade).
     pub cy: usize,
+    /// Quantas vezes a grade rolou (linhas que saíram por cima): `scrolled + cy` é a linha
+    /// ABSOLUTA do cursor no texto alimentado — o que um editor com rolagem precisa saber.
+    pub scrolled: usize,
 }
 
 impl<const C: usize, const R: usize> Default for Grid<C, R> {
@@ -27,6 +30,7 @@ impl<const C: usize, const R: usize> Grid<C, R> {
             cells: [[b' '; C]; R],
             cx: 0,
             cy: 0,
+            scrolled: 0,
         }
     }
 
@@ -36,6 +40,7 @@ impl<const C: usize, const R: usize> Grid<C, R> {
             self.cells.copy_within(1.., 0);
             self.cells[R - 1] = [b' '; C];
             self.cy = R - 1;
+            self.scrolled += 1;
         }
     }
 
@@ -110,6 +115,22 @@ mod tests {
         g.feed_all(b"\r\nNexo OS - shell de diagnostico (digite 'ajuda')\r\n> ");
         g.feed_all(b"eco ola\r\nola\r\n> ");
         assert!((0..6).rev().any(|r| &g.cells[r] == b"ola     "));
+    }
+
+    #[test]
+    fn scrolled_counts_lines_that_left_the_top() {
+        // 2 linhas: "a", "b", "c" + quebra final = 4 linhas absolutas; a grade rolou 2 vezes
+        let mut g: Grid<4, 2> = Grid::new();
+        g.feed_all(b"a\nb\nc\n");
+        assert_eq!(g.scrolled, 2);
+        assert_eq!((g.cx, g.cy), (0, 1));
+        assert_eq!(g.scrolled + g.cy, 3); // linha absoluta do cursor
+        assert_eq!(&g.cells[0], b"c   ");
+        // a quebra automatica tambem conta como rolagem
+        let mut g: Grid<2, 2> = Grid::new();
+        g.feed_all(b"abcde"); // ab / cd / e -> rolou 1
+        assert_eq!(g.scrolled, 1);
+        assert_eq!(&g.cells[1], b"e ");
     }
 
     #[test]

@@ -1110,7 +1110,8 @@ fn agenda_driver() -> ! {
 /// digita "mundo" (com um typo corrigido por backspace), volta o CURSOR com as setas e
 /// insere "meu " no meio (mais um 'z' removido no meio — cursor livre completo), salva com
 /// F2 e — depois que o editor DEVOLVE o canal do fs no "fecha" — re-le o arquivo e confere
-/// "ola\nmeu mundo". Handles: 0 wm (bootstrap), 1 pipe do editor, 2 fs.
+/// "ola\nmeu mundo" — e antes de salvar cria mais quatro linhas (a janela ROLA) e volta ao topo
+/// com o cursor (rola de volta), conferindo por pixel. Handles: 0 wm, 1 pipe do editor, 2 fs.
 fn editor_driver() -> ! {
     let s1: nexo_sys::Handle = 0;
     let pipe: nexo_sys::Handle = 1;
@@ -1203,6 +1204,31 @@ fn editor_driver() -> ! {
     wm_wait_px(ob, stride, 2 * 8 + ux, 8 + uy, (255, 255, 255), 1509);
     wm_wait_px(ob, stride, 4 * 8 + mx, 8 + my, (255, 255, 255), 1510);
 
+    // ROLAGEM: 5 setas DIREITA levam ao fim de "meu mundo"; Enter+digito quatro vezes cria as
+    // linhas "1".."4". Como "meu mundo" QUEBRA em 8 colunas ("meu mund" / "o"), o texto ocupa
+    // 7 linhas de grade (> 6 da janela): a janela rola uma linha — a linha 0 passa a mostrar o
+    // 'm' de "meu" (o "ola" saiu por cima) e o '4' aparece na linha 5. Depois 18 setas
+    // ESQUERDA levam o cursor ao fim de "ola" (linha 0, fora da janela): rola de volta e o
+    // 'o' de "ola" reaparece na linha 0.
+    for _ in 0..5 {
+        wm_key(inj, 106, 1);
+        wm_key(inj, 106, 0);
+    }
+    for code in [28u16, 2, 28, 3, 28, 4, 28, 5] {
+        wm_key(inj, code, 1);
+        wm_key(inj, code, 0);
+    }
+    let (sx, sy) = glyph_diff_pixel(b'm', b'o').unwrap_or_else(|| nexo_sys::exit(2480));
+    wm_wait_px(ob, stride, sx, sy, (255, 255, 255), 2481);
+    let (fx, fy) = glyph_diff_pixel(b'4', b' ').unwrap_or_else(|| nexo_sys::exit(2482));
+    wm_wait_px(ob, stride, fx, 5 * 8 + fy, (255, 255, 255), 2483);
+    for _ in 0..18 {
+        wm_key(inj, 105, 1);
+        wm_key(inj, 105, 0);
+    }
+    let (bx, by) = glyph_diff_pixel(b'o', b'm').unwrap_or_else(|| nexo_sys::exit(2484));
+    wm_wait_px(ob, stride, bx, by, (255, 255, 255), 2485);
+
     // F2 salva; o editor confirma
     wm_key(inj, 60, 1);
     wm_key(inj, 60, 0);
@@ -1228,12 +1254,12 @@ fn editor_driver() -> ! {
     let mut back = [0u8; 64];
     let n = nexo_inst::AppFs::read_file(&mut fs, "/nota.txt", &mut back)
         .unwrap_or_else(|_| nexo_sys::exit(1506));
-    if &back[..n] != b"ola\nmeu mundo" {
+    if &back[..n] != b"ola\nmeu mundo\n1\n2\n3\n4" {
         nexo_sys::exit(1507);
     }
 
     nexo_sys::log(
-        "utest: editor ok — digitado (com edicao NO MEIO), salvo e conferido no NexoFS real",
+        "utest: editor ok — editado no meio, ROLADO nos dois sentidos, salvo e conferido no NexoFS real",
     );
     nexo_sys::exit(0)
 }
