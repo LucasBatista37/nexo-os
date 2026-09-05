@@ -1,8 +1,9 @@
 //! `editor` — editor de texto (Plano §Fase 6: "criar editor de texto"). MVP honesto de notas:
 //! abre um arquivo do `nexo.fs`, mostra o texto numa grade de glifos (`nexo-textgrid`, a mesma
-//! do terminal) e edita **no fim do texto** — teclas imprimíveis acrescentam, backspace apaga,
-//! Enter quebra linha; **F2 salva** (truncate + write no arquivo real). A janela é a prova: a
-//! grade é uma função pura do texto, repintada a cada edição.
+//! do terminal) e edita com **cursor livre** — setas ESQ/DIR movem o cursor, imprimíveis
+//! INSEREM na posição, backspace remove à esquerda, Enter quebra linha; **F2 salva**
+//! (truncate + write no arquivo real). A janela é a prova: a grade é uma função pura do
+//! par (texto, cursor), repintada a cada edição.
 //! Handle 0 = canal do orquestrador: "sess" (sessão wm), depois "abre <caminho>" + canal
 //! `nexo.fs`; responde "pronto"; a cada salvamento emite "salvo"; em "fecha" devolve o canal
 //! do fs ("fs" + handle) e encerra — as capacidades voltam para quem as emprestou.
@@ -24,6 +25,8 @@ const W: i32 = (COLS * 8) as i32;
 const H: i32 = (ROWS * 8) as i32;
 const TEXT_MAX: usize = 4096;
 const KEY_F2: u32 = 60;
+const KEY_LEFT: u32 = 105;
+const KEY_RIGHT: u32 = 106;
 
 type Grid = TextGrid<COLS, ROWS>;
 
@@ -130,10 +133,15 @@ impl Fs {
     }
 }
 
-/// Repinta: a grade é reconstruída do texto (função pura), com um cursor de acento.
-fn redraw(base: u64, text: &[u8]) {
+/// Repinta: a grade é reconstruída do texto (função pura), com o cursor de acento na célula
+/// correspondente a `cur` — alimentar `text[..cur]` primeiro captura a posição exata, e o
+/// resto do texto segue na MESMA grade (o estado de alimentação é contínuo).
+fn redraw(base: u64, text: &[u8], cur: usize) {
     let mut grid = Grid::new();
-    grid.feed_all(text);
+    let cur = cur.min(text.len());
+    grid.feed_all(&text[..cur]);
+    let (ccx, ccy) = (grid.cx, grid.cy);
+    grid.feed_all(&text[cur..]);
     // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
     let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize) };
     let mut s = Surface::new(px, W as u32, H as u32, W as u32, PixelFormat::Rgbx8888)
@@ -154,9 +162,9 @@ fn redraw(base: u64, text: &[u8]) {
             }
         }
     }
-    // cursor: risco de acento sob a próxima célula
+    // cursor: risco de acento sob a célula onde a próxima inserção cai
     s.fill_rect(
-        nexo_gfx::Rect::new((grid.cx * 8) as i32, (grid.cy * 8 + 7) as i32, 8, 1),
+        nexo_gfx::Rect::new((ccx * 8) as i32, (ccy * 8 + 7) as i32, 8, 1),
         Color::rgb(0x6f, 0x9f, 0xff),
     );
 }
@@ -227,7 +235,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
     let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
 
-    redraw(base, &text[..len]);
+    let mut cur = len; // cursor livre: comeca no fim do texto
+    redraw(base, &text[..len], cur);
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| fail(33, "enc commit"));
@@ -264,15 +273,33 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                         let _ = nexo_sys::channel_send(PIPE, b"salvo", &[]);
                         continue;
                     }
+                    if k.code == KEY_LEFT {
+                        if cur > 0 {
+                            cur -= 1;
+                            dirty = true;
+                        }
+                        continue;
+                    }
+                    if k.code == KEY_RIGHT {
+                        if cur < len {
+                            cur += 1;
+                            dirty = true;
+                        }
+                        continue;
+                    }
                     match evdev_char(k.code as u16) {
                         Some(0x08) => {
-                            if len > 0 {
+                            if cur > 0 {
+                                text.copy_within(cur..len, cur - 1);
+                                cur -= 1;
                                 len -= 1;
                                 dirty = true;
                             }
                         }
                         Some(ch) if len < TEXT_MAX => {
-                            text[len] = ch;
+                            text.copy_within(cur..len, cur + 1);
+                            text[cur] = ch;
+                            cur += 1;
                             len += 1;
                             dirty = true;
                         }
@@ -285,7 +312,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             }
         }
         if dirty {
-            redraw(base, &text[..len]);
+            redraw(base, &text[..len], cur);
             let m = wm::CommitRequest { id }
                 .encode_msg(&mut out)
                 .unwrap_or_else(|_| fail(35, "enc commit2"));

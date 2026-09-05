@@ -1107,9 +1107,10 @@ fn agenda_driver() -> ! {
 }
 
 /// Modo 58: editor de texto. Escreve /nota.txt, entrega ao editor a sessao e o canal do fs,
-/// digita "mundo" (com um typo corrigido por backspace) pela entrada sintetica do compositor,
-/// salva com F2 e — depois que o editor DEVOLVE o canal do fs no "fecha" — re-le o arquivo e
-/// confere o conteudo salvo. Handles: 0 wm (bootstrap), 1 pipe do editor, 2 fs.
+/// digita "mundo" (com um typo corrigido por backspace), volta o CURSOR com as setas e
+/// insere "meu " no meio (mais um 'z' removido no meio — cursor livre completo), salva com
+/// F2 e — depois que o editor DEVOLVE o canal do fs no "fecha" — re-le o arquivo e confere
+/// "ola\nmeu mundo". Handles: 0 wm (bootstrap), 1 pipe do editor, 2 fs.
 fn editor_driver() -> ! {
     let s1: nexo_sys::Handle = 0;
     let pipe: nexo_sys::Handle = 1;
@@ -1188,6 +1189,20 @@ fn editor_driver() -> ! {
     let (ox, oy) = glyph_diff_pixel(b'o', b' ').unwrap_or_else(|| nexo_sys::exit(1501));
     wm_wait_px(ob, stride, 4 * 8 + ox, 8 + oy, (255, 255, 255), 1502);
 
+    // CURSOR LIVRE: 5x ESQUERDA volta ao inicio de "mundo"; "meu " entra NO MEIO (linha vira
+    // "meu mundo"); um 'z' inserido e removido com backspace prova a remocao no meio tambem
+    for _ in 0..5 {
+        wm_key(inj, 105, 1);
+        wm_key(inj, 105, 0);
+    }
+    for code in [50u16, 18, 22, 57, 44, 14] {
+        wm_key(inj, code, 1);
+        wm_key(inj, code, 0);
+    }
+    let (ux, uy) = glyph_diff_pixel(b'u', b' ').unwrap_or_else(|| nexo_sys::exit(1508));
+    wm_wait_px(ob, stride, 2 * 8 + ux, 8 + uy, (255, 255, 255), 1509);
+    wm_wait_px(ob, stride, 4 * 8 + mx, 8 + my, (255, 255, 255), 1510);
+
     // F2 salva; o editor confirma
     wm_key(inj, 60, 1);
     wm_key(inj, 60, 0);
@@ -1213,11 +1228,13 @@ fn editor_driver() -> ! {
     let mut back = [0u8; 64];
     let n = nexo_inst::AppFs::read_file(&mut fs, "/nota.txt", &mut back)
         .unwrap_or_else(|_| nexo_sys::exit(1506));
-    if &back[..n] != b"ola\nmundo" {
+    if &back[..n] != b"ola\nmeu mundo" {
         nexo_sys::exit(1507);
     }
 
-    nexo_sys::log("utest: editor ok — digitado, salvo e conferido no NexoFS real");
+    nexo_sys::log(
+        "utest: editor ok — digitado (com edicao NO MEIO), salvo e conferido no NexoFS real",
+    );
     nexo_sys::exit(0)
 }
 
