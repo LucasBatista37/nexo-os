@@ -2606,7 +2606,31 @@ fn consent_driver(elf_len: usize) -> ! {
         nexo_sys::exit(1475); // janela de um app negado: o consentimento falhou
     }
 
-    nexo_sys::log("utest: consentimento ok — permitir lanca, negar nao executa");
+    // rodada 3: PERMITIR POR TEMPO — o app e lancado, a janela aparece e, sem nenhum "fecha",
+    // some sozinha quando a permissao expira (o lanc avisa "expirou")
+    if nexo_sys::channel_send(pipe, b"abre app-sim", &[]) != Status::Ok {
+        nexo_sys::exit(2510);
+    }
+    expect_pipe(b"pedido", 2511, &mut buf, &mut hs);
+    wm_click(inj, 8 + 2 + 22, 8 + 22 + 4); // centro do "Permitir por tempo"
+    expect_pipe(b"permitido", 2512, &mut buf, &mut hs);
+    let start = nexo_sys::time_now();
+    while !find_title(b"calc", &mut out, &mut buf, &mut hs) {
+        if nexo_sys::time_now() - start > 10_000_000_000 {
+            nexo_sys::exit(2513);
+        }
+        nexo_sys::sleep_ns(10_000_000);
+    }
+    expect_pipe(b"expirou", 2514, &mut buf, &mut hs);
+    let start = nexo_sys::time_now();
+    while find_title(b"calc", &mut out, &mut buf, &mut hs) {
+        if nexo_sys::time_now() - start > 10_000_000_000 {
+            nexo_sys::exit(2515); // a janela de um app expirado continua viva
+        }
+        nexo_sys::sleep_ns(10_000_000);
+    }
+
+    nexo_sys::log("utest: consentimento ok — permitir lanca, negar nao executa, por tempo expira");
     nexo_sys::exit(0)
 }
 

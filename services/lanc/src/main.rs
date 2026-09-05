@@ -1,7 +1,8 @@
 //! `lanc` — lançador com **consentimento** (Plano §Fase 6: "implementar permissões declarativas
 //! e consentimento"). Antes de executar um app instalado, mostra uma janela com as permissões
 //! que o manifesto declara (uma célula de acento por permissão) e os botões **Permitir** e
-//! **Negar** — e só concede as capacidades depois do clique em Permitir. O clique é entregue
+//! **Negar** (e **Permitir por tempo**: a concessão vale por um prazo; ao expirar o lançador
+//! corta o cordão de vida e o app encerra) — e só concede as capacidades depois do clique. O clique é entregue
 //! pelo compositor à janela sob o cursor: a decisão vem do usuário, não do app. Negar significa
 //! que o app nem é executado.
 //! Handle 0 = canal do orquestrador: recebe "sess" (sessão do compositor), depois
@@ -18,7 +19,10 @@ use nexo_sys::abi::Status;
 
 const PIPE: Handle = 0;
 const W: i32 = 48;
-const H: i32 = 24;
+const H: i32 = 32;
+/// Prazo da permissao temporaria ("Permitir por tempo"): ao expirar, o lancador corta o
+/// cordao de vida e o app encerra — a concessao tem validade, nao e para sempre.
+const PRAZO_NS: u64 = 1_000_000_000;
 const ELF_MAX: usize = 40960;
 
 static mut ELF_BUF: [u8; ELF_MAX] = [0; ELF_MAX];
@@ -33,6 +37,10 @@ fn permit_rect() -> Rect {
 }
 fn deny_rect() -> Rect {
     Rect::new(26, 12, 20, 8)
+}
+/// "Permitir por tempo": concede como Permitir, mas so por PRAZO_NS.
+fn timed_rect() -> Rect {
+    Rect::new(2, 22, 44, 8)
 }
 
 /// Cliente `nexo.fs` de leitura (o lançador não escreve nada).
@@ -164,6 +172,7 @@ fn draw_consent(base: u64, nperms: usize) {
     }
     s.fill_rect(permit_rect(), Color::rgb(0x2f, 0xa0, 0x4f));
     s.fill_rect(deny_rect(), Color::rgb(0xc0, 0x30, 0x30));
+    s.fill_rect(timed_rect(), Color::rgb(0xe0, 0xa0, 0x20));
 }
 
 #[unsafe(no_mangle)]
@@ -214,13 +223,38 @@ pub extern "C" fn _start(_arg: u64) -> ! {
 
     let mut fs: Option<Fs> = None;
     let mut app: Option<(Handle, Handle)> = None; // (pipe do app, processo)
+    let mut prazo: Option<u64> = None; // permissao temporaria: instante em que expira
     // SAFETY: unico acesso, processo de uma so thread.
     let elf_buf = unsafe { &mut *core::ptr::addr_of_mut!(ELF_BUF) };
 
-    loop {
-        let (n, nh) = match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
-            Ok(v) => v,
-            Err(_) => nexo_sys::exit(0), // cordão de vida
+    'pedidos: loop {
+        // Com uma permissao temporaria em curso, o lancador nao pode bloquear: sonda o
+        // orquestrador e o relogio; ao expirar, corta o cordao de vida do app e avisa.
+        let (n, nh) = if let Some(fim) = prazo {
+            loop {
+                match nexo_sys::channel_try_recv(PIPE, &mut buf, &mut hs) {
+                    Ok(v) => break v,
+                    Err(Status::WouldBlock) => {
+                        if nexo_sys::time_now() >= fim {
+                            if let Some((app_pipe, child)) = app.take() {
+                                let _ = nexo_sys::handle_close(app_pipe);
+                                let _ = nexo_sys::process_wait(child);
+                            }
+                            prazo = None;
+                            log!("lanc: permissao temporaria EXPIROU — app encerrado");
+                            let _ = nexo_sys::channel_send(PIPE, b"expirou", &[]);
+                            continue 'pedidos;
+                        }
+                        nexo_sys::sleep_ns(20_000_000);
+                    }
+                    Err(_) => nexo_sys::exit(0), // cordão de vida
+                }
+            }
+        } else {
+            match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
+                Ok(v) => v,
+                Err(_) => nexo_sys::exit(0), // cordão de vida
+            }
         };
         if n > 5 && &buf[..5] == b"abre " {
             if nh == 1 {
@@ -257,8 +291,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
             let _ = nexo_sys::channel_send(PIPE, b"pedido", &[]);
 
-            // espera a DECISÃO: um clique dentro de Permitir ou Negar
-            let permitted = loop {
+            // espera a DECISÃO: um clique em Permitir (1), Negar (0) ou Permitir por tempo (2)
+            let decisao = loop {
                 let (n, _) = match nexo_sys::channel_recv(sess, &mut buf, &mut hs) {
                     Ok(v) => v,
                     Err(_) => nexo_sys::exit(0),
@@ -270,13 +304,16 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     continue;
                 }
                 if permit_rect().contains(ev.x, ev.y) {
-                    break true;
+                    break 1u8;
                 }
                 if deny_rect().contains(ev.x, ev.y) {
-                    break false;
+                    break 0u8;
+                }
+                if timed_rect().contains(ev.x, ev.y) {
+                    break 2u8;
                 }
             };
-            if !permitted {
+            if decisao == 0 {
                 log!("lanc: '{}' NEGADO pelo usuario — nada e executado", name);
                 let _ = nexo_sys::channel_send(PIPE, b"negado", &[]);
                 continue;
@@ -319,13 +356,23 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     fail(42, "send sess ao app");
                 }
             }
-            log!("lanc: '{}' PERMITIDO — lancado com o que declara", name);
+            if decisao == 2 {
+                prazo = Some(nexo_sys::time_now() + PRAZO_NS);
+                log!(
+                    "lanc: '{}' PERMITIDO POR TEMPO — lancado; expira em {} ms",
+                    name,
+                    PRAZO_NS / 1_000_000
+                );
+            } else {
+                log!("lanc: '{}' PERMITIDO — lancado com o que declara", name);
+            }
             app = Some((app_pipe, child));
             let _ = nexo_sys::channel_send(PIPE, b"permitido", &[]);
         } else if &buf[..n] == b"fecha" {
             let Some((app_pipe, child)) = app.take() else {
                 fail(43, "nada a fechar");
             };
+            prazo = None;
             let _ = nexo_sys::handle_close(app_pipe); // cordão de vida do app
             if nexo_sys::process_wait(child) != Ok(0) {
                 fail(44, "app nao saiu limpo");

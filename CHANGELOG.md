@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 84 — permissão temporária no lançador)
+- A janela de consentimento ganhou **"Permitir por tempo"**: concede exatamente como Permitir, mas a concessão tem validade (1 s na v0) — ao expirar, o lançador **corta o cordão de vida** e o app encerra, avisando "expirou". Enquanto há um prazo em curso o lançador não bloqueia (sonda o orquestrador e o relógio). É a forma de permissão temporária que os primitivos de hoje sustentam: a vida da concessão; revogação fina por capacidade (proxies) pende.
+- Teste `user_consent` ganhou a rodada 3: o app é lançado, a janela "calc" aparece e, sem nenhum "fecha", some sozinha depois do "expirou".
+
 ### Adicionado (Fase 6/7, bloco 83 — regex mínima no grep)
 - O `grep` casa **regex mínima** — o casador de Pike: `^` início, `$` fim, `.` qualquer caractere, `c*` zero ou mais; um padrão sem metacaracteres continua sendo a busca de substring de antes (os testes anteriores seguem válidos).
 - Auto-teste `user_grep_regex` (118º): `grep '^ab*c$' | wc` sobre `abc/abbbc/ac/xabc` deixa passar três linhas ("3 3 13" é marcador do cenário boot) e `z$` sobre `za` sai 1.
