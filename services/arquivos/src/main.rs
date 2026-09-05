@@ -2,9 +2,10 @@
 //! de navegação: lista um diretório do `nexo.fs` (uma entrada por linha; diretórios em acento,
 //! arquivos em branco), clique numa pasta **entra nela**, a linha 0 é o **".." (voltar ao
 //! pai)** e listagens grandes rolam por **páginas** (linha 5 = "+N" avança; "<<" volta à
-//! primeira). Clique num arquivo pede ao orquestrador que o abra ("abrir <caminho>") — o
-//! gerenciador não abre nada sozinho: quem
-//! decide o app é quem tem as capacidades (o shell).
+//! primeira); nomes maiores que a janela mostram `~` na última coluna (o caminho completo vai
+//! inteiro nas mensagens). Clique num arquivo pede ao orquestrador que o abra
+//! ("abrir <caminho>") — o gerenciador não abre nada sozinho: quem decide o app é quem tem as
+//! capacidades (o shell).
 //! Handle 0 = canal do orquestrador: "sess", depois "abre <dir>" + canal `nexo.fs`; responde
 //! "pronto"; navegação emite "pasta <dir>"; abertura emite "abrir <caminho>". Pipe fechado = sair.
 #![no_std]
@@ -124,9 +125,14 @@ fn redraw(base: u64, entries: &[Entry; MAX_ENTRIES], count: usize, pagina: usize
         } else {
             Color::rgb(255, 255, 255)
         };
+        // nome maior que a janela: as 7 primeiras letras + `~` (marcador de truncamento);
+        // o caminho COMPLETO segue inteiro nas mensagens "abrir"/"pasta"
         let mut nome = [0u8; COLS];
         let n = e.len.min(COLS);
         nome[..n].copy_from_slice(&e.name[..n]);
+        if e.len > COLS {
+            nome[COLS - 1] = b'~';
+        }
         texto(1 + k, &nome[..n], color);
     }
     let resto = count.saturating_sub(ini + POR_PAGINA);

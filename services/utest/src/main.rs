@@ -1358,6 +1358,9 @@ fn arquivos_driver() -> ! {
                 .unwrap_or_else(|_| nexo_sys::exit(1513));
             fs.mkdir("/fm-teste/rol")
                 .unwrap_or_else(|_| nexo_sys::exit(1540));
+            // nome maior que as 8 colunas da janela: o gerenciador mostra "nome-co~"
+            fs.write_file("/fm-teste/nome-comprido.txt", b"N")
+                .unwrap_or_else(|_| nexo_sys::exit(2520));
             // seis arquivos com iniciais DISTINTAS: a 5a entrada muda o glifo da linha 1
             for nome in ["aa", "bb", "cc", "dd", "ee", "ff"] {
                 let mut p = [0u8; 32];
@@ -1388,7 +1391,7 @@ fn arquivos_driver() -> ! {
             count += 1;
             pos += 6 + nl;
         }
-        if count < 3 {
+        if count < 4 {
             nexo_sys::exit(1515);
         }
         let (st, _, dl) = c.call(6, 0, 0, 0, b"/fm-teste/rol");
@@ -1504,6 +1507,24 @@ fn arquivos_driver() -> ! {
         _ => nexo_sys::exit(1547),
     }
 
+    // NOME LONGO: "nome-comprido.txt" aparece truncado com `~` na coluna 7 (acento) e o
+    // clique nele pede a abertura do caminho COMPLETO
+    let r_longo = row_of(b"nome-comprido.txt");
+    let (tx, ty) = glyph_diff_pixel(b'~', b' ').unwrap_or_else(|| nexo_sys::exit(2521));
+    wm_wait_px(
+        ob,
+        stride,
+        7 * 8 + tx,
+        (1 + r_longo as i32) * 8 + ty,
+        (255, 255, 255),
+        2522,
+    );
+    wm_click(inj, 4, (1 + r_longo as i32) * 8 + 4);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"abrir /fm-teste/nome-comprido.txt" => {}
+        _ => nexo_sys::exit(2523),
+    }
+
     // ROLAGEM: entra em "rol" (6 entradas > 4 por pagina); o "+2" aparece na linha 5
     let r_rol = row_of(b"rol");
     wm_click(inj, 4, (1 + r_rol as i32) * 8 + 4);
@@ -1528,7 +1549,9 @@ fn arquivos_driver() -> ! {
         _ => nexo_sys::exit(1563),
     }
 
-    nexo_sys::log("utest: arquivos ok — navegou, VOLTOU pelo .. e ROLOU por paginas ate abrir");
+    nexo_sys::log(
+        "utest: arquivos ok — navegou, VOLTOU pelo .., nome longo truncado com ~ e ROLOU por paginas ate abrir",
+    );
     nexo_sys::exit(0)
 }
 
