@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6, bloco 78 — voltar e rolagem no gerenciador de arquivos)
+- Layout novo do gerenciador: **linha 0 = ".."** (volta ao pai; some na raiz), entradas nas linhas 1..=4 (**páginas de 4**) e **linha 5 = rolagem** ("+N" avança a página; "<<" volta à primeira). A listagem lê até 64 entradas do `list` do fs (antes parava nas 6 que cabiam).
+- Teste `user_arquivos` estendido: entra em `sub`, abre `c.txt`, **volta pelo ".."** ("pasta /fm-teste"), entra em `rol` (seis arquivos com iniciais distintas), vê o "+2" por pixel, **pagina** e abre exatamente a 5ª entrada da ordem própria da listagem. Do item do gerenciador resta nomes longos (janela de 8 colunas).
+
 ### Adicionado (Fase 6, bloco 77 — cursor livre no editor)
 - O editor edita **no meio do texto**: setas ESQ/DIR movem o cursor, imprimíveis INSEREM na posição, backspace remove à esquerda — a grade continua uma função pura, agora do par (texto, cursor): alimentar `text[..cur]` primeiro captura a célula exata do cursor e o resto segue na MESMA grade.
 - Teste `user_editor` estendido: depois de digitar "mundo", cinco setas para a esquerda + "meu " inserido NO MEIO (e um 'z' inserido e removido ali mesmo); o arquivo relido de fora é "ola\nmeu mundo", e os glifos deslocados são conferidos por pixel. Do item do editor resta a rolagem de arquivos maiores que a janela.

@@ -1238,10 +1238,12 @@ fn editor_driver() -> ! {
     nexo_sys::exit(0)
 }
 
-/// Modo 59: gerenciador de arquivos. Prepara /fm-teste (a.txt + sub/c.txt), lista o diretorio por
-/// conta propria para saber a ordem, entrega o fs ao app e navega CLICANDO: entrar em "sub"
-/// emite "pasta /fm-teste/sub" e a listagem muda; clicar em "c.txt" emite "abrir /fm-teste/sub/c.txt"
-/// — o gerenciador aponta, quem abre e o orquestrador. Handles: 0 wm, 1 pipe, 2 fs.
+/// Modo 59: gerenciador de arquivos. Prepara /fm-teste (a.txt + sub/c.txt + rol/ com SEIS
+/// arquivos), lista por conta propria para saber a ordem, entrega o fs ao app e navega
+/// CLICANDO no layout novo: linha 0 = "..", entradas nas linhas 1..=4, linha 5 = rolagem.
+/// Entra em "sub" ("pasta /fm-teste/sub"), abre "c.txt" ("abrir ..."), VOLTA pelo ".."
+/// ("pasta /fm-teste"), entra em "rol" e PAGINA (clique no "+2" da linha 5) ate abrir a 5a
+/// entrada — rolagem conferida por pixel e pela mensagem. Handles: 0 wm, 1 pipe, 2 fs.
 fn arquivos_driver() -> ! {
     let s1: nexo_sys::Handle = 0;
     let pipe: nexo_sys::Handle = 1;
@@ -1249,11 +1251,14 @@ fn arquivos_driver() -> ! {
     let mut buf = [0u8; 384];
     let mut hs = [0u32; 1];
 
-    // prepara o diretorio e memoriza a ordem das entradas de /fm-teste
+    // prepara o diretorio e memoriza a ordem das entradas de /fm-teste e de /fm-teste/rol
     let mut names = [[0u8; 24]; 6];
     let mut lens = [0usize; 6];
     let mut kinds = [0u8; 6];
     let mut count = 0usize;
+    let mut rnames = [[0u8; 24]; 8];
+    let mut rlens = [0usize; 8];
+    let mut rcount = 0usize;
     {
         let mut c = FsClient {
             ch: 2,
@@ -1271,6 +1276,18 @@ fn arquivos_driver() -> ! {
                 .unwrap_or_else(|_| nexo_sys::exit(1512));
             fs.write_file("/fm-teste/sub/c.txt", b"C")
                 .unwrap_or_else(|_| nexo_sys::exit(1513));
+            fs.mkdir("/fm-teste/rol")
+                .unwrap_or_else(|_| nexo_sys::exit(1540));
+            // seis arquivos com iniciais DISTINTAS: a 5a entrada muda o glifo da linha 1
+            for nome in ["aa", "bb", "cc", "dd", "ee", "ff"] {
+                let mut p = [0u8; 32];
+                p[..13].copy_from_slice(b"/fm-teste/rol");
+                p[13] = b'/';
+                p[14..16].copy_from_slice(nome.as_bytes());
+                let path = core::str::from_utf8(&p[..16]).unwrap_or_else(|_| nexo_sys::exit(1541));
+                fs.write_file(path, b"x")
+                    .unwrap_or_else(|_| nexo_sys::exit(1542));
+            }
         }
         let (st, _, dl) = c.call(6, 0, 0, 0, b"/fm-teste");
         if st != 0 {
@@ -1291,8 +1308,29 @@ fn arquivos_driver() -> ! {
             count += 1;
             pos += 6 + nl;
         }
-        if count < 2 {
+        if count < 3 {
             nexo_sys::exit(1515);
+        }
+        let (st, _, dl) = c.call(6, 0, 0, 0, b"/fm-teste/rol");
+        if st != 0 {
+            nexo_sys::exit(1543);
+        }
+        let entries: [u8; 4096] = c.reply;
+        let mut pos = 12usize;
+        let end = 12 + dl;
+        while pos + 6 <= end && rcount < 8 {
+            let nl = entries[pos + 5] as usize;
+            if pos + 6 + nl > end {
+                break;
+            }
+            rlens[rcount] = nl.min(24);
+            rnames[rcount][..rlens[rcount]]
+                .copy_from_slice(&entries[pos + 6..pos + 6 + rlens[rcount]]);
+            rcount += 1;
+            pos += 6 + nl;
+        }
+        if rcount != 6 {
+            nexo_sys::exit(1544);
         }
     }
     let row_of = |want: &[u8]| -> usize {
@@ -1356,27 +1394,61 @@ fn arquivos_driver() -> ! {
     } else {
         (255, 255, 255)
     };
+    // layout novo: linha 0 = ".." (ponto em acento), primeira entrada na linha 1
+    let (px0, py0) = glyph_diff_pixel(b'.', b' ').unwrap_or_else(|| nexo_sys::exit(1545));
+    wm_wait_px(ob, stride, px0, py0, (0x6f, 0x9f, 0xff), 1546);
     let (gx, gy) = glyph_diff_pixel(names[0][0], b' ').unwrap_or_else(|| nexo_sys::exit(1533));
-    wm_wait_px(ob, stride, gx, gy, first_color, 1534);
+    wm_wait_px(ob, stride, gx, 8 + gy, first_color, 1534);
 
     // clica em "sub": navegacao emite "pasta /fm-teste/sub" e a listagem passa a mostrar c.txt
     let r_sub = row_of(b"sub");
-    wm_click(inj, 4, (r_sub as i32) * 8 + 4);
+    wm_click(inj, 4, (1 + r_sub as i32) * 8 + 4);
     match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
         Ok((n, _)) if &buf[..n] == b"pasta /fm-teste/sub" => {}
         _ => nexo_sys::exit(1535),
     }
     let (cx, cy) = glyph_diff_pixel(b'c', b' ').unwrap_or_else(|| nexo_sys::exit(1536));
-    wm_wait_px(ob, stride, cx, cy, (255, 255, 255), 1537);
+    wm_wait_px(ob, stride, cx, 8 + cy, (255, 255, 255), 1537);
 
-    // clica em "c.txt": o app pede ao orquestrador que abra
-    wm_click(inj, 4, 4);
+    // clica em "c.txt" (linha 1): o app pede ao orquestrador que abra
+    wm_click(inj, 4, 12);
     match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
         Ok((n, _)) if &buf[..n] == b"abrir /fm-teste/sub/c.txt" => {}
         _ => nexo_sys::exit(1538),
     }
 
-    nexo_sys::log("utest: arquivos ok — navegou por clique e delegou a abertura");
+    // VOLTAR: clique no ".." da linha 0 devolve /fm-teste
+    wm_click(inj, 4, 4);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pasta /fm-teste" => {}
+        _ => nexo_sys::exit(1547),
+    }
+
+    // ROLAGEM: entra em "rol" (6 entradas > 4 por pagina); o "+2" aparece na linha 5
+    let r_rol = row_of(b"rol");
+    wm_click(inj, 4, (1 + r_rol as i32) * 8 + 4);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if &buf[..n] == b"pasta /fm-teste/rol" => {}
+        _ => nexo_sys::exit(1548),
+    }
+    let (ix, iy) = glyph_diff_pixel(b'+', b' ').unwrap_or_else(|| nexo_sys::exit(1549));
+    wm_wait_px(ob, stride, ix, 5 * 8 + iy, (0x6f, 0x9f, 0xff), 1560);
+    // clique no "+2" avanca a pagina: a linha 1 passa a mostrar a 5a entrada
+    wm_click(inj, 4, 5 * 8 + 4);
+    let (nx, ny) =
+        glyph_diff_pixel(rnames[4][0], rnames[0][0]).unwrap_or_else(|| nexo_sys::exit(1561));
+    wm_wait_px(ob, stride, nx, 8 + ny, (255, 255, 255), 1562);
+    // e o clique na linha 1 abre exatamente a 5a entrada da ordem propria
+    wm_click(inj, 4, 12);
+    let mut esperado = [0u8; 64];
+    esperado[..20].copy_from_slice(b"abrir /fm-teste/rol/");
+    esperado[20..20 + rlens[4]].copy_from_slice(&rnames[4][..rlens[4]]);
+    match nexo_sys::channel_recv(pipe, &mut buf, &mut hs) {
+        Ok((n, _)) if buf[..n] == esperado[..20 + rlens[4]] => {}
+        _ => nexo_sys::exit(1563),
+    }
+
+    nexo_sys::log("utest: arquivos ok — navegou, VOLTOU pelo .. e ROLOU por paginas ate abrir");
     nexo_sys::exit(0)
 }
 
@@ -2291,6 +2363,7 @@ fn config_driver() -> ! {
     expect_pipe(pipe, b"np0", 1348, &mut buf, &mut hs);
     notify(s1, &mut out, &mut buf, &mut hs);
     wm_wait_px(ob, stride, 60, 4, (40, 80, 200), 1349); // o banner aparece (fundo do banner)
+
     nexo_sys::log("utest: config ok — toggles de RM e nao-perturbe com efeito real");
     nexo_sys::exit(0)
 }

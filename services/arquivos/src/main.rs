@@ -1,7 +1,9 @@
 //! `arquivos` — gerenciador de arquivos (Plano §Fase 6: "criar gerenciador de arquivos"). MVP
 //! de navegação: lista um diretório do `nexo.fs` (uma entrada por linha; diretórios em acento,
-//! arquivos em branco), clique numa pasta **entra nela** e clique num arquivo pede ao
-//! orquestrador que o abra ("abrir <caminho>") — o gerenciador não abre nada sozinho: quem
+//! arquivos em branco), clique numa pasta **entra nela**, a linha 0 é o **".." (voltar ao
+//! pai)** e listagens grandes rolam por **páginas** (linha 5 = "+N" avança; "<<" volta à
+//! primeira). Clique num arquivo pede ao orquestrador que o abra ("abrir <caminho>") — o
+//! gerenciador não abre nada sozinho: quem
 //! decide o app é quem tem as capacidades (o shell).
 //! Handle 0 = canal do orquestrador: "sess", depois "abre <dir>" + canal `nexo.fs`; responde
 //! "pronto"; navegação emite "pasta <dir>"; abertura emite "abrir <caminho>". Pipe fechado = sair.
@@ -18,6 +20,9 @@ use nexo_sys::abi::Status;
 const PIPE: Handle = 0;
 const COLS: usize = 8;
 const ROWS: usize = 6;
+/// Entradas por página (linhas 1..=4; a 0 é o ".." e a 5 o indicador de rolagem).
+const POR_PAGINA: usize = 4;
+const MAX_ENTRIES: usize = 64;
 const W: i32 = (COLS * 8) as i32;
 const H: i32 = (ROWS * 8) as i32;
 const NAME_MAX: usize = 24;
@@ -44,7 +49,7 @@ struct Fs {
 }
 
 impl Fs {
-    fn list(&mut self, path: &str, out: &mut [Entry; ROWS]) -> Option<usize> {
+    fn list(&mut self, path: &str, out: &mut [Entry; MAX_ENTRIES]) -> Option<usize> {
         use nexo_proto::fs as pfs;
         let mut p = [0u8; 256];
         let n = path.len().min(256);
@@ -64,7 +69,7 @@ impl Fs {
         let entries = r.entries();
         let mut count = 0usize;
         let mut pos = 0usize;
-        while pos + 6 <= entries.len() && count < ROWS {
+        while pos + 6 <= entries.len() && count < MAX_ENTRIES {
             let kind = entries[pos + 4];
             let nl = entries[pos + 5] as usize;
             if pos + 6 + nl > entries.len() {
@@ -84,30 +89,60 @@ impl Fs {
     }
 }
 
-/// Repinta a listagem: uma entrada por linha, diretórios em acento.
-fn redraw(base: u64, entries: &[Entry; ROWS], count: usize) {
+/// Repinta a listagem: linha 0 = ".." (quando há pai), linhas 1..=4 = a página corrente,
+/// linha 5 = "+N" (há mais páginas) ou "<<" (volta à primeira). Diretórios em acento.
+fn redraw(base: u64, entries: &[Entry; MAX_ENTRIES], count: usize, pagina: usize, pai: bool) {
     // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
     let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize) };
     let mut s = Surface::new(px, W as u32, H as u32, W as u32, PixelFormat::Rgbx8888)
         .unwrap_or_else(|| fail(20, "superficie"));
     s.clear(Color::rgb(0x14, 0x15, 0x18));
-    for (r, e) in entries[..count].iter().enumerate() {
-        let color = if e.dir {
-            Color::rgb(0x6f, 0x9f, 0xff)
-        } else {
-            Color::rgb(255, 255, 255)
-        };
-        for (c, &ch) in e.name[..e.len.min(COLS)].iter().enumerate() {
+    let acento = Color::rgb(0x6f, 0x9f, 0xff);
+    let mut texto = |linha: usize, t: &[u8], color: Color| {
+        for (c, &ch) in t.iter().take(COLS).enumerate() {
             draw_glyph(
                 &mut s,
                 ch as char,
                 (c * 8) as i32,
-                (r * 8) as i32,
+                (linha * 8) as i32,
                 1,
                 color,
                 None,
             );
         }
+    };
+    if pai {
+        texto(0, b"..", acento);
+    }
+    let ini = pagina * POR_PAGINA;
+    for k in 0..POR_PAGINA {
+        let Some(e) = entries.get(ini + k).filter(|_| ini + k < count) else {
+            break;
+        };
+        let color = if e.dir {
+            acento
+        } else {
+            Color::rgb(255, 255, 255)
+        };
+        let mut nome = [0u8; COLS];
+        let n = e.len.min(COLS);
+        nome[..n].copy_from_slice(&e.name[..n]);
+        texto(1 + k, &nome[..n], color);
+    }
+    let resto = count.saturating_sub(ini + POR_PAGINA);
+    if resto > 0 {
+        let mut ind = [b'+', 0, 0];
+        let n = if resto >= 10 {
+            ind[1] = b'0' + ((resto / 10) % 10) as u8;
+            ind[2] = b'0' + (resto % 10) as u8;
+            3
+        } else {
+            ind[1] = b'0' + (resto % 10) as u8;
+            2
+        };
+        texto(5, &ind[..n], acento);
+    } else if pagina > 0 {
+        texto(5, b"<<", acento);
     }
 }
 
@@ -151,9 +186,10 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         name: [0; NAME_MAX],
         len: 0,
         dir: false,
-    }; ROWS];
+    }; MAX_ENTRIES];
     let d = core::str::from_utf8(&dir[..dl]).unwrap_or_else(|_| fail(23, "dir"));
     let mut count = fs.list(d, &mut entries).unwrap_or_else(|| fail(24, "list"));
+    let mut pagina = 0usize;
 
     let req = wm::CreateSurfaceRequest {
         x: 0,
@@ -190,7 +226,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
     let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
 
-    redraw(base, &entries, count);
+    redraw(base, &entries, count, pagina, dl > 1);
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| fail(32, "enc commit"));
@@ -214,23 +250,59 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     continue;
                 }
                 let row = (ev.y / 8) as usize;
-                if row >= count {
+                // linha 0 = ".." (voltar ao pai); 5 = rolagem; 1..=4 = a página corrente
+                let mut relista = false;
+                if row == 0 {
+                    if dl > 1 {
+                        let corte = dir[..dl - 1].iter().rposition(|&c| c == b'/').unwrap_or(0);
+                        dl = corte.max(1);
+                        pagina = 0;
+                        relista = true;
+                    }
+                } else if row == 5 {
+                    if count > (pagina + 1) * POR_PAGINA {
+                        pagina += 1;
+                    } else if pagina > 0 {
+                        pagina = 0;
+                    } else {
+                        continue;
+                    }
+                    redraw(base, &entries, count, pagina, dl > 1);
+                    let m = wm::CommitRequest { id }
+                        .encode_msg(&mut out)
+                        .unwrap_or_else(|_| fail(37, "enc commit3"));
+                    let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
                     continue;
+                } else {
+                    let idx = pagina * POR_PAGINA + (row - 1);
+                    if idx >= count {
+                        continue;
+                    }
+                    let e = entries[idx];
+                    let d = core::str::from_utf8(&dir[..dl]).unwrap_or_else(|_| fail(33, "dir"));
+                    let mut pb = [0u8; PATH_MAX];
+                    let path = join(d, &e, &mut pb);
+                    if e.dir {
+                        // navega: o diretório clicado vira o corrente
+                        let nd = path.len().min(PATH_MAX);
+                        let mut tmp = [0u8; PATH_MAX];
+                        tmp[..nd].copy_from_slice(&path.as_bytes()[..nd]);
+                        dir[..nd].copy_from_slice(&tmp[..nd]);
+                        dl = nd;
+                        pagina = 0;
+                        relista = true;
+                    } else {
+                        // abrir e decisão do orquestrador: o gerenciador só aponta
+                        let mut msg = [0u8; PATH_MAX + 6];
+                        msg[..6].copy_from_slice(b"abrir ");
+                        msg[6..6 + path.len()].copy_from_slice(path.as_bytes());
+                        let _ = nexo_sys::channel_send(PIPE, &msg[..6 + path.len()], &[]);
+                    }
                 }
-                let e = entries[row];
-                let d = core::str::from_utf8(&dir[..dl]).unwrap_or_else(|_| fail(33, "dir"));
-                let mut pb = [0u8; PATH_MAX];
-                let path = join(d, &e, &mut pb);
-                if e.dir {
-                    // navega: o diretório clicado vira o corrente
-                    let nd = path.len().min(PATH_MAX);
-                    let mut tmp = [0u8; PATH_MAX];
-                    tmp[..nd].copy_from_slice(&path.as_bytes()[..nd]);
-                    dir[..nd].copy_from_slice(&tmp[..nd]);
-                    dl = nd;
+                if relista {
                     let d = core::str::from_utf8(&dir[..dl]).unwrap_or_else(|_| fail(34, "dir"));
                     count = fs.list(d, &mut entries).unwrap_or_else(|| fail(35, "list"));
-                    redraw(base, &entries, count);
+                    redraw(base, &entries, count, pagina, dl > 1);
                     let m = wm::CommitRequest { id }
                         .encode_msg(&mut out)
                         .unwrap_or_else(|_| fail(36, "enc commit2"));
@@ -239,12 +311,6 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     msg[..6].copy_from_slice(b"pasta ");
                     msg[6..6 + dl].copy_from_slice(&dir[..dl]);
                     let _ = nexo_sys::channel_send(PIPE, &msg[..6 + dl], &[]);
-                } else {
-                    // abrir e decisão do orquestrador: o gerenciador só aponta
-                    let mut msg = [0u8; PATH_MAX + 6];
-                    msg[..6].copy_from_slice(b"abrir ");
-                    msg[6..6 + path.len()].copy_from_slice(path.as_bytes());
-                    let _ = nexo_sys::channel_send(PIPE, &msg[..6 + path.len()], &[]);
                 }
             }
             Err(Status::WouldBlock) => {}
