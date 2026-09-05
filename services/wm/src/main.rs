@@ -122,6 +122,8 @@ struct Slot {
     context: u8,
     /// Título da janela (para leitores de tela e a Faixa de Atividades).
     title: ([u8; 32], u32),
+    /// Documento que a janela mostra (caminho), declarado pelo app — o shell lista por Contexto.
+    document: ([u8; 96], u32),
     /// Retângulo salvo antes de maximizar (para `restore`).
     saved: Option<Rect>,
     /// Handle do wm para o `MemoryObject` (mantido para ler os pixels e liberar no fim).
@@ -141,6 +143,7 @@ const EMPTY: Slot = Slot {
     display: 0,
     context: 0,
     title: ([0; 32], 0),
+    document: ([0; 96], 0),
     saved: None,
     mem: 0,
     base: 0,
@@ -745,6 +748,7 @@ fn serve(
                 display: rq.display,
                 context: 0,
                 title: ([0; 32], 0),
+                document: ([0; 96], 0),
                 saved: None,
                 mem,
                 base,
@@ -993,11 +997,16 @@ fn serve(
                 display: if sl.used { sl.display } else { 0 },
                 title: [0; 32],
                 title_len: 0,
+                document: [0; 96],
+                document_len: 0,
             };
             if sl.used {
                 let (t, tl) = sl.title;
                 resp.title[..tl as usize].copy_from_slice(&t[..tl as usize]);
                 resp.title_len = tl;
+                let (d, dl) = sl.document;
+                resp.document[..dl as usize].copy_from_slice(&d[..dl as usize]);
+                resp.document_len = dl;
             }
             let m = resp.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
@@ -1144,6 +1153,18 @@ fn serve(
             title[..t.len()].copy_from_slice(t);
             surfaces[rq.id as usize].title = (title, t.len() as u32);
             let m = wm::SetTitleResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
+        Request::SetDocument(rq) => {
+            if !mine(surfaces, rq.id) {
+                reply_err(ch, wm::SetDocumentRequest::METHOD_ID, E_NO_SURFACE, out);
+                return;
+            }
+            let d = rq.path();
+            let mut doc = [0u8; 96];
+            doc[..d.len()].copy_from_slice(d);
+            surfaces[rq.id as usize].document = (doc, d.len() as u32);
+            let m = wm::SetDocumentResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::A11ySubscribe(rq) => {

@@ -273,6 +273,20 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         .unwrap_or_else(|_| fail(32, "enc title"));
     let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
     let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
+    // o documento que esta janela mostra: o shell o enumera por Contexto (surface_info)
+    let mut doc = wm::SetDocumentRequest {
+        id,
+        path: [0; 96],
+        path_len: 0,
+    };
+    let pl = path.len().min(96);
+    doc.path[..pl].copy_from_slice(&path.as_bytes()[..pl]);
+    doc.path_len = pl as u32;
+    let m = doc
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| fail(37, "enc document"));
+    let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
+    let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
 
     let mut cur = len; // cursor livre: comeca no fim do texto
     let mut topo = enquadra(0, linha_do_cursor(&text[..len], cur)); // rolagem: o fim fica visivel

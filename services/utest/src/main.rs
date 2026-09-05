@@ -1219,6 +1219,31 @@ fn editor_driver() -> ! {
         _ => nexo_sys::exit(1491),
     }
 
+    // documentos por Contexto: a janela "editor" declara "/nota.txt" e o shell (sessao
+    // bootstrap) a enumera com o Contexto dela — e disso que a listagem por Contexto e feita
+    let mut achou = false;
+    for idx in 0..8u32 {
+        let m = nexo_proto::wm::SurfaceInfoRequest { index: idx }
+            .encode_msg(&mut out)
+            .unwrap_or_else(|_| nexo_sys::exit(2595));
+        if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(2596);
+        }
+        let (n, _) =
+            nexo_sys::channel_recv(s1, &mut buf, &mut hs).unwrap_or_else(|_| nexo_sys::exit(2597));
+        let info = nexo_proto::wm::decode_surface_info_response(&buf[..n])
+            .unwrap_or_else(|_| nexo_sys::exit(2598));
+        if info.used == 1 && info.title() == b"editor" {
+            if info.document() != b"/nota.txt" || info.context != 0 {
+                nexo_sys::exit(2599);
+            }
+            achou = true;
+        }
+    }
+    if !achou {
+        nexo_sys::exit(2600);
+    }
+
     // saida composta: o conteudo inicial aparece ('o' de "ola" na celula (0,0))
     let m = nexo_proto::wm::OutputRequest { display: 0 }
         .encode_msg(&mut out)

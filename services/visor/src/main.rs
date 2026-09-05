@@ -167,6 +167,20 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         .unwrap_or_else(|_| fail(34, "enc title"));
     let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
     let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
+    // o documento que esta janela mostra: o shell o enumera por Contexto (surface_info)
+    let mut doc = wm::SetDocumentRequest {
+        id,
+        path: [0; 96],
+        path_len: 0,
+    };
+    let pl = path_len.min(96);
+    doc.path[..pl].copy_from_slice(&path[..pl]);
+    doc.path_len = pl as u32;
+    let m = doc
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| fail(37, "enc document"));
+    let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
+    let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
 
     let stride = w as usize * 4;
     // SAFETY: base .. base+w*h*4 foi mapeada por memory_map (USER|RW) neste processo.

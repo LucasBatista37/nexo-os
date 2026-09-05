@@ -7,7 +7,7 @@
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
 # 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
-protocol wm 1.20
+protocol wm 1.21
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -296,9 +296,10 @@ method 28 drag_start {
     }
 }
 
-# Evento: clique (BTN_LEFT press) dentro da janela `surface`, em coordenadas LOCAIS da janela.
-# Entregue a sessao dona apos o foco/frente. Durante uma captura (grab), cliques continuam
-# engolidos (nenhum evento sai).
+# Evento: clique (BTN_LEFT press) dentro da janela `surface`, em coordenadas do BUFFER da
+# janela — ja convertidas pela escala exibida (por janela ou global), entao o app pode compara-las
+# com os retangulos que desenhou. Entregue a sessao dona apos o foco/frente. Durante uma captura
+# (grab), cliques continuam engolidos (nenhum evento sai).
 event 40 pointer {
     surface: u32,
     x: i32,
@@ -324,6 +325,7 @@ method 33 surface_info {
         context: u8,
         display: u8,
         title: bytes<32>,
+        document: bytes<96>,
     }
 }
 
@@ -376,6 +378,17 @@ method 37 prefs {
 method 43 set_theme {
     request {
         theme: u8,
+    }
+    response {
+    }
+}
+
+# Documento que a janela mostra (caminho): so a sessao dona (erro 3). O shell enumera as
+# janelas com Contexto + documento em `surface_info` — "documentos por Contexto" (v1.21).
+method 44 set_document {
+    request {
+        id: u32,
+        path: bytes<96>,
     }
     response {
     }

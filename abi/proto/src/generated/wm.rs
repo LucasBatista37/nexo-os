@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.wm` v1.20 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
+//! Protocolo tipado `nexo.wm` v1.21 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x1b0edd71;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 20;
+pub const VERSION_MINOR: u16 = 21;
 
 /// `nexo.wm.create_surface` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2808,6 +2808,10 @@ pub struct SurfaceInfoResponse {
     pub title: [u8; 32],
     /// Tamanho valido de `title`.
     pub title_len: u32,
+    /// Bytes de `document` (ate 96).
+    pub document: [u8; 96],
+    /// Tamanho valido de `document`.
+    pub document_len: u32,
 }
 
 impl SurfaceInfoResponse {
@@ -2818,6 +2822,10 @@ impl SurfaceInfoResponse {
     /// Fatia valida de `title`.
     pub fn title(&self) -> &[u8] {
         &self.title[..(self.title_len as usize).min(32)]
+    }
+    /// Fatia valida de `document`.
+    pub fn document(&self) -> &[u8] {
+        &self.document[..(self.document_len as usize).min(96)]
     }
     /// Codifica o payload; devolve o tamanho.
     pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
@@ -2851,6 +2859,16 @@ impl SurfaceInfoResponse {
         }
         out[o..o + 4].copy_from_slice(&(n as u32).to_le_bytes());
         out[o + 4..o + 4 + n].copy_from_slice(&self.title[..n]);
+        o += 4 + n;
+        let n = self.document_len as usize;
+        if n > 96 {
+            return Err(ProtoError::TooBig);
+        }
+        if o + 4 + n > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&(n as u32).to_le_bytes());
+        out[o + 4..o + 4 + n].copy_from_slice(&self.document[..n]);
         o += 4 + n;
         Ok(o)
     }
@@ -2895,6 +2913,23 @@ impl SurfaceInfoResponse {
             title_len = l as u32;
             o += 4 + l;
         }
+        let mut document = [0u8; 96];
+        let document_len: u32;
+        {
+            if o + 4 > b.len() {
+                return Err(ProtoError::Short);
+            }
+            let l = u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as usize;
+            if l > 96 {
+                return Err(ProtoError::TooBig);
+            }
+            if o + 4 + l > b.len() {
+                return Err(ProtoError::Short);
+            }
+            document[..l].copy_from_slice(&b[o + 4..o + 4 + l]);
+            document_len = l as u32;
+            o += 4 + l;
+        }
         let _ = o;
         Ok(SurfaceInfoResponse {
             used,
@@ -2903,6 +2938,8 @@ impl SurfaceInfoResponse {
             display,
             title,
             title_len,
+            document,
+            document_len,
         })
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
@@ -3419,6 +3456,131 @@ impl SetThemeResponse {
     /// ausentes assumem o padrao — ipc-compat §3).
     pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
         Ok(SetThemeResponse {})
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.set_document` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetDocumentRequest {
+    /// Campo `id`.
+    pub id: u32,
+    /// Bytes de `path` (ate 96).
+    pub path: [u8; 96],
+    /// Tamanho valido de `path`.
+    pub path_len: u32,
+}
+
+impl SetDocumentRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 44;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Fatia valida de `path`.
+    pub fn path(&self) -> &[u8] {
+        &self.path[..(self.path_len as usize).min(96)]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.id.to_le_bytes());
+        o += 4;
+        let n = self.path_len as usize;
+        if n > 96 {
+            return Err(ProtoError::TooBig);
+        }
+        if o + 4 + n > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&(n as u32).to_le_bytes());
+        out[o + 4..o + 4 + n].copy_from_slice(&self.path[..n]);
+        o += 4 + n;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let id = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let mut path = [0u8; 96];
+        let path_len: u32;
+        {
+            if o + 4 > b.len() {
+                return Err(ProtoError::Short);
+            }
+            let l = u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as usize;
+            if l > 96 {
+                return Err(ProtoError::TooBig);
+            }
+            if o + 4 + l > b.len() {
+                return Err(ProtoError::Short);
+            }
+            path[..l].copy_from_slice(&b[o + 4..o + 4 + l]);
+            path_len = l as u32;
+            o += 4 + l;
+        }
+        let _ = o;
+        Ok(SetDocumentRequest { id, path, path_len })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.set_document` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SetDocumentResponse {}
+
+impl SetDocumentResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 44;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(SetDocumentResponse {})
     }
     /// Codifica a mensagem completa (cabecalho NXIP + payload).
     pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
@@ -4487,6 +4649,8 @@ pub enum Request {
     Prefs(PrefsRequest),
     /// `set_theme`.
     SetTheme(SetThemeRequest),
+    /// `set_document`.
+    SetDocument(SetDocumentRequest),
     /// `set_auto_tile`.
     SetAutoTile(SetAutoTileRequest),
     /// `set_global_scale`.
@@ -4672,6 +4836,11 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
                 return Err(ProtoError::Length);
             }
         }
+        Request::SetDocument(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
         Request::SetAutoTile(_) => {
             if !hs.is_empty() {
                 return Err(ProtoError::Length);
@@ -4772,6 +4941,7 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
         )),
         37 => Ok(Request::Prefs(PrefsRequest::decode_payload(p)?)),
         43 => Ok(Request::SetTheme(SetThemeRequest::decode_payload(p)?)),
+        44 => Ok(Request::SetDocument(SetDocumentRequest::decode_payload(p)?)),
         42 => Ok(Request::SetAutoTile(SetAutoTileRequest::decode_payload(p)?)),
         41 => Ok(Request::SetGlobalScale(
             SetGlobalScaleRequest::decode_payload(p)?,
@@ -5687,6 +5857,33 @@ pub fn decode_set_theme_response(msg: &[u8]) -> Result<SetThemeResponse, ProtoEr
         return Err(ProtoError::Flags);
     }
     SetThemeResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `set_document` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_set_document_response(msg: &[u8]) -> Result<SetDocumentResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 44 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    SetDocumentResponse::decode_payload(p)
 }
 
 /// Decodifica a resposta de `set_auto_tile` (erro remoto vira `ProtoError::Remote`).
