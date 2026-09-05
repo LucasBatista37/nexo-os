@@ -77,6 +77,9 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wc_stdin", test_user_wc_stdin),
     ("user_cat_stdin", test_user_cat_stdin),
     ("user_mv", test_user_mv),
+    ("user_echo", test_user_echo),
+    ("user_head", test_user_head),
+    ("user_mkdir", test_user_mkdir),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3412,6 +3415,32 @@ fn test_user_mv() -> TestResult {
     run_c_util("mv-c", b"mv\0/mv-de.txt\0/mv-teste.txt\0", None)?;
     run_c_util("wc-c", b"wc\0/mv-teste.txt\0", None)?;
     run_c_util("rm-c", b"rm\0/mv-teste.txt\0", None)
+}
+
+/// `echo` portado: VARIOS argumentos de uma vez pela convencao de argv — a linha
+/// "ola argv do echo" (marcador do cenario boot) prova a separacao por `\0` e o printf.
+fn test_user_echo() -> TestResult {
+    run_c_util("echo-c", b"echo\0ola\0argv\0do\0echo\0", None)
+}
+
+/// `head -n 2` no stdin: para na segunda linha — "cabeca" e "meio" saem (marcadores),
+/// "cauda" fica para tras; o parse de argumentos usa o atoi novo da stdlib.
+fn test_user_head() -> TestResult {
+    run_c_util(
+        "head-c",
+        b"head\x00-n\x002\x00",
+        Some(b"cabeca\nmeio\ncauda\n"),
+    )
+}
+
+/// `mkdir` portado (sys/stat.h; modo ignorado na v0): cria /mk-teste, o `ls` mostra
+/// "d mk-teste" (marcador) e o `rm` remove (unlink de diretorio vazio) — idempotente,
+/// com faxina tolerante de restos de boots interrompidos.
+fn test_user_mkdir() -> TestResult {
+    run_c_util_codes("rm-c", b"rm\0/mk-teste\0", None, &[0, 1])?;
+    run_c_util("mkdir-c", b"mkdir\0/mk-teste\0", None)?;
+    run_c_util("ls-c", b"ls\0/\0", None)?;
+    run_c_util("rm-c", b"rm\0/mk-teste\0", None)
 }
 
 /// Primeiro processo em **C++** (freestanding, sem exceptions/RTTI): construtor global via

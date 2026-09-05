@@ -3,6 +3,7 @@
  * Tabela por processo: fd -> {ino, offset}; o canal do fs vem de nexo_libc_use_fs. */
 #include "../include/dirent.h"
 #include "../include/fcntl.h"
+#include "../include/sys/stat.h"
 #include "../include/stdio.h"
 #include "../include/unistd.h"
 #include "../include/string.h"
@@ -202,6 +203,20 @@ off_t lseek(int fd, off_t off, int whence) {
         return -1;
     a->off = (uint64_t)novo;
     return novo;
+}
+
+int mkdir(const char *path, unsigned int mode) {
+    (void)mode; /* NexoFS v0 nao tem permissoes por arquivo */
+    if (canal_fs == 0xffffffffu)
+        return -1;
+    nexo_fs_mkdir_req mq = {0};
+    if (caminho(path, mq.path, &mq.path_len))
+        return -1;
+    int n = nexo_fs_mkdir_req_encode(msg, sizeof(msg), &mq);
+    if (n < 0 || (n = rpc(n)) < 0)
+        return -1;
+    nexo_fs_mkdir_resp mr;
+    return nexo_fs_mkdir_resp_decode(msg, (size_t)n, &mr) == 0 ? 0 : -1;
 }
 
 int rename(const char *from, const char *to) {

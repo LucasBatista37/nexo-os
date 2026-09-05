@@ -14,6 +14,7 @@ void *malloc(size_t n);
 void free(void *p);
 void *calloc(size_t nmemb, size_t size);
 void *realloc(void *p, size_t n);
+int atoi(const char *s); /* decimal com sinal; para no primeiro nao-digito */
 
 #ifdef __cplusplus
 }

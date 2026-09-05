@@ -108,3 +108,15 @@ void *realloc(void *p, size_t n) {
     free(p);
     return q;
 }
+
+int atoi(const char *s) {
+    while (*s == ' ' || *s == '\t')
+        s++;
+    int neg = *s == '-';
+    if (*s == '-' || *s == '+')
+        s++;
+    int v = 0;
+    while (*s >= '0' && *s <= '9')
+        v = v * 10 + (*s++ - '0');
+    return neg ? -v : v;
+}

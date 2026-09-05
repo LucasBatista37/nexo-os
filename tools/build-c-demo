@@ -35,7 +35,7 @@ clang $CFLAGS -c "$ROOT/examples/c/wc.c" -o "$ROOT/build/wc-c.o"
        "$ROOT/build/libc-crt0.o" "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" \
        "$ROOT/build/libc-stdlib.o" "$ROOT/build/libc-fd.o"
 echo "[c-demo] $ROOT/build/wc-c.elf ($(wc -c < "$ROOT/build/wc-c.elf" | tr -d ' ') bytes)"
-for UTIL in cat ls cp rm mv; do
+for UTIL in cat ls cp rm mv echo head mkdir; do
   clang $CFLAGS -c "$ROOT/examples/c/$UTIL.c" -o "$ROOT/build/$UTIL-c.o"
   "$LLD" -flavor gnu --no-pie -e _start -o "$ROOT/build/$UTIL-c.elf" "$ROOT/build/$UTIL-c.o" \
          "$ROOT/build/libc-crt0.o" "$ROOT/build/libc-string.o" "$ROOT/build/libc-stdio.o" \
