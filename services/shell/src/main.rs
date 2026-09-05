@@ -1,7 +1,9 @@
 //! `shell` — shell de diagnóstico na console VirtIO. Handle 0 = canal do `consoledev`
 //! (protocolo tipado `nexo.console` v1.0), handle 1 = canal de um `vfs` (`nexo.fs` v0).
 //! Comandos: `ajuda`, `info`, `tempo`, `ls [caminho]`, `cat <caminho>`,
-//! `escreve <caminho> <texto>`, `remove <caminho>`, `eco <texto>`, `sair`.
+//! `escreve <caminho> <texto>`, `remove <caminho>`, `eco <texto>`, `sair`; qualquer outro
+//! nome tenta o utilitário POSIX `<nome>-c` do initrd (convenção de argv/stdout do Nexo,
+//! com o vfs duplicado como serviço principal — saída bombeada para a console).
 #![no_std]
 #![no_main]
 
@@ -301,6 +303,89 @@ fn cmd_write(rest: &[u8], reply: &mut [u8; 4096]) {
     outln!("{} byte(s) escritos", w);
 }
 
+/// Comando não-builtin: tenta o utilitário `<nome>-c` do initrd com a convenção do Nexo —
+/// h0 = o vfs DUPLICADO (o utilitário fala o mesmo `nexo.fs`; caminhos `/disk` `/boot`
+/// `/tmp`), h1 = argv (uma mensagem, palavras separadas por `\0`), h2 = stdin vazio,
+/// h3 = stdout por canal, bombeado para a console até o EOF (`\n` vira `\r\n`). O shell não
+/// toca o vfs enquanto o filho roda — respostas iriam ao leitor errado. Devolve false se o
+/// utilitário não existe (o chamador imprime o "comando desconhecido" de sempre).
+fn cmd_run(name: &[u8], rest: &[u8]) -> bool {
+    if name.len() > 32 {
+        return false;
+    }
+    let mut nome = [0u8; 34];
+    nome[..name.len()].copy_from_slice(name);
+    nome[name.len()..name.len() + 2].copy_from_slice(b"-c");
+    let Ok(nome_str) = core::str::from_utf8(&nome[..name.len() + 2]) else {
+        return false;
+    };
+    let mut bloco = [0u8; 300];
+    bloco[..name.len()].copy_from_slice(name);
+    let mut bn = name.len();
+    bloco[bn] = 0;
+    bn += 1;
+    for w in rest.split(|&c| c == b' ') {
+        if w.is_empty() {
+            continue;
+        }
+        if bn + w.len() + 1 > bloco.len() {
+            return false;
+        }
+        bloco[bn..bn + w.len()].copy_from_slice(w);
+        bn += w.len();
+        bloco[bn] = 0;
+        bn += 1;
+    }
+    let Ok((argv_tx, argv_rx)) = nexo_sys::channel_create() else {
+        return false;
+    };
+    let _ = nexo_sys::channel_send(argv_tx, &bloco[..bn], &[]);
+    nexo_sys::handle_close(argv_tx);
+    let Ok((stdin_tx, stdin_rx)) = nexo_sys::channel_create() else {
+        return false;
+    };
+    nexo_sys::handle_close(stdin_tx); // ponta fechada = EOF imediato
+    let Ok((stdout_tx, stdout_rx)) = nexo_sys::channel_create() else {
+        return false;
+    };
+    let Ok(h0) =
+        nexo_sys::handle_info(VFS).and_then(|(rights, _)| nexo_sys::handle_duplicate(VFS, rights))
+    else {
+        return false;
+    };
+    let proc = match nexo_sys::process_spawn(nome_str, 0, &[h0, argv_rx, stdin_rx, stdout_tx]) {
+        Ok(p) => p,
+        Err(_) => {
+            nexo_sys::handle_close(stdout_rx);
+            return false;
+        }
+    };
+    let mut buf = [0u8; 4096];
+    let mut cru = [0u8; 1024];
+    let mut hs = [0u32; 1];
+    while let Ok((n, _)) = nexo_sys::channel_recv(stdout_rx, &mut cru, &mut hs) {
+        let mut m = 0;
+        for &c in &cru[..n] {
+            if c == b'\n' {
+                buf[m] = b'\r';
+                m += 1;
+            }
+            buf[m] = c;
+            m += 1;
+        }
+        if m > 0 {
+            con_write(&buf[..m]);
+        }
+    }
+    nexo_sys::handle_close(stdout_rx);
+    let code = nexo_sys::process_wait(proc).unwrap_or(-1);
+    nexo_sys::handle_close(proc);
+    if code != 0 {
+        outln!("{} saiu com {}", nome_str, code);
+    }
+    true
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(_arg: u64) -> ! {
     let mut inbuf = [0u8; 4096];
@@ -327,7 +412,9 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     match name {
                         b"" => {}
                         b"ajuda" => {
-                            outln!("comandos: ajuda info tempo ls cat escreve remove eco sair");
+                            outln!(
+                                "comandos: ajuda info tempo ls cat escreve remove eco sair (outro nome = utilitario do initrd)"
+                            );
                         }
                         b"info" => cmd_info(),
                         b"tempo" => {
@@ -353,7 +440,9 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                             nexo_sys::exit(0)
                         }
                         _ => {
-                            outln!("comando desconhecido (tente 'ajuda')");
+                            if !cmd_run(name, rest) {
+                                outln!("comando desconhecido (tente 'ajuda')");
+                            }
                         }
                     }
                     con_write(b"> ");

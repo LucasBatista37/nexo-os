@@ -243,7 +243,7 @@ SCENARIOS = {
 
 SHELL_SCRIPT = [
     # (comando, regex esperado na resposta)
-    ("ajuda", r"comandos: ajuda info tempo ls cat escreve remove eco sair"),
+    ("ajuda", r"comandos: ajuda info tempo ls cat escreve remove eco sair \(outro nome = utilitario do initrd\)"),
     ("info", r"cpus: [1-9]\d*"),
     ("tempo", r"\d+ ms desde o boot"),
     ("ls /", r"d boot"),
@@ -256,6 +256,11 @@ SHELL_SCRIPT = [
     ("remove /tmp/nota.txt", r"removido"),
     ("cat /tmp/nota.txt", r"cat: erro 3"),
     ("eco alo mundo", r"alo mundo"),
+    # utilitarios POSIX do initrd pelo shell (convencao de argv/stdout; vfs duplicado)
+    ("echo utilitario vivo", r"utilitario vivo"),
+    ("escreve /disk/sh76.txt um dois tres", r"12 byte\(s\) escritos"),
+    ("wc /disk/sh76.txt", r"0 3 12 /disk/sh76\.txt"),
+    ("remove /disk/sh76.txt", r"removido"),
 ]
 
 
