@@ -1878,6 +1878,46 @@ pub fn net_test_mode() {
     kinfo!("[NET] fase 2: netd + API de sockets");
     let code = crate::process::wait_and_reap(&client2);
     kinfo!("[NET] fase 2 (netd) terminou com {code}");
+    // Fase 3: repositorio de pacotes EM REDE — o host publica um .npk por HTTP; o guest baixa
+    // pela API de sockets, grava em /repo (fs real) e instala pelo caminho oficial. Sem TLS
+    // (cripto adiada): o transporte e claro e o pacote e validado como sempre (NEXOPKG1+CRC).
+    if http_port == 0 || !has_virtio_blk() {
+        return;
+    }
+    let (na3, nb3) = ChannelEnd::create_pair();
+    let (sa3, sb3) = ChannelEnd::create_pair();
+    let g3 = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let _drv3 = crate::process::spawn_named("netdev", 0, alloc::vec![g3, channel_handle(na3)])
+        .expect("netdev 3");
+    let _netd3 = crate::process::spawn_named(
+        "netd",
+        0,
+        alloc::vec![channel_handle(nb3), channel_handle(sa3)],
+    )
+    .expect("netd 3");
+    let (fa, fb) = ChannelEnd::create_pair();
+    let (fc, fd) = ChannelEnd::create_pair();
+    let _blk = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(fa)],
+    )
+    .expect("blockdev");
+    let _fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(fb), channel_handle(fc)])
+            .expect("fs");
+    let client3 = crate::process::spawn_named(
+        "utest",
+        71 | (http_port << 8),
+        alloc::vec![channel_handle(sb3), channel_handle(fd)],
+    )
+    .expect("utest 71");
+    kinfo!("[NET] fase 3: repositorio em rede (HTTP -> /repo -> instalacao)");
+    let code = crate::process::wait_and_reap(&client3);
+    kinfo!("[NET] fase 3 (repo em rede) terminou com {code}");
 }
 
 /// `fs-churn=1` na linha de comando: blockdev + fs + utest(10) escrevendo sem parar, para o

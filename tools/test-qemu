@@ -8,6 +8,7 @@ Uso: tools/test-qemu [--scenario nome] [--timeout 120] [--no-build]
 """
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -678,6 +679,17 @@ def run_net_scenario(timeout: float) -> bool:
     hsrv.listen(1)
     http_port = hsrv.getsockname()[1]
 
+    # repositorio em rede: o host PUBLICA um pacote real — o echo empacotado pelo nexo-pack
+    # (o mesmo formato NEXOPKG1 que o instalador valida); o guest baixa /repo/app-net.npk.
+    npk = BUILD / "app-net.npk"
+    manifest = BUILD / "app-net-manifest.txt"
+    manifest.write_text("name=app-net\nversion=1.0\nentry=app.elf\nperms=ipc\n")
+    app_elf = BUILD / "app.elf"
+    shutil.copy2(BUILD / "svc-echo.elf", app_elf)
+    run([sys.executable, ROOT / "tools" / "nexo-pack", "build", "--manifest", manifest,
+         "--out", npk, app_elf], stdout=subprocess.DEVNULL)
+    npk_bytes = npk.read_bytes()
+
     def hserve():
         hsrv.settimeout(timeout)
         while True:
@@ -693,7 +705,8 @@ def run_net_scenario(timeout: float) -> bool:
                     if not chunk:
                         break
                     data += chunk
-                body = b"nexo-http-ok\n"
+                path = data.split(b" ")[1] if data.count(b" ") >= 2 else b"/"
+                body = npk_bytes if path == b"/repo/app-net.npk" else b"nexo-http-ok\n"
                 conn.sendall(b"HTTP/1.0 200 OK\r\nContent-Length: "
                              + str(len(body)).encode() + b"\r\n\r\n" + body)
                 conn.close()
@@ -763,6 +776,8 @@ def run_net_scenario(timeout: float) -> bool:
             r"utest: posix udp ok — poll e select viram o datagrama antes do recvfrom",
                 r"utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados",
                 r"utest: http ok — GET /nexo\.txt devolveu 200 e o corpo esperado \(\d+ bytes\)",
+                r"utest: repo em rede ok — app-net\.npk baixado por HTTP \(\d+ bytes\), instalado v\d+",
+                r"\[NET\] fase 3 \(repo em rede\) terminou com 0",
                 r"\[NET\] fase 2 \(netd\) terminou com 0",
                 r"\[NET\] teste de rede terminou com 0",
                 r"NEXO: boot completo"]:
