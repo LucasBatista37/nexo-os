@@ -1,7 +1,11 @@
-/* stdio.c — nexo-libc: puts/printf saem pelo log do kernel, em LINHAS (nexo_log enquadra uma
- * linha por chamada). puts e printf acumulam num buffer e publicam a cada '\n'; um final sem
- * '\n' fica pendente ate nexo_stdio_flush (o crt0 chama na saida). Linha vazia nao publica
- * nada (o log ja enquadra). Buffers estaticos: um fluxo de saida por processo, sem threads.
+/* stdio.c — nexo-libc: a saida (puts/printf/write(1)) tem DOIS destinos pela convencao do
+ * Nexo. Sem canal no handle 3, sai pelo log do kernel em LINHAS (acumula e publica a cada
+ * '\n'; o '\n' e so o quadro, nao vai no log; linha vazia nao publica nada). COM canal no
+ * handle 3 (um pipe), o fluxo de bytes e FIEL: cada mensagem carrega os bytes como escritos,
+ * '\n' incluso — e assim `cat | wc` conta certo do outro lado. A sonda e uma unica mensagem
+ * vazia no primeiro flush (consumidores ignoram mensagens vazias — o stdin da libc ignora).
+ * Um final sem '\n' fica pendente ate nexo_stdio_flush (o crt0 chama na saida). Buffers
+ * estaticos: um fluxo de saida por processo, sem threads.
  *
  * vsnprintf cobre o nucleo de C: %% %c %s %d %i %u %x %X %p, flag '0', largura decimal e os
  * modificadores l/ll/z (todos 64 bits neste alvo). Sem ponto flutuante e sem precisao (.N):
@@ -11,18 +15,42 @@
 #include "../../../abi/c/nexo.h"
 
 #define LINHA_MAX 256
+#define STDOUT_HANDLE 3
 
 static char pendente[LINHA_MAX];
 static size_t pend_n;
+static int modo; /* 0 = nao sondado, 1 = canal (handle 3), 2 = log do kernel */
+
+static int stdout_canal(void) {
+    if (modo == 0) {
+        uint32_t hs[2];
+        uint64_t st = nexo_channel_send(STDOUT_HANDLE, pendente, 0, hs, 0);
+        modo = st == NEXO_STATUS_OK ? 1 : 2;
+    }
+    return modo == 1;
+}
 
 void nexo_stdio_flush(void) {
-    if (pend_n) {
+    if (!pend_n)
+        return;
+    if (stdout_canal()) {
+        uint32_t hs[2];
+        nexo_channel_send(STDOUT_HANDLE, pendente, pend_n, hs, 0);
+    } else {
         nexo_log(pendente, pend_n);
-        pend_n = 0;
     }
+    pend_n = 0;
 }
 
 static void escreve(const char *s, size_t n) {
+    if (stdout_canal()) {
+        for (size_t i = 0; i < n; i++) {
+            pendente[pend_n++] = s[i]; /* '\n' incluso: fluxo de bytes fiel */
+            if (pend_n == LINHA_MAX || s[i] == '\n')
+                nexo_stdio_flush();
+        }
+        return;
+    }
     for (size_t i = 0; i < n; i++) {
         if (s[i] == '\n') {
             nexo_stdio_flush();

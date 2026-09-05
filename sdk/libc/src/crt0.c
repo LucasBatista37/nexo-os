@@ -4,7 +4,8 @@
  * enviada — os argumentos separados por '\0' (argv[0] incluso). Sem o canal (ou sem
  * mensagem), main recebe argc = 0. O handle 0 fica livre para o servico principal do
  * programa (ex.: o canal do nexo.fs para a camada de arquivos); um canal OPCIONAL no
- * handle 2 e o stdin (read(0) na libc; PeerClosed = EOF). */
+ * handle 2 e o stdin (read(0) na libc; PeerClosed = EOF) e um canal OPCIONAL no handle 3 e
+ * o stdout (bytes fieis, '\n' incluso — um pipe; sem ele, a saida vai ao log em linhas). */
 #include "../../../abi/c/nexo.h"
 
 extern int main(int argc, char **argv);

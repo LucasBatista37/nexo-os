@@ -80,6 +80,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_echo", test_user_echo),
     ("user_head", test_user_head),
     ("user_mkdir", test_user_mkdir),
+    ("user_pipe", test_user_pipe),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3441,6 +3442,76 @@ fn test_user_mkdir() -> TestResult {
     run_c_util("mkdir-c", b"mkdir\0/mk-teste\0", None)?;
     run_c_util("ls-c", b"ls\0/\0", None)?;
     run_c_util("rm-c", b"rm\0/mk-teste\0", None)
+}
+
+/// PIPELINE de verdade: `cat | wc` — o stdout do cat e um CANAL (handle 3 da convencao,
+/// bytes fieis com `\n` incluso) e a outra ponta e o stdin do wc (handle 2). O kernel
+/// alimenta o stdin do cat e le o veredito do wc no log: "2 3 13" e marcador do cenario
+/// boot. Nenhum fs envolvido — encanamento puro entre dois processos C; o EOF viaja em
+/// cascata (kernel solta o stdin -> cat sai -> pipe fecha -> wc ve EOF).
+fn test_user_pipe() -> TestResult {
+    use crate::ipc::{ChannelEnd, Message};
+    for bin in ["cat-c", "wc-c"] {
+        if crate::initrd::find(bin).is_none() {
+            return Err(alloc::format!(
+                "{bin} ausente do initrd (host sem clang/rust-lld)"
+            ));
+        }
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let frames0 = phys::stats().free;
+    let (h0a, h0b) = ChannelEnd::create_pair(); // handle 0 de cada um (nao usado)
+    let (argv_cat_tx, argv_cat_rx) = ChannelEnd::create_pair();
+    let (argv_wc_tx, argv_wc_rx) = ChannelEnd::create_pair();
+    let (stdin_tx, stdin_rx) = ChannelEnd::create_pair();
+    let (pipe_tx, pipe_rx) = ChannelEnd::create_pair();
+    let manda = |end: &alloc::sync::Arc<ChannelEnd>, dados: &[u8]| {
+        end.send(Message {
+            data: dados.to_vec(),
+            handles: alloc::vec![],
+        })
+        .map_err(|e| alloc::format!("envio falhou: {e:?}"))
+    };
+    manda(&argv_cat_tx, b"cat\0")?;
+    manda(&argv_wc_tx, b"wc\0")?;
+    manda(&stdin_tx, b"um dois\n")?;
+    manda(&stdin_tx, b"tres\n")?;
+    drop(stdin_tx);
+    let cat = crate::process::spawn_named(
+        "cat-c",
+        0,
+        alloc::vec![
+            channel_handle(h0a),
+            channel_handle(argv_cat_rx),
+            channel_handle(stdin_rx),
+            channel_handle(pipe_tx)
+        ],
+    )
+    .map_err(String::from)?;
+    let wc = crate::process::spawn_named(
+        "wc-c",
+        0,
+        alloc::vec![
+            channel_handle(h0b),
+            channel_handle(argv_wc_rx),
+            channel_handle(pipe_rx)
+        ],
+    )
+    .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&cat);
+    let wcod = crate::process::wait_and_reap(&wc);
+    drop((cat, wc, argv_cat_tx, argv_wc_tx));
+    sched::reap();
+    check!(cc == 0, "cat saiu com {cc}");
+    check!(wcod == 0, "wc saiu com {wcod}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    let frames = settled_free_frames(frames0, 8);
+    check!(
+        frames + 8 >= frames0,
+        "quadros vazaram: {frames0} -> {frames}"
+    );
+    Ok(())
 }
 
 /// Primeiro processo em **C++** (freestanding, sem exceptions/RTTI): construtor global via

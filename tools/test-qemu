@@ -120,6 +120,7 @@ SCENARIOS = {
             r"head-c\] cabeca",
             r"head-c\] meio",
             r"ls-c\] d mk-teste",
+            r"wc-c\] 2 3 13",
             r"\[TEST\] gfx \.\.\. ok",
             r"\[TEST\] symbols \.\.\. ok",
             r"\[RESULT\] PASS \d+/\d+",
