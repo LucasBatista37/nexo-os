@@ -1,9 +1,10 @@
-/* grep.c — utilitario POSIX portado: imprime as linhas que CONTEM o padrao (substring, sem
- * regex na v0). Sai 0 se achou alguma, 1 se nenhuma — a semantica classica de grep.
+/* grep.c — utilitario POSIX portado: imprime as linhas que CASAM com o padrao. Regex minima
+ * (o casador de Pike): `^` inicio, `$` fim, `.` qualquer caractere, `c*` zero ou mais; o
+ * resto e literal — um padrao sem metacaracteres e a busca de substring de antes. Sai 0 se
+ * achou alguma linha, 1 se nenhuma — a semantica classica de grep.
  * Uso: grep <padrao> [arquivo]  (sem arquivo, le o stdin). */
 #include "../../sdk/libc/include/fcntl.h"
 #include "../../sdk/libc/include/stdio.h"
-#include "../../sdk/libc/include/string.h"
 #include "../../sdk/libc/include/unistd.h"
 
 #define LINHA_MAX 512
@@ -12,9 +13,44 @@ static char linha[LINHA_MAX];
 static size_t ln;
 static int achou;
 
+static int casa_aqui(const char *re, const char *texto);
+
+/* `c*` seguido de `re`: tenta o resto a cada prefixo de repeticoes de `c` (ou `.`). */
+static int casa_estrela(int c, const char *re, const char *texto) {
+    do {
+        if (casa_aqui(re, texto))
+            return 1;
+    } while (*texto != 0 && (*texto++ == c || c == '.'));
+    return 0;
+}
+
+/* Casa `re` no inicio de `texto`. */
+static int casa_aqui(const char *re, const char *texto) {
+    if (re[0] == 0)
+        return 1;
+    if (re[1] == '*')
+        return casa_estrela(re[0], re + 2, texto);
+    if (re[0] == '$' && re[1] == 0)
+        return *texto == 0;
+    if (*texto != 0 && (re[0] == '.' || re[0] == *texto))
+        return casa_aqui(re + 1, texto + 1);
+    return 0;
+}
+
+/* Casa `re` em qualquer posicao de `texto` (`^` ancora no inicio). */
+static int casa(const char *re, const char *texto) {
+    if (re[0] == '^')
+        return casa_aqui(re + 1, texto);
+    do {
+        if (casa_aqui(re, texto))
+            return 1;
+    } while (*texto++ != 0);
+    return 0;
+}
+
 static void fecha_linha(const char *padrao) {
     linha[ln] = 0;
-    if (ln && strstr(linha, padrao)) {
+    if (ln && casa(padrao, linha)) {
         achou = 1;
         printf("%s\n", linha);
     }

@@ -87,6 +87,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_sort", test_user_sort),
     ("user_sh_redir", test_user_sh_redir),
     ("user_sh_quotes", test_user_sh_quotes),
+    ("user_grep_regex", test_user_grep_regex),
     ("user_ahci", test_user_ahci),
     ("user_nvme", test_user_nvme),
     ("user_nvme_pipe", test_user_nvme_pipe),
@@ -3495,6 +3496,18 @@ fn test_user_sh_quotes() -> TestResult {
         b"sh\0-c\0grep 'nexo dentro' | wc\0",
         Some(b"com nexo dentro\nnexo fora\n"),
     )
+}
+
+/// Regex minima do grep (o casador de Pike: `^ $ . *`): `^ab*c$` casa "abc", "abbbc" e
+/// "ac" mas NAO "xabc" (ancorado) — o wc ve "3 3 13" (marcador do cenario boot); e `z$`
+/// sobre "za" nao casa nada (saida 1 aceita).
+fn test_user_grep_regex() -> TestResult {
+    run_c_util(
+        "sh-c",
+        b"sh\0-c\0grep '^ab*c$' | wc\0",
+        Some(b"abc\nabbbc\nac\nxabc\n"),
+    )?;
+    run_c_util_codes("grep-c", b"grep\0z$\0", Some(b"za\n"), &[1])
 }
 
 /// Redirecoes do sh sem concorrencia no canal do fs (bomba antes do spawn, dreno depois dos

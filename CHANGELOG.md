@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Adicionado (Fase 6/7, bloco 83 — regex mínima no grep)
+- O `grep` casa **regex mínima** — o casador de Pike: `^` início, `$` fim, `.` qualquer caractere, `c*` zero ou mais; um padrão sem metacaracteres continua sendo a busca de substring de antes (os testes anteriores seguem válidos).
+- Auto-teste `user_grep_regex` (118º): `grep '^ab*c$' | wc` sobre `abc/abbbc/ac/xabc` deixa passar três linhas ("3 3 13" é marcador do cenário boot) e `z$` sobre `za` sai 1.
+
 ### Adicionado (Fase 6/7, bloco 82 — aspas no sh)
 - O mini `sh` aceita **aspas simples ou duplas** para agrupar um argumento com espaços (`grep 'nexo dentro' | wc`); aspas sem fechar são erro explícito. Limite documentado da v0: o `|` continua separando estágios mesmo entre aspas.
 - Auto-teste `user_sh_quotes` (117º): sem as aspas o grep receberia `nexo` + o arquivo inexistente `dentro` e sairia 2; com elas, só a linha que casa chega ao wc — "1 3 16" é marcador do cenário boot.
