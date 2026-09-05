@@ -33,6 +33,37 @@ Suíte de boot: 99 → 116 testes; roadmap 179 → 180 itens concluídos (70 par
 | 79 | tema do sistema em runtime (`set_theme`/`prefs.theme`, `nexo.wm` v1.20) | a janela das Configurações repinta clara/escura, por pixel |
 | 80 | rolagem no editor (`scrolled` na textgrid; janela [topo, topo+6)) → item do editor `[x]` | sete linhas de grade, rola e volta com o cursor |
 
+## Segundo dia (2026-09-05): blocos 81–88
+
+| Bloco | Entrega | Evidência |
+|---|---|---|
+| 81 | documentos básicos no visor (texto numa grade 6×4) → item do visualizador `[x]` | segundo visor por `process_spawn` do driver; glifos por pixel |
+| 82 | aspas no `sh` (`grep 'nexo dentro' \| wc`) | sem aspas o grep sairia 2; "1 3 16" |
+| 83 | regex mínima no `grep` (`^ $ . *`, o casador de Pike) | `^ab*c$` deixa passar 3 de 4 linhas: "3 3 13" |
+| 84 | permissão temporária no lançador ("Permitir por tempo") | a janela "calc" some sozinha após "expirou" |
+| 85 | nomes longos no gerenciador (`~` de truncamento) → item `[x]` | "nome-co~" por pixel; `abrir` com o caminho inteiro |
+| 86 | repositório de pacotes **em rede** (host publica `.npk` por HTTP; guest baixa, grava em `/repo`, instala) | fase 3 do cenário `net`: 23974 bytes, instalado v1 |
+| 87 | descoberta/atualização: `indice.txt` publicado × manifesto instalado | 1º boot instala; 2º boot "já na versão 1.0; nada a fazer" |
+| 88 | atualização de janela TCP ao drenar (persist timer do par) | download de 24 KiB: ~30 s → 431 ms; teste de host |
+
+Entre os blocos 83 e 84 entrou um commit de docs (`docs/sdk.md`: programas em C, a nexo-libc
+e a convenção de processos). Suíte de boot: 118 testes; roadmap 182 itens concluídos.
+
+Lições novas:
+
+- **`tcp_recv` com `closed = 1` pode carregar bytes e ainda deixar bytes na fila** (até 4 KiB,
+  1400 por resposta): drenar até uma resposta vazia; conferir o `Content-Length` para um
+  download truncado falhar com a mensagem certa, não no CRC. O pcap (`--net-dump`) foi o
+  árbitro: o servidor entregou tudo, o netstack aceitou tudo — o erro era do consumidor.
+- **Janela zero sem atualização de janela = persist timer do par** (sondas de 1 byte a cada
+  ~5 s no pcap). O receptor precisa anunciar a janela nova quando a aplicação drena
+  (RFC 1122 §4.2.3.3).
+- **Processo**: `tools/nexo-unsafe-audit` exige um `// SAFETY:` por linha `unsafe` (um comentário
+  partilhado não conta) e o `make lint` só mostra isso no fim do log; um commit por lista
+  explícita de arquivos exige conferir `git status` depois (o `Cargo.lock` do workspace ficou
+  de fora uma vez); a validação de blocos consecutivos pode ser feita em união (mesma imagem)
+  com commits separados por arquivos — o CI de cada push valida cada commit isolado.
+
 ## Lições registradas
 
 - **A convenção de handles é posicional e vale no arranque.** Depois que um programa cria ou
