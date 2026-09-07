@@ -431,7 +431,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 - [x] criar `init` e `service-manager` — *`services/init` e `services/svcmgr` em ring 3*;
 - [-] criar políticas de reinício e dependências — *reinício com limite implementado e testado (`echo` cai e volta); dependências declarativas pendentes*;
 - [x] criar loader ELF de usuário — *`process::spawn_elf` (W^X, USER, pilha com guarda)*;
-- [-] criar runtime mínimo Rust e ABI C — *`sdk/nexo-sys` + `sdk/nexo-rt` (Rust, sem alocação); ABI C pendente*;
+- [x] criar runtime mínimo Rust e ABI C — *`sdk/nexo-sys` + `sdk/nexo-rt` (Rust, sem alocação); **ABI C**: `abi/c/nexo.h` (syscalls e handles), `abi/c/proto/*.h` gerados do mesmo IDL (`fs`, `sock`), a **nexo-libc** (`sdk/libc`: string, stdio, stdlib, fd/dirent, sockets, crt0 com a convenção h0..h3 — ADR-0017) e o toolchain empacotado (`make toolchain`, `nexo-cc`)*;
 - [x] criar shell de diagnóstico no espaço de usuário — *`services/shell` sobre a console VirtIO e o VFS; cenário `shell` interativo*;
 - [-] testar isolamento e negação de capabilities — *isolamento de memória/instruções e negação por direitos (Denied) testados; fuzzing pendente*;
 - [x] fuzzar decodificador de IPC e syscalls — *fuzz-lite determinístico dos parsers e dos decodificadores NXIP no host; fuzz de syscalls aleatório com sementes registradas, agendado toda semana no CI (`make fuzz`, workflow `fuzz`); cobertura guiada (cargo-fuzz) pendente*;
@@ -674,15 +674,15 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 ### 6.1 Kernel e baixo nível
 
 - [x] especificação da ABI de boot — *docs/spec/boot-abi.md*;
-- [-] memória física e virtual — *0.0.1-boot: bitmap + paginação 4 níveis; falta SMP/afinidade*;
+- [x] memória física e virtual — *bitmap de quadros + paginação de 4 níveis; um espaço de endereçamento por processo, objetos de memória compartilháveis (`memory_create`/`map`/`unmap`), guard pages, heap do kernel crescendo sob demanda; SMP/afinidade no item seguinte*;
 - [x] SMP e afinidade — *4 CPUs no QEMU; afinidade por máscara (`spawn_on`, `set_affinity`)*;
 - [-] preempção e prioridades — *preempção sim; prioridades não*;
 - [-] temporizadores de alta resolução — *TSC em ns; timers despachados com resolução de 1 ms (tick)*;
 - [x] isolamento usuário/kernel — *ring 3 com espaços próprios; faltas de usuário não afetam o kernel*;
-- [-] syscalls versionadas — *v0 instável com `SYS_ABI_VERSION`*;
+- [x] syscalls versionadas — *`ABI_VERSION = 1` consultável (`abi_version`), tabela em `docs/spec/syscall-abi.md` com política aditiva (números e campos novos apenas; quebras sobem a versão); a promoção a **estável** é o item da Fase 6 (gate F6)*;
 - [x] IPC com transferência de capabilities — *handles transferidos por canal com direito TRANSFER*;
 - [ ] contabilidade e limites de recursos;
-- [-] panic, dump e symbolication — *panic/backtrace/símbolos prontos; dump completo pendente*;
+- [x] panic, dump e symbolication — *panic com backtrace simbolizado e **dump em disco** (setores reservados do disco de dados, caminho de emergência sem alocação; `tools/nexo-disk crashdump`; cenário `panic` no CI) — o consentimento de envio é o item da Fase 8*;
 - [ ] mitigação de classes de exploração;
 - [ ] benchmarks de contexto, syscall e IPC;
 - [-] stress de 24h e posteriormente 7 dias — *24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias pendem*;

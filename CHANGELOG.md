@@ -324,6 +324,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - `utest` modo 50 + auto-teste de boot `user_config` (wm + config + driver): clica os toggles e confere os **efeitos reais** de fora — `prefs` reflete o movimento reduzido (liga/desliga) e, com o não-perturbe, um aviso não desenha banner (com DND off, desenha). 73 testes no boot.
 - Lição de teste registrada no código: a saída composta é memória compartilhada e o `composite` pinta o fundo antes do banner — leituras de pixel concorrentes a recomposições devem **esperar a convergência** (`wm_wait_px`), nunca ler uma vez (uma corrida transiente foi pega e corrigida; suíte verde 3× seguidas).
 
+### Documentação (bloco 96 — plano em dia e relatório 89–95)
+- Quatro cláusulas do plano estavam atrás do código: "ABI C pendente" (existe: `nexo.h`, protocolos C gerados, nexo-libc, toolchain), "falta SMP/afinidade" no item de memória (é o item seguinte, `[x]`), "v0 instável" nas syscalls versionadas (`ABI_VERSION = 1` com política aditiva) e "dump completo pendente" (o dump em disco existe desde a Fase 8) — agora `[x]` com o que há e o que fica para os itens certos.
+- Relatório `docs/progress/2026-09-05-contextos-e-kernel.md`: blocos 89–95 — sockets em C, painel de escala (e o bug das coordenadas do ponteiro), documentos por Contexto, ADR-0017, revogação fina por proxy, o **bug do escalonador** que ela revelou (despertar espúrio no `join`) e as ações nos avisos.
+
 ### Adicionado (Fase 6, bloco 95 — ações nos avisos)
 - Um clique no banner de notificação **ativa a janela de origem** do aviso (a de topo da sessão publicante no `notify`: sobe, ganha o foco, evento a11y) e recolhe o banner. A origem acompanha o aviso que espera por um Contexto inativo; origem morta ou de outro Contexto só recolhe. Sem mudança de protocolo.
 - Teste `user_wm_notify`: a janela vermelha de origem é coberta por um clique na azul; o clique no banner a traz de volta e o banner some. Fecha o item de notificações: banner, dismiss, não-perturbe, Central (registro de 8 + limpar), avisos por Contexto e ação.
