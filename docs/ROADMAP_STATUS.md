@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `ca5524d`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `a46858f`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 190 · 🟡 60 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 191 · 🟡 59 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -343,7 +343,7 @@ Gate: ⬜ não iniciado.
 
 | Frente | ✅ | 🟡 | ⬜ | % |
 |---|---|---|---|---|
-| 6.1 Kernel e baixo nível | 8 | 2 | 4 | 64% |
+| 6.1 Kernel e baixo nível | 9 | 1 | 4 | 68% |
 | 6.2 Drivers | 0 | 1 | 15 | 3% |
 | 6.3 Armazenamento | 0 | 0 | 14 | 0% |
 | 6.4 Rede | 0 | 0 | 14 | 0% |
@@ -362,7 +362,7 @@ Gate: ⬜ não iniciado.
 | ✅ | memória física e virtual | bitmap de quadros + paginação de 4 níveis; um espaço de endereçamento por processo, objetos de memória compartilháveis (`memory_create`/`map`/`unmap`), guard pages, heap do kernel crescendo sob demanda; SMP/afinidade no item seguinte |
 | ✅ | SMP e afinidade | 4 CPUs no QEMU; afinidade por máscara (`spawn_on`, `set_affinity`) |
 | ✅ | preempção e prioridades | preempção por quantum (10 ms) e **duas classes de prioridade** por thread (normal/baixa, herdadas no spawn): a fila prefere as normais e uma normal pronta preempta uma de baixa no tique seguinte (≤ 1 ms); `set_priority` (syscall 35) — auto-testes `threads_priority` e `user_priority` (bloco 98) |
-| 🟡 | temporizadores de alta resolução | TSC em ns; timers despachados com resolução de 1 ms (tick) |
+| ✅ | temporizadores de alta resolução | TSC em ns; **tique dinâmico na BSP**: o timer do LAPIC é one-shot, re-armado a cada disparo para o próximo prazo (dormida ou timer de kernel; no máximo 1 ms à frente) — `sleep` em ns de verdade; um prazo mais cedo re-arma na hora (ou por IPI, de outra CPU); APs seguem com tique periódico de 1 ms. Dormidas e timers abaixo de 1 ms acordam perto do prazo **quando a entrega de interrupções permite** — sob QEMU no macOS o laço principal atrasa timers ~1 ms, por isso o auto-teste `timer_resolution` verifica o contrato no LAPIC (contagem re-armada) e só registra a latência medida (bloco 103) |
 | ✅ | isolamento usuário/kernel | ring 3 com espaços próprios; faltas de usuário não afetam o kernel |
 | ✅ | syscalls versionadas | `ABI_VERSION = 1` consultável (`abi_version`), tabela em `docs/spec/syscall-abi.md` com política aditiva (números e campos novos apenas; quebras sobem a versão); a promoção a **estável** é o item da Fase 6 (gate F6) |
 | ✅ | IPC com transferência de capabilities | handles transferidos por canal com direito TRANSFER |

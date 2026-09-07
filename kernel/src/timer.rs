@@ -57,6 +57,7 @@ pub fn after_ns(after_ns: u64, callback: Callback, arg: usize) -> TimerId {
             arg,
         },
     );
+    crate::time::notify_deadline(deadline);
     id
 }
 
@@ -74,6 +75,7 @@ pub fn periodic_ns(period_ns: u64, callback: Callback, arg: usize) -> TimerId {
             arg,
         },
     );
+    crate::time::notify_deadline(deadline);
     id
 }
 
@@ -83,6 +85,15 @@ pub fn cancel(id: TimerId) -> bool {
     let before = list.len();
     list.retain(|p| p.id != id);
     list.len() != before
+}
+
+/// Prazo do timer mais próximo ainda no futuro (depois de `now`), se houver.
+pub fn next_deadline_after(now: u64) -> Option<u64> {
+    PENDING
+        .lock()
+        .iter()
+        .map(|p| p.deadline_ns)
+        .find(|d| *d > now)
 }
 
 /// Timers pendentes.
@@ -152,7 +163,7 @@ pub fn init() {
         sched::yield_now();
     }
     kinfo!(
-        "timer: thread ktimer ativa; resolucao de despacho {} ms",
+        "timer: thread ktimer ativa; despacho no tique dinamico da BSP (ate {} ms de cobertura)",
         1000 / crate::time::HZ
     );
 }

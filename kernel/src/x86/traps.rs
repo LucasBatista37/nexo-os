@@ -103,14 +103,18 @@ fn handle_trap(frame: &mut TrapFrame) {
         8 => double_fault(frame),
         vectors::TIMER => {
             TIMER_IRQS.fetch_add(1, Ordering::Relaxed);
-            match super::percpu::try_current() {
+            let bsp = match super::percpu::try_current() {
                 Some(c) => {
                     c.timer_irqs.fetch_add(1, Ordering::Relaxed);
-                    if c.index == 0 {
-                        crate::time::tick();
-                    }
+                    c.index == 0
                 }
-                None => crate::time::tick(),
+                None => true,
+            };
+            if bsp {
+                crate::time::tick();
+                // one-shot: re-arma ANTES de escalonar (on_tick pode trocar de thread e esta
+                // sequência só continuaria muito depois — a BSP ficaria sem tique)
+                crate::time::rearm_bsp();
             }
             super::apic::eoi();
             crate::sched::on_tick();

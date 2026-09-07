@@ -80,7 +80,7 @@ pub fn init() {
     // SAFETY: IDT instalada com handler para o vetor do timer.
     unsafe { cpu::enable_interrupts() };
     kinfo!(
-        "time: TSC {}.{:03} MHz ({}), timer LAPIC {}.{:03} MHz, tick {} Hz (contagem {} /{}), IF={}",
+        "time: TSC {}.{:03} MHz ({}), timer LAPIC {}.{:03} MHz, tick {} Hz (contagem {} /{}; one-shot dinamico na BSP), IF={}",
         c.tsc_hz / 1_000_000,
         (c.tsc_hz / 1000) % 1000,
         if apic::tsc_invariant() {
@@ -97,11 +97,101 @@ pub fn init() {
     );
 }
 
-/// Programa o timer periódico do LAPIC desta CPU com os parâmetros calibrados.
+/// Programa o timer do LAPIC desta CPU com os parâmetros calibrados: **periódico** (1 ms)
+/// nas APs; **one-shot** na BSP (tique dinâmico: re-armado a cada disparo para o próximo
+/// prazo, no máximo 1 ms à frente — ver [`rearm_bsp`]).
 pub fn start_local_timer() {
     let lapic = crate::x86::apic::lapic();
-    lapic.timer_configure(vectors::TIMER, true, APIC_DIVIDE);
-    lapic.timer_start(APIC_INITIAL.load(Ordering::Relaxed) as u32);
+    if is_bsp() {
+        lapic.timer_configure(vectors::TIMER, false, APIC_DIVIDE);
+        ARMED_DEADLINE.store(monotonic_ns() + TICK_NS, Ordering::Relaxed);
+        lapic.timer_start(APIC_INITIAL.load(Ordering::Relaxed) as u32);
+    } else {
+        lapic.timer_configure(vectors::TIMER, true, APIC_DIVIDE);
+        lapic.timer_start(APIC_INITIAL.load(Ordering::Relaxed) as u32);
+    }
+}
+
+/// Nanossegundos por tique periódico.
+const TICK_NS: u64 = 1_000_000_000 / HZ;
+/// Menor antecedência armada (evita disparos em cascata por prazos já vencidos).
+const MIN_ARM_NS: u64 = 20_000;
+/// Prazo (ns monotônicos) para o qual o one-shot da BSP está armado.
+static ARMED_DEADLINE: AtomicU64 = AtomicU64::new(0);
+/// Re-armamentos antecipados (prazo novo antes do armado): diagnóstico.
+static EARLY_REARMS: AtomicU64 = AtomicU64::new(0);
+
+fn is_bsp() -> bool {
+    crate::x86::percpu::try_current().is_none_or(|c| c.index == 0)
+}
+
+/// Arma o one-shot da BSP para `deadline_ns` (limitado a `[now + MIN_ARM_NS, now + 1 ms]`).
+/// Só na BSP.
+fn arm_bsp(deadline_ns: u64) {
+    let now = monotonic_ns();
+    let delta = deadline_ns.saturating_sub(now).clamp(MIN_ARM_NS, TICK_NS);
+    let per_tick = APIC_INITIAL.load(Ordering::Relaxed).max(1);
+    let count = (per_tick * delta / TICK_NS).max(1) as u32;
+    ARMED_DEADLINE.store(now + delta, Ordering::Relaxed);
+    crate::x86::apic::lapic().timer_start(count);
+}
+
+/// Chamado pelo handler do timer na BSP **antes** de escalonar (o handler pode trocar de
+/// thread e só voltar muito depois): re-arma o one-shot para o próximo prazo — a dormida
+/// mais próxima, o timer de kernel mais próximo ou o tique regular de 1 ms.
+pub fn rearm_bsp() {
+    let now = monotonic_ns();
+    let mut next = now + TICK_NS;
+    // só prazos ainda no futuro: os vencidos são atendidos pelo `on_tick` logo a seguir
+    if let Some(w) = crate::sched::next_wake_after(now) {
+        next = next.min(w);
+    }
+    if let Some(t) = crate::timer::next_deadline_after(now) {
+        next = next.min(t);
+    }
+    arm_bsp(next);
+}
+
+/// Um prazo novo (dormida ou timer) foi registrado: se vence antes do que está armado,
+/// re-arma agora (na BSP) ou pede à BSP que re-arme (IPI do vetor do timer, de outra CPU).
+pub fn notify_deadline(deadline_ns: u64) {
+    if tsc_hz() == 0 {
+        return;
+    }
+    // Só deixa de armar se o prazo já armado é MAIS CEDO e ainda está no futuro; um prazo
+    // armado que já passou (a IRQ está atrasada ou pendente) não pode segurar o novo — sob
+    // emulação a IRQ chega centenas de µs depois e o bookkeeping ficaria "no passado".
+    let armed = ARMED_DEADLINE.load(Ordering::Relaxed);
+    if deadline_ns >= armed && armed > monotonic_ns() {
+        return;
+    }
+    EARLY_REARMS.fetch_add(1, Ordering::Relaxed);
+    if is_bsp() {
+        arm_bsp(deadline_ns);
+    } else if let (Some(bsp), Some(l)) = (crate::x86::percpu::get(0), crate::x86::apic::try_lapic())
+    {
+        // evita tempestade de IPIs: marca como "já pedido" até o próximo tique da BSP
+        ARMED_DEADLINE.store(deadline_ns, Ordering::Relaxed);
+        l.send_ipi(bsp.apic_id, vectors::TIMER);
+    }
+}
+
+/// Teste/diagnóstico: arma o one-shot da BSP para daqui a `ns` (só na BSP) e devolve
+/// (LVT do timer, contagem atual logo após o armamento).
+pub fn probe_arm(ns: u64) -> (u32, u32) {
+    let l = crate::x86::apic::lapic();
+    arm_bsp(monotonic_ns() + ns);
+    (l.timer_lvt(), l.timer_current())
+}
+
+/// Contagem do timer do LAPIC correspondente a `ns` (com o divisor calibrado).
+pub fn apic_counts_for_ns(ns: u64) -> u32 {
+    (APIC_INITIAL.load(Ordering::Relaxed).max(1) * ns / TICK_NS) as u32
+}
+
+/// Re-armamentos antecipados do tique dinâmico (diagnóstico).
+pub fn early_rearms() -> u64 {
+    EARLY_REARMS.load(Ordering::Relaxed)
 }
 
 /// Chamado pelo handler do vetor do timer na CPU de boot.

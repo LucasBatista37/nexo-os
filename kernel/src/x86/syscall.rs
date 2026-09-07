@@ -805,7 +805,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             (Status::Ok, 0)
         }
         SYS_SLEEP => {
-            sched::sleep_ms(f.rdi.div_ceil(1_000_000));
+            sched::sleep_ns(f.rdi);
             (Status::Ok, 0)
         }
         SYS_GET_PID => (Status::Ok, p.pid),

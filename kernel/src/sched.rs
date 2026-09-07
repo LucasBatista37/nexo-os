@@ -575,11 +575,17 @@ pub fn yield_now() {
 
 /// Dorme pelo menos `ms` milissegundos de tempo real.
 pub fn sleep_ms(ms: u64) {
+    sleep_ns(ms.saturating_mul(1_000_000));
+}
+
+/// Dorme pelo menos `ns` nanossegundos de tempo real. Com o tique dinâmico da BSP, uma
+/// dormida abaixo de 1 ms acorda perto do prazo (não no próximo tique de 1 ms).
+pub fn sleep_ns(ns: u64) {
     if !is_active() || percpu::try_current().is_none() {
-        crate::time::sleep_ms(ms);
+        crate::time::sleep_ms(ns.div_ceil(1_000_000));
         return;
     }
-    let wake_at = crate::time::monotonic_ns() + ms * 1_000_000;
+    let wake_at = crate::time::monotonic_ns() + ns;
     cpu::without_interrupts(|| {
         let g = SCHED.lock();
         let cur = g.running[percpu::current().index]
@@ -591,12 +597,28 @@ pub fn sleep_ms(ms: u64) {
         }
         // SAFETY: lock detido.
         unsafe { cur.inner().wake_at_ns = wake_at };
+        crate::time::notify_deadline(wake_at);
         schedule_locked(g, State::Sleeping);
     });
     // Garante o tempo mínimo mesmo com granularidade de tick.
     while crate::time::monotonic_ns() < wake_at {
         yield_now();
     }
+}
+
+/// Prazo da dormida mais próxima ainda no futuro (depois de `now`, ns monotônicos).
+pub fn next_wake_after(now: u64) -> Option<u64> {
+    cpu::without_interrupts(|| {
+        let g = SCHED.lock();
+        g.sleepers
+            .iter()
+            .map(|t| {
+                // SAFETY: lock detido.
+                unsafe { t.inner().wake_at_ns }
+            })
+            .filter(|w| *w > now)
+            .min()
+    })
 }
 
 /// Termina a thread atual.

@@ -61,6 +61,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("threads_spawn_churn", test_threads_spawn_churn),
     ("threads_multi_cpu", test_threads_multi_cpu),
     ("timers", test_timers),
+    ("timer_resolution", test_timer_resolution),
     ("threads_affinity", test_threads_affinity),
     ("threads_priority", test_threads_priority),
     ("user_process", test_user_process),
@@ -1079,6 +1080,57 @@ fn test_user_aslr() -> TestResult {
     Ok(())
 }
 
+/// Tique dinâmico. O contrato do kernel — re-armar o one-shot da BSP para o próximo prazo —
+/// é verificado no LAPIC (a contagem cai para o valor de 100 µs). A latência real de entrega
+/// depende do emulador (sob QEMU/macOS o laço principal entrega timers com ~1 ms de atraso),
+/// por isso a média das dormidas só é registrada e limitada com folga; o que é exigido:
+/// nenhuma dormida acorda antes do prazo, o mecanismo é exercitado (re-armamentos
+/// antecipados) e um timer de kernel de 150 µs dispara.
+fn test_timer_resolution() -> TestResult {
+    let (lvt, after) = crate::time::probe_arm(100_000);
+    check!(
+        lvt & (1 << 17) == 0 && lvt & (1 << 16) == 0,
+        "timer da BSP nao esta em one-shot desmascarado (lvt {lvt:#x})"
+    );
+    let por_100us = crate::time::apic_counts_for_ns(100_000);
+    check!(
+        after <= por_100us,
+        "contagem {after} logo apos armar 100 us (esperado <= {por_100us}): o armamento nao chegou ao LAPIC"
+    );
+    let e0 = crate::time::early_rearms();
+    let (mut total, mut min) = (0u64, u64::MAX);
+    for _ in 0..40 {
+        let t0 = crate::time::monotonic_ns();
+        sched::sleep_ns(100_000);
+        let dt = crate::time::monotonic_ns() - t0;
+        total += dt;
+        min = min.min(dt);
+    }
+    let avg_us = total / 40 / 1000;
+    kinfo!(
+        "[TICK] dormida de 100 us: media {} us, minimo {} us (latencia de IRQ deste QEMU); re-armamentos antecipados {}",
+        avg_us,
+        min / 1000,
+        crate::time::early_rearms() - e0
+    );
+    check!(min >= 100_000, "dormiu menos que o pedido ({min} ns)");
+    check!(avg_us < 3000, "media de {avg_us} us para dormir 100 us");
+    check!(
+        crate::time::early_rearms() > e0,
+        "nenhum re-armamento antecipado do one-shot"
+    );
+    // timer de kernel curto dispara (a thread ktimer o executa)
+    FLAG.store(false, Ordering::Relaxed);
+    let t0 = crate::time::monotonic_ns();
+    crate::timer::after_ns(150_000, |_| FLAG.store(true, Ordering::Release), 0);
+    while !FLAG.load(Ordering::Acquire) {
+        if crate::time::monotonic_ns() - t0 > 50_000_000 {
+            return Err("timer de 150 us nao disparou em 50 ms".into());
+        }
+        sched::yield_now();
+    }
+    Ok(())
+}
 fn run_utest(mode: u64) -> Result<i64, String> {
     let p = crate::process::spawn_named("utest", mode, Vec::new()).map_err(String::from)?;
     Ok(crate::process::wait_and_reap(&p))

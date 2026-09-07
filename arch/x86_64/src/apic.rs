@@ -193,6 +193,11 @@ impl LocalApic {
         self.write(REG_TIMER_INIT, initial);
     }
 
+    /// Registro LVT do timer (bit 17 = periódico, bit 16 = mascarado, bits 0..8 = vetor).
+    pub fn timer_lvt(&self) -> u32 {
+        self.read(REG_LVT_TIMER)
+    }
+
     /// Contagem atual.
     pub fn timer_current(&self) -> u32 {
         self.read(REG_TIMER_CUR)
