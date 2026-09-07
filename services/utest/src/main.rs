@@ -6392,6 +6392,18 @@ fn wm_notify() -> ! {
     if wm_px(ob, stride, 60, 4) != (0, 0, 255) {
         nexo_sys::exit(905);
     }
+    // canal de entrada (para clicar no banner na ultima rodada)
+    let (inj, src) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(935));
+    let m = nexo_proto::wm::SetInputRequest { chan: src }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(936));
+    if nexo_sys::channel_send(s1, &out[..m], &[src]) != Status::Ok {
+        nexo_sys::exit(937);
+    }
+    match nexo_sys::channel_recv(s1, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_set_input_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(938),
+    }
 
     let notify = |ch: nexo_sys::Handle,
                   txt: &[u8],
@@ -6531,8 +6543,30 @@ fn wm_notify() -> ! {
         nexo_sys::exit(934); // de volta ao 0: o banner do 1 foi recolhido, o azul reaparece
     }
     let _ = b2;
+
+    // ACAO NO AVISO: uma janela vermelha pequena (c) e a de topo da sessao no Contexto 0 —
+    // o aviso nasce dela. Um clique traz a azul (a) a frente e cobre c; um clique NO BANNER
+    // ativa c de volta (o vermelho reaparece) e recolhe o banner.
+    // z acima da b2 (z 9, Contexto 1): a origem do aviso e a janela de TOPO da sessao
+    let (c, c_base) = wm_create(s1, 20, 20, 8, 8, 20);
+    wm_fill(c_base, 8, 8, 255, 0, 0);
+    wm_commit(s1, c);
+    wm_wait_px(ob, stride, 24, 24, (255, 0, 0), 939);
+    notify(s1, b"acao", &mut out, &mut buf, &mut hs);
+    if wm_px(ob, stride, 60, 4) == (0, 0, 255) {
+        nexo_sys::exit(940); // o banner deve estar visivel
+    }
+    wm_click(inj, 5, 40); // clique na azul: sobe e cobre a vermelha
+    wm_wait_px(ob, stride, 24, 24, (0, 0, 255), 941);
+    if wm_px(ob, stride, 60, 4) == (0, 0, 255) {
+        nexo_sys::exit(942); // um clique fora do banner nao o recolhe
+    }
+    wm_click(inj, 60, 4); // clique NO banner: ativa a origem e recolhe o aviso
+    wm_wait_px(ob, stride, 24, 24, (255, 0, 0), 943);
+    wm_wait_px(ob, stride, 60, 4, (0, 0, 255), 944);
+    let _ = c;
     nexo_sys::log(
-        "utest: wm notify ok — banner, DND, posse da entrada e avisos por Contexto (espera e troca)",
+        "utest: wm notify ok — banner, DND, posse da entrada, avisos por Contexto e ACAO (clique no banner ativa a origem)",
     );
     nexo_sys::exit(0)
 }

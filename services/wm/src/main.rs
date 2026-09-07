@@ -70,8 +70,13 @@ struct Attention {
     /// Banner em exibição: título + tamanho + o **Contexto a que pertence** (só aparece
     /// quando esse Contexto está ativo — um aviso não vaza para o Contexto errado).
     banner: Option<([u8; 64], u32, u8)>,
+    /// Janela de **origem** do banner (topo da sessão publicante no `notify`): um clique no
+    /// banner a ativa. `None` se a sessão não tinha janelas (ou a origem morreu).
+    banner_src: Option<u32>,
     /// Aviso à espera por Contexto inativo: não interrompe; aparece ao trocar para ele.
     pending: [Option<([u8; 64], u32)>; NUM_CONTEXTS as usize],
+    /// Origem de cada aviso à espera (sobe junto com ele).
+    pending_src: [Option<u32>; NUM_CONTEXTS as usize],
     dnd: bool,
     /// Preferência de acessibilidade: apps devem desligar animações.
     reduce_motion: bool,
@@ -405,7 +410,9 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let mut drag: Option<([u8; 256], u32)> = None;
     let mut attention = Attention {
         banner: None,
+        banner_src: None,
         pending: [None; NUM_CONTEXTS as usize],
+        pending_src: [None; NUM_CONTEXTS as usize],
         dnd: false,
         reduce_motion: false,
         theme: 0,
@@ -539,6 +546,41 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                             (EV_KEY, BTN_LEFT, 1) => {
                                 // captura em vigor: cliques são engolidos (ninguém rouba o foco)
                                 if grabbed.is_some() {
+                                    continue;
+                                }
+                                // AÇÃO NO AVISO: clique no banner (topo direito do display 0)
+                                // ativa a janela de origem — sobe, ganha o foco, evento a11y —
+                                // e recolhe o banner. Origem morta ou de outro Contexto: só
+                                // recolhe.
+                                if attention.banner.is_some()
+                                    && (OUT_W - 32..OUT_W).contains(&px)
+                                    && (0..10).contains(&py)
+                                {
+                                    attention.banner = None;
+                                    if let Some(i) = attention.banner_src.take()
+                                        && (i as usize) < MAX_SURFACES
+                                        && surfaces[i as usize].used
+                                        && surfaces[i as usize].context == active_ctx
+                                    {
+                                        let i = i as usize;
+                                        let top = surfaces
+                                            .iter()
+                                            .filter(|s| s.used)
+                                            .map(|s| s.z)
+                                            .max()
+                                            .unwrap_or(0);
+                                        surfaces[i].z = top.saturating_add(1);
+                                        focused = Some(i);
+                                        let (t, tl) = surfaces[i].title;
+                                        a11y_emit(&mut a11y, 1, i as u32, &t[..tl as usize]);
+                                    }
+                                    recompose(
+                                        &surfaces,
+                                        &outs,
+                                        fb.as_ref(),
+                                        active_ctx,
+                                        &attention,
+                                    );
                                     continue;
                                 }
                                 // foco por clique: traz para a frente a superfície sob o ponteiro.
@@ -970,6 +1012,8 @@ fn serve(
             }
             attention.log_n = 0;
             attention.pending = [None; NUM_CONTEXTS as usize];
+            attention.pending_src = [None; NUM_CONTEXTS as usize];
+            attention.banner_src = None;
             if attention.banner.take().is_some() {
                 recompose(surfaces, outs, fb, *active_ctx, attention);
             }
@@ -1028,12 +1072,14 @@ fn serve(
                 && c != *active_ctx
             {
                 attention.pending[c as usize] = Some((t, l));
+                attention.pending_src[c as usize] = attention.banner_src.take();
                 attention.banner = None;
             }
             if attention.banner.is_none()
                 && let Some((t, l)) = attention.pending[*active_ctx as usize].take()
             {
                 attention.banner = Some((t, l, *active_ctx));
+                attention.banner_src = attention.pending_src[*active_ctx as usize].take();
                 a11y_emit(a11y, 2, 0, &t[..l as usize]);
             }
             let top = surfaces
@@ -1199,24 +1245,31 @@ fn serve(
                 // O aviso pertence ao Contexto da janela de topo da sessão publicante (o wm
                 // atribui — a sessão não escolhe); sem janelas, ao Contexto ativo. Contexto
                 // inativo NÃO é interrompido: o aviso espera a troca.
-                let nctx = surfaces
+                // A janela de topo da sessão é a ORIGEM do aviso (um clique no banner a
+                // ativa) e define o Contexto dele.
+                let origem = surfaces
                     .iter()
-                    .filter(|s| s.used && s.owner == owner)
-                    .max_by_key(|s| s.z)
-                    .map(|s| s.context)
-                    .unwrap_or(*active_ctx);
+                    .enumerate()
+                    .filter(|(_, s)| s.used && s.owner == owner)
+                    .max_by_key(|(_, s)| s.z)
+                    .map(|(i, s)| (i as u32, s.context));
+                let nctx = origem.map_or(*active_ctx, |(_, c)| c);
+                let src = origem.map(|(i, _)| i);
                 if nctx == *active_ctx {
                     attention.banner = Some((title, t.len() as u32, nctx));
+                    attention.banner_src = src;
                     a11y_emit(a11y, 2, 0, t);
                     recompose(surfaces, outs, fb, *active_ctx, attention);
                 } else {
                     attention.pending[nctx as usize] = Some((title, t.len() as u32));
+                    attention.pending_src[nctx as usize] = src;
                 }
             }
             let m = wm::NotifyResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
         Request::DismissNotification(_) => {
+            attention.banner_src = None;
             if attention.banner.take().is_some() {
                 recompose(surfaces, outs, fb, *active_ctx, attention);
             }
@@ -1343,12 +1396,14 @@ fn serve(
                 && c != rq.context
             {
                 attention.pending[c as usize] = Some((t, l));
+                attention.pending_src[c as usize] = attention.banner_src.take();
                 attention.banner = None;
             }
             if attention.banner.is_none()
                 && let Some((t, l)) = attention.pending[rq.context as usize].take()
             {
                 attention.banner = Some((t, l, rq.context));
+                attention.banner_src = attention.pending_src[rq.context as usize].take();
                 a11y_emit(a11y, 2, 0, &t[..l as usize]);
             }
             // foco vai para a janela de maior z do contexto ativado (ou nenhuma)
