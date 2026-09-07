@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `800a8ce`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `fbdbffa`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 188 · 🟡 62 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 189 · 🟡 61 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -349,7 +349,7 @@ Gate: ⬜ não iniciado.
 | 6.4 Rede | 0 | 0 | 14 | 0% |
 | 6.5 Desktop e experiência | 0 | 0 | 16 | 0% |
 | 6.6 Aplicativos e SDK | 0 | 0 | 18 | 0% |
-| 6.7 Segurança e privacidade | 0 | 3 | 14 | 9% |
+| 6.7 Segurança e privacidade | 1 | 2 | 14 | 12% |
 | 6.8 Qualidade e confiabilidade | 3 | 2 | 11 | 25% |
 | 6.9 Acessibilidade e internacionalização | 0 | 0 | 14 | 0% |
 | 6.10 Distribuição e operação | 0 | 1 | 13 | 4% |
@@ -480,7 +480,7 @@ Gate: ⬜ não iniciado.
 
 | | Item | Evidência / nota |
 |---|---|---|
-| 🟡 | threat model atualizado | v0 em SECURITY.md |
+| ✅ | threat model atualizado | v1 (2026-09-07) em SECURITY.md: ativos, vetores, mitigações e lacunas do sistema com modo usuário, capabilities, rede, disco, compositor mediado, consentimento/revogação e atualizações A/B; o v0 só cobria o kernel em ring 0 |
 | ⬜ | privilégio mínimo |  |
 | ⬜ | isolamento de drivers e serviços |  |
 | 🟡 | W^X, NX, ASLR e guard pages | W^X, NX e guard pages ativos; ASLR pendente |

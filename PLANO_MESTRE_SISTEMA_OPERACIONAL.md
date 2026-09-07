@@ -783,7 +783,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 
 ### 6.7 Segurança e privacidade
 
-- [-] threat model atualizado — *v0 em SECURITY.md*;
+- [x] threat model atualizado — *v1 (2026-09-07) em SECURITY.md: ativos, vetores, mitigações e lacunas do sistema com modo usuário, capabilities, rede, disco, compositor mediado, consentimento/revogação e atualizações A/B; o v0 só cobria o kernel em ring 0*;
 - [ ] privilégio mínimo;
 - [ ] isolamento de drivers e serviços;
 - [-] W^X, NX, ASLR e guard pages — *W^X, NX e guard pages ativos; ASLR pendente*;
