@@ -676,7 +676,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [x] especificação da ABI de boot — *docs/spec/boot-abi.md*;
 - [x] memória física e virtual — *bitmap de quadros + paginação de 4 níveis; um espaço de endereçamento por processo, objetos de memória compartilháveis (`memory_create`/`map`/`unmap`), guard pages, heap do kernel crescendo sob demanda; SMP/afinidade no item seguinte*;
 - [x] SMP e afinidade — *4 CPUs no QEMU; afinidade por máscara (`spawn_on`, `set_affinity`)*;
-- [-] preempção e prioridades — *preempção sim; prioridades não*;
+- [x] preempção e prioridades — *preempção por quantum (10 ms) e **duas classes de prioridade** por thread (normal/baixa, herdadas no spawn): a fila prefere as normais e uma normal pronta preempta uma de baixa no tique seguinte (≤ 1 ms); `set_priority` (syscall 35) — auto-testes `threads_priority` e `user_priority` (bloco 98)*;
 - [-] temporizadores de alta resolução — *TSC em ns; timers despachados com resolução de 1 ms (tick)*;
 - [x] isolamento usuário/kernel — *ring 3 com espaços próprios; faltas de usuário não afetam o kernel*;
 - [x] syscalls versionadas — *`ABI_VERSION = 1` consultável (`abi_version`), tabela em `docs/spec/syscall-abi.md` com política aditiva (números e campos novos apenas; quebras sobem a versão); a promoção a **estável** é o item da Fase 6 (gate F6)*;

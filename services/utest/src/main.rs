@@ -115,6 +115,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         69 => reset_driver(),
         70 => backup_agenda_driver(),
         71 => repo_net_client(param as u16),
+        72 => priority_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -317,6 +318,7 @@ fn syscall_fuzz(seed: u64) -> ! {
             || n == SYS_PROCESS_WAIT
             || n == SYS_CHANNEL_WAIT_ANY
             || n == SYS_CHANNEL_WAIT_ANY_TIMEOUT
+            || n == SYS_SET_PRIORITY
             || n == SYS_MEMORY_CREATE
             || n == SYS_MEMORY_UNMAP
         {
@@ -5040,6 +5042,21 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         }
         nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
     }
+    nexo_sys::exit(0)
+}
+
+/// Modo 72: `set_priority` — 1 (baixa) e 0 (normal) aceitos, 9 recusado com InvalidArgs.
+fn priority_test() -> ! {
+    if nexo_sys::set_priority(1) != Status::Ok {
+        nexo_sys::exit(420);
+    }
+    if nexo_sys::set_priority(9) != Status::InvalidArgs {
+        nexo_sys::exit(421);
+    }
+    if nexo_sys::set_priority(0) != Status::Ok {
+        nexo_sys::exit(422);
+    }
+    nexo_sys::log("utest: set_priority ok — baixa, invalida recusada, normal de volta");
     nexo_sys::exit(0)
 }
 

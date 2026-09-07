@@ -15,7 +15,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::UnsafeCell;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use nexo_arch_x86_64::context::{nexo_switch_context, prepare_stack};
 use nexo_arch_x86_64::cpu;
 use nexo_sync::SpinLock;
@@ -72,6 +72,9 @@ pub struct Thread {
     pub last_cpu: AtomicUsize,
     /// Máscara de CPUs permitidas (bit i = CPU i).
     pub affinity: AtomicU64,
+    /// Prioridade: 0 = normal, 1 = baixa (segundo plano). Herdada de quem cria a thread. A
+    /// fila prefere as normais; uma normal pronta preempta uma de baixa no tique seguinte.
+    pub prio: AtomicU8,
     /// Processo dono (threads de kernel: `None`).
     pub process: Option<Arc<crate::process::Process>>,
     stack: Option<stack::Slot>,
@@ -128,6 +131,7 @@ struct Sched {
     reaped: u64,
     join_dedups: u64,
     join_skips: u64,
+    prio_preempts: u64,
 }
 
 const NONE_THREAD: Option<Arc<Thread>> = None;
@@ -146,6 +150,7 @@ static SCHED: SpinLock<Sched> = SpinLock::new(Sched {
     reaped: 0,
     join_dedups: 0,
     join_skips: 0,
+    prio_preempts: 0,
 });
 static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -171,6 +176,8 @@ pub struct Stats {
     pub join_dedups: u64,
     /// Esperadores de uma thread morta que NÃO estavam bloqueados (não são re-enfileirados).
     pub join_skips: u64,
+    /// Preempções de uma thread de baixa prioridade por uma normal pronta (antes do quantum).
+    pub prio_preempts: u64,
 }
 
 /// Estatísticas instantâneas.
@@ -187,6 +194,7 @@ pub fn stats() -> Stats {
             sleeping: g.sleepers.len(),
             join_dedups: g.join_dedups,
             join_skips: g.join_skips,
+            prio_preempts: g.prio_preempts,
         }
     })
 }
@@ -228,6 +236,7 @@ fn new_thread(
         runs: AtomicU64::new(0),
         last_cpu: AtomicUsize::new(usize::MAX),
         affinity: AtomicU64::new(u64::MAX),
+        prio: AtomicU8::new(0),
         process: None,
         stack,
         entry: UnsafeCell::new(entry),
@@ -408,6 +417,11 @@ fn spawn_full(
     }
     t.affinity
         .store(if mask == 0 { u64::MAX } else { mask }, Ordering::Relaxed);
+    // prioridade herdada de quem cria (um app em segundo plano gera filhos em segundo plano)
+    if let Some(cur) = current() {
+        t.prio
+            .store(cur.prio.load(Ordering::Relaxed), Ordering::Relaxed);
+    }
     // SAFETY: pilha recém-mapeada e exclusiva.
     unsafe {
         t.inner().sp = prepare_stack(slot.top, thread_main, Arc::as_ptr(&t) as usize);
@@ -449,7 +463,7 @@ fn schedule_locked(g: nexo_sync::SpinLockGuard<'static, Sched>, new_state: State
     let ci = cpu_data.index;
     let cur = g.running[ci].clone().expect("cpu sem thread atual");
     let idle = g.idle[ci].clone().expect("cpu sem idle");
-    let next = match g.run_queue.iter().position(|t| allowed_on(t, ci)) {
+    let next = match pick_next(&g.run_queue, ci) {
         Some(i) => g.run_queue.remove(i),
         None => idle.clone(),
     };
@@ -742,11 +756,31 @@ pub fn on_tick() {
         inner.quantum_left == 0
     };
     let has_work = g.run_queue.iter().any(|t| allowed_on(t, ci));
-    if has_work && (cur.is_idle || expired) {
+    // uma NORMAL pronta preempta a de baixa prioridade em execução já neste tique
+    let normal_waiting = cur.prio.load(Ordering::Relaxed) == 1 && normal_ready(&g.run_queue, ci);
+    if has_work && (cur.is_idle || expired || normal_waiting) {
         g.preemptions += 1;
+        if normal_waiting && !expired {
+            g.prio_preempts += 1;
+        }
         drop(cur);
         schedule_locked(g, State::Ready);
     }
+}
+
+/// Próxima da fila para a CPU `ci`: a primeira NORMAL permitida; sem nenhuma, a primeira de
+/// baixa prioridade permitida (FIFO dentro de cada classe). Baixa só roda quando nenhuma
+/// normal está pronta para essa CPU — é o contrato de "segundo plano".
+fn pick_next(q: &[Arc<Thread>], ci: usize) -> Option<usize> {
+    q.iter()
+        .position(|t| allowed_on(t, ci) && t.prio.load(Ordering::Relaxed) == 0)
+        .or_else(|| q.iter().position(|t| allowed_on(t, ci)))
+}
+
+/// Há uma thread NORMAL pronta que pode rodar na CPU `ci`?
+fn normal_ready(q: &[Arc<Thread>], ci: usize) -> bool {
+    q.iter()
+        .any(|t| allowed_on(t, ci) && t.prio.load(Ordering::Relaxed) == 0)
 }
 
 /// Chamado pelo handler da IPI RESCHED (após o EOI).
@@ -762,7 +796,10 @@ pub fn on_resched_ipi() {
     let Some(cur) = g.running[ci].clone() else {
         return;
     };
-    if cur.is_idle && g.run_queue.iter().any(|t| allowed_on(t, ci)) {
+    let low = cur.prio.load(Ordering::Relaxed) == 1;
+    if (cur.is_idle && g.run_queue.iter().any(|t| allowed_on(t, ci)))
+        || (low && normal_ready(&g.run_queue, ci))
+    {
         drop(cur);
         schedule_locked(g, State::Ready);
     }
@@ -782,6 +819,24 @@ pub fn set_affinity(id: ThreadId, mask: u64) -> bool {
         match g.all.iter().find(|t| t.id == id) {
             Some(t) => {
                 t.affinity.store(mask, Ordering::Relaxed);
+                true
+            }
+            None => false,
+        }
+    })
+}
+
+/// Muda a prioridade da thread `id` (0 = normal, 1 = baixa). `false` se não existe ou a
+/// prioridade é inválida.
+pub fn set_priority(id: ThreadId, prio: u8) -> bool {
+    if prio > 1 {
+        return false;
+    }
+    cpu::without_interrupts(|| {
+        let g = SCHED.lock();
+        match g.all.iter().find(|t| t.id == id) {
+            Some(t) => {
+                t.prio.store(prio, Ordering::Relaxed);
                 true
             }
             None => false,

@@ -302,6 +302,22 @@ fn sys_channel_wait_any(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     wait_any_impl(p, f, None)
 }
 
+/// `rdi` = 0 (normal) / 1 (baixa): prioridade da thread chamadora — um "nice" (processos
+/// criados a herdam), não uma fronteira de segurança.
+fn sys_set_priority(f: &TrapFrame) -> (Status, u64) {
+    if f.rdi > 1 {
+        return (Status::InvalidArgs, 0);
+    }
+    match sched::current() {
+        Some(t) => {
+            t.prio
+                .store(f.rdi as u8, core::sync::atomic::Ordering::Relaxed);
+            (Status::Ok, 0)
+        }
+        None => (Status::Denied, 0),
+    }
+}
+
 /// `rdx` = prazo em ns (0 = só sonda). `TimedOut` ao esgotar sem canal pronto.
 fn sys_channel_wait_any_timeout(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let deadline = crate::time::monotonic_ns().saturating_add(f.rdx);
@@ -897,6 +913,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_CHANNEL_TRY_RECV => sys_channel_recv(&p, f, true),
         SYS_CHANNEL_WAIT_ANY => sys_channel_wait_any(&p, f),
         SYS_CHANNEL_WAIT_ANY_TIMEOUT => sys_channel_wait_any_timeout(&p, f),
+        SYS_SET_PRIORITY => sys_set_priority(f),
         SYS_IRQ_CHANNEL => sys_irq_channel(&p, f),
         SYS_MEMORY_CREATE => sys_memory_create(&p, f),
         SYS_MEMORY_MAP => sys_memory_map(&p, f),

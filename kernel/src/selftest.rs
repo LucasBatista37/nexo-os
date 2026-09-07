@@ -62,6 +62,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("threads_multi_cpu", test_threads_multi_cpu),
     ("timers", test_timers),
     ("threads_affinity", test_threads_affinity),
+    ("threads_priority", test_threads_priority),
     ("user_process", test_user_process),
     ("user_isolation", test_user_isolation),
     ("user_syscall_error", test_user_syscall_error),
@@ -111,6 +112,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_devmgr", test_user_devmgr),
     ("user_vfs", test_user_vfs),
     ("user_wait_any", test_user_wait_any),
+    ("user_priority", test_user_priority),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -229,7 +231,7 @@ fn report_memory() {
     let s = sched::stats();
     let cur = sched::current();
     kprint!(
-        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} join_dedups={} join_skips={} atual={} estado={:?} pilha_propria={}\n",
+        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} join_dedups={} join_skips={} prio_preempts={} atual={} estado={:?} pilha_propria={}\n",
         s.alive,
         s.ready,
         s.sleeping,
@@ -238,6 +240,7 @@ fn report_memory() {
         s.preemptions,
         s.join_dedups,
         s.join_skips,
+        s.prio_preempts,
         cur.as_ref().map_or("?", |t| t.name),
         cur.as_ref().map(|t| t.state()),
         cur.as_ref().is_some_and(|t| t.stack_bounds().is_some())
@@ -985,6 +988,75 @@ fn test_threads_affinity() -> TestResult {
     );
     sched::reap();
     check!(crate::x86::percpu::current().index == 0, "principal migrou");
+    Ok(())
+}
+
+static PRIO_STOP: AtomicBool = AtomicBool::new(false);
+static PRIO_SPINS: AtomicUsize = AtomicUsize::new(0);
+
+fn prio_spinner(_: usize) {
+    while !PRIO_STOP.load(Ordering::Acquire) {
+        PRIO_SPINS.fetch_add(1, Ordering::Relaxed);
+        core::hint::spin_loop();
+    }
+}
+
+fn prio_pinger(n: usize) {
+    for _ in 0..n {
+        sched::sleep_ms(1);
+    }
+}
+
+/// Prioridades: dois giradores de BAIXA prioridade presos à CPU 1 e uma thread NORMAL na
+/// mesma CPU fazendo 100 ciclos dormir-1 ms/acordar. Com prioridades, cada despertar
+/// preempta o girador no tique seguinte (~2–3 ms por ciclo); sem, cada despertar esperaria
+/// até dois quanta de 10 ms (~1–2 s no total). Os giradores ainda progridem (rodam
+/// enquanto a normal dorme).
+fn test_threads_priority() -> TestResult {
+    let n = crate::x86::percpu::online_count();
+    check!(n >= 2, "precisa de 2 CPUs (ha {n})");
+    PRIO_STOP.store(false, Ordering::Relaxed);
+    PRIO_SPINS.store(0, Ordering::Relaxed);
+    let s0 = sched::stats();
+    let a = sched::spawn_on("baixa-a", prio_spinner, 0, 1);
+    let b = sched::spawn_on("baixa-b", prio_spinner, 0, 1);
+    check!(
+        sched::set_priority(a, 1) && sched::set_priority(b, 1),
+        "set_priority"
+    );
+    check!(!sched::set_priority(a, 2), "prioridade invalida aceita");
+    check!(
+        !sched::set_priority(usize::MAX, 1),
+        "set_priority de id inexistente"
+    );
+    let t0 = crate::time::monotonic_ns();
+    let p = sched::spawn_on("normal", prio_pinger, 100, 1);
+    check!(sched::join(p), "join da thread normal");
+    let dt_ms = (crate::time::monotonic_ns() - t0) / 1_000_000;
+    PRIO_STOP.store(true, Ordering::Release);
+    check!(sched::join(a) && sched::join(b), "join dos giradores");
+    let s1 = sched::stats();
+    check!(
+        s1.prio_preempts > s0.prio_preempts,
+        "nenhuma preempcao por prioridade ({} -> {})",
+        s0.prio_preempts,
+        s1.prio_preempts
+    );
+    check!(
+        PRIO_SPINS.load(Ordering::Relaxed) > 0,
+        "giradores de baixa prioridade nunca rodaram"
+    );
+    check!(
+        dt_ms < 1000,
+        "100 ciclos da thread normal levaram {dt_ms} ms com giradores de baixa prioridade na CPU"
+    );
+    sched::reap();
+    Ok(())
+}
+
+fn test_user_priority() -> TestResult {
+    let code = run_utest(72)?;
+    check!(code == 0, "set_priority saiu com {code}");
     Ok(())
 }
 

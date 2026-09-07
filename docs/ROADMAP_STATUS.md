@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `11148e7`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `800a8ce`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 187 · 🟡 63 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 188 · 🟡 62 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -343,7 +343,7 @@ Gate: ⬜ não iniciado.
 
 | Frente | ✅ | 🟡 | ⬜ | % |
 |---|---|---|---|---|
-| 6.1 Kernel e baixo nível | 7 | 3 | 4 | 61% |
+| 6.1 Kernel e baixo nível | 8 | 2 | 4 | 64% |
 | 6.2 Drivers | 0 | 1 | 15 | 3% |
 | 6.3 Armazenamento | 0 | 0 | 14 | 0% |
 | 6.4 Rede | 0 | 0 | 14 | 0% |
@@ -361,7 +361,7 @@ Gate: ⬜ não iniciado.
 | ✅ | especificação da ABI de boot | docs/spec/boot-abi.md |
 | ✅ | memória física e virtual | bitmap de quadros + paginação de 4 níveis; um espaço de endereçamento por processo, objetos de memória compartilháveis (`memory_create`/`map`/`unmap`), guard pages, heap do kernel crescendo sob demanda; SMP/afinidade no item seguinte |
 | ✅ | SMP e afinidade | 4 CPUs no QEMU; afinidade por máscara (`spawn_on`, `set_affinity`) |
-| 🟡 | preempção e prioridades | preempção sim; prioridades não |
+| ✅ | preempção e prioridades | preempção por quantum (10 ms) e **duas classes de prioridade** por thread (normal/baixa, herdadas no spawn): a fila prefere as normais e uma normal pronta preempta uma de baixa no tique seguinte (≤ 1 ms); `set_priority` (syscall 35) — auto-testes `threads_priority` e `user_priority` (bloco 98) |
 | 🟡 | temporizadores de alta resolução | TSC em ns; timers despachados com resolução de 1 ms (tick) |
 | ✅ | isolamento usuário/kernel | ring 3 com espaços próprios; faltas de usuário não afetam o kernel |
 | ✅ | syscalls versionadas | `ABI_VERSION = 1` consultável (`abi_version`), tabela em `docs/spec/syscall-abi.md` com política aditiva (números e campos novos apenas; quebras sobem a versão); a promoção a **estável** é o item da Fase 6 (gate F6) |

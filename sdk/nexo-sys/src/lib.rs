@@ -444,6 +444,14 @@ pub fn channel_wait_any_timeout(handles: &[Handle], timeout_ns: u64) -> Result<u
     if st.is_ok() { Ok(v as usize) } else { Err(st) }
 }
 
+/// Prioridade da thread chamadora: 0 = normal, 1 = baixa (segundo plano). Um "nice": a fila
+/// do escalonador prefere as normais e uma normal pronta preempta uma de baixa no tique
+/// seguinte; processos criados herdam. `InvalidArgs` fora de 0/1.
+pub fn set_priority(prio: u8) -> Status {
+    // SAFETY: syscall sem ponteiros.
+    unsafe { raw(abi::SYS_SET_PRIORITY, prio as u64, 0, 0) }.0
+}
+
 /// Cria um objeto de memória compartilhável de `pages` páginas de 4 KiB (zeradas).
 pub fn memory_create(pages: u64) -> Result<Handle, Status> {
     // SAFETY: sem ponteiros.

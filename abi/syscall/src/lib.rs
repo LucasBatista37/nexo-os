@@ -116,8 +116,14 @@ pub const SYS_TRACE: u64 = 33;
 /// objeto novo. Aditivo (2026-09-05).
 pub const SYS_CHANNEL_WAIT_ANY_TIMEOUT: u64 = 34;
 
+/// Prioridade da thread chamadora: `rdi` = 0 (normal) / 1 (baixa, segundo plano). Um
+/// "nice", não uma fronteira de segurança: a fila do escalonador prefere as normais e uma
+/// normal pronta preempta uma de baixa no tique seguinte; processos criados herdam a
+/// prioridade. `InvalidArgs` fora de 0/1. Aditivo (2026-09-05).
+pub const SYS_SET_PRIORITY: u64 = 35;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 34;
+pub const SYS_MAX: u64 = 35;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -416,6 +422,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_PROCESS_SPAWN_MEM => "process_spawn_mem",
         SYS_TRACE => "trace",
         SYS_CHANNEL_WAIT_ANY_TIMEOUT => "channel_wait_any_timeout",
+        SYS_SET_PRIORITY => "set_priority",
         _ => "?",
     }
 }
