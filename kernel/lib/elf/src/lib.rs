@@ -13,6 +13,15 @@ pub const PF_R: u32 = 4;
 
 const EM_X86_64: u16 = 0x3e;
 const ET_EXEC: u16 = 2;
+const ET_DYN: u16 = 3;
+/// Segmento com a tabela dinâmica (`PT_DYNAMIC`).
+pub const PT_DYNAMIC: u32 = 2;
+/// Relocação `R_X86_64_RELATIVE`: escreve `base + addend` em `base + offset`.
+pub const R_X86_64_RELATIVE: u32 = 8;
+const DT_NULL: u64 = 0;
+const DT_RELA: u64 = 7;
+const DT_RELASZ: u64 = 8;
+const DT_RELAENT: u64 = 9;
 
 /// Erros de análise.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -21,7 +30,7 @@ pub enum ElfError {
     NotElf,
     /// Não é ELF64 little-endian.
     WrongClass,
-    /// Não é `ET_EXEC` (estático, sem relocação).
+    /// Não é `ET_EXEC` (nem `ET_DYN`, quando o chamador aceita PIE).
     NotExecutable,
     /// Não é x86_64.
     WrongMachine,
@@ -81,11 +90,23 @@ impl ProgramHeader {
 #[derive(Clone, Copy, Debug)]
 pub struct ElfFile<'a> {
     data: &'a [u8],
-    /// Ponto de entrada.
+    /// Ponto de entrada (relativo à base, num PIE).
     pub entry: u64,
     phoff: usize,
     phentsize: usize,
     phnum: usize,
+    dynamic: bool,
+}
+
+/// Uma entrada `Elf64_Rela`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rela {
+    /// Endereço (relativo à base) a corrigir.
+    pub offset: u64,
+    /// Tipo (`R_X86_64_*`).
+    pub kind: u32,
+    /// Adendo.
+    pub addend: i64,
 }
 
 fn u16_at(b: &[u8], o: usize) -> Option<u16> {
@@ -99,15 +120,26 @@ fn u64_at(b: &[u8], o: usize) -> Option<u64> {
 }
 
 impl<'a> ElfFile<'a> {
-    /// Valida cabeçalho: ELF64, little-endian, x86_64, executável estático.
+    /// Valida cabeçalho: ELF64, little-endian, x86_64, executável estático (`ET_EXEC`).
     pub fn parse(data: &'a [u8]) -> Result<Self, ElfError> {
+        Self::parse_with(data, false)
+    }
+
+    /// Como [`ElfFile::parse`], aceitando também PIE (`ET_DYN`, endereços relativos à base
+    /// que o carregador escolher; ver [`ElfFile::relocations`]).
+    pub fn parse_any(data: &'a [u8]) -> Result<Self, ElfError> {
+        Self::parse_with(data, true)
+    }
+
+    fn parse_with(data: &'a [u8], allow_dyn: bool) -> Result<Self, ElfError> {
         if data.get(0..4) != Some(b"\x7fELF") {
             return Err(ElfError::NotElf);
         }
         if data.get(4) != Some(&2) || data.get(5) != Some(&1) {
             return Err(ElfError::WrongClass);
         }
-        if u16_at(data, 0x10).ok_or(ElfError::Truncated)? != ET_EXEC {
+        let e_type = u16_at(data, 0x10).ok_or(ElfError::Truncated)?;
+        if e_type != ET_EXEC && !(allow_dyn && e_type == ET_DYN) {
             return Err(ElfError::NotExecutable);
         }
         if u16_at(data, 0x12).ok_or(ElfError::Truncated)? != EM_X86_64 {
@@ -132,7 +164,74 @@ impl<'a> ElfFile<'a> {
             phoff,
             phentsize,
             phnum,
+            dynamic: e_type == ET_DYN,
         })
+    }
+
+    /// `true` se é PIE (`ET_DYN`): segmentos e entrada são relativos a uma base.
+    pub fn is_dyn(&self) -> bool {
+        self.dynamic
+    }
+
+    /// Relocações da tabela `DT_RELA` (via `PT_DYNAMIC`). Vazio sem tabela dinâmica.
+    /// `BadSegment` se a tabela aponta para fora dos segmentos carregáveis do arquivo.
+    pub fn relocations(&self) -> Result<impl Iterator<Item = Rela> + 'a, ElfError> {
+        let data = self.data;
+        let (mut rela_vaddr, mut rela_size, mut rela_ent) = (0u64, 0u64, 24u64);
+        let dynseg = self.program_headers().find(|p| p.p_type == PT_DYNAMIC);
+        if self.dynamic && dynseg.is_none() {
+            // um PIE sem PT_DYNAMIC arrancaria sem relocações e cairia com ponteiros nulos
+            return Err(ElfError::BadSegment);
+        }
+        if let Some(dynseg) = dynseg {
+            let dynbytes = self.segment_data(&dynseg)?;
+            let mut i = 0;
+            while i + 16 <= dynbytes.len() {
+                let tag = u64_at(dynbytes, i).ok_or(ElfError::Truncated)?;
+                let val = u64_at(dynbytes, i + 8).ok_or(ElfError::Truncated)?;
+                match tag {
+                    DT_NULL => break,
+                    DT_RELA => rela_vaddr = val,
+                    DT_RELASZ => rela_size = val,
+                    DT_RELAENT => rela_ent = val,
+                    _ => {}
+                }
+                i += 16;
+            }
+        }
+        if rela_ent != 24 || !rela_size.is_multiple_of(24) {
+            return Err(ElfError::BadSegment);
+        }
+        // endereço virtual da tabela -> deslocamento no arquivo, pelo segmento que a contém
+        let (off, n) = if rela_size == 0 {
+            (0usize, 0usize)
+        } else {
+            let seg = self
+                .load_segments()
+                .find(|p| {
+                    rela_vaddr >= p.p_vaddr
+                        && rela_vaddr
+                            .checked_add(rela_size)
+                            .is_some_and(|end| end <= p.p_vaddr + p.p_filesz)
+                })
+                .ok_or(ElfError::BadSegment)?;
+            let off = (seg.p_offset + (rela_vaddr - seg.p_vaddr)) as usize;
+            if off
+                .checked_add(rela_size as usize)
+                .is_none_or(|end| end > data.len())
+            {
+                return Err(ElfError::BadSegment);
+            }
+            (off, (rela_size / 24) as usize)
+        };
+        Ok((0..n).filter_map(move |i| {
+            let b = &data[off + i * 24..];
+            Some(Rela {
+                offset: u64_at(b, 0)?,
+                kind: u64_at(b, 8)? as u32,
+                addend: u64_at(b, 16)? as i64,
+            })
+        }))
     }
 
     /// Itera os program headers.
@@ -242,13 +341,16 @@ mod tests {
         let mut ok = 0;
         for _ in 0..20_000 {
             let input = mutate(&mut rng, &base);
-            if let Ok(elf) = ElfFile::parse(&input) {
+            if let Ok(elf) = ElfFile::parse_any(&input) {
                 ok += 1;
                 for ph in elf.program_headers() {
                     let _ = elf.segment_data(&ph);
                     let _ = ph.is_load();
                 }
                 let _ = elf.address_range();
+                if let Ok(it) = elf.relocations() {
+                    let _ = it.count();
+                }
             }
         }
         assert!(
@@ -306,6 +408,51 @@ mod tests {
         assert!(segs[1].writable());
         assert_eq!(elf.segment_data(&segs[0]).unwrap().len(), 32);
         assert_eq!(elf.address_range(), Some((0x40_0000, 0x40_2000 + 24)));
+    }
+
+    #[test]
+    fn pie_is_accepted_only_by_parse_any_and_yields_relative_relocs() {
+        // PT_LOAD cobre 0x1000..0x1200 (arquivo 0x100..0x300); PT_DYNAMIC em 0x1100 (arquivo
+        // 0x200): DT_RELA -> 0x1180 (arquivo 0x280), 1 entrada RELATIVE {0x1010, +0x1234}.
+        let mut d = synthetic(
+            0x1040,
+            &[(1, 6, 0x100, 0x1000, 0x200), (2, 6, 0x200, 0x1100, 0x40)],
+        );
+        d[0x10] = 3; // ET_DYN
+        let dynents: [(u64, u64); 4] = [(7, 0x1180), (8, 24), (9, 24), (0, 0)];
+        for (i, (tag, val)) in dynents.iter().enumerate() {
+            d[0x200 + i * 16..0x200 + i * 16 + 8].copy_from_slice(&tag.to_le_bytes());
+            d[0x208 + i * 16..0x208 + i * 16 + 8].copy_from_slice(&val.to_le_bytes());
+        }
+        d[0x280..0x288].copy_from_slice(&0x1010u64.to_le_bytes());
+        d[0x288..0x290].copy_from_slice(&8u64.to_le_bytes());
+        d[0x290..0x298].copy_from_slice(&0x1234u64.to_le_bytes());
+        assert_eq!(ElfFile::parse(&d).unwrap_err(), ElfError::NotExecutable);
+        let elf = ElfFile::parse_any(&d).unwrap();
+        assert!(elf.is_dyn());
+        let relas: Vec<_> = elf.relocations().unwrap().collect();
+        assert_eq!(
+            relas,
+            vec![Rela {
+                offset: 0x1010,
+                kind: R_X86_64_RELATIVE,
+                addend: 0x1234
+            }]
+        );
+        // estatico sem PT_DYNAMIC: sem relocacoes
+        let e = synthetic(0x40_1000, &[(1, 5, 0x100, 0x40_0000, 32)]);
+        let elf = ElfFile::parse_any(&e).unwrap();
+        assert!(!elf.is_dyn());
+        assert_eq!(elf.relocations().unwrap().count(), 0);
+        // tabela apontando para fora do segmento: recusada, sem panico
+        d[0x208..0x210].copy_from_slice(&0x9000u64.to_le_bytes());
+        let elf = ElfFile::parse_any(&d).unwrap();
+        assert!(elf.relocations().is_err());
+        // PIE sem PT_DYNAMIC (linker script sem o phdr): recusado, nao carregado sem relocacoes
+        let mut e = synthetic(0x1040, &[(1, 6, 0x100, 0x1000, 0x200)]);
+        e[0x10] = 3;
+        let elf = ElfFile::parse_any(&e).unwrap();
+        assert!(elf.is_dyn() && elf.relocations().is_err());
     }
 
     #[test]

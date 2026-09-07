@@ -1071,6 +1071,11 @@ fn test_user_aslr() -> TestResult {
         a != b,
         "dois processos com pilha e mapeamentos nos mesmos enderecos ({a:#x})"
     );
+    check!(
+        (a >> 32) != (b >> 32),
+        "PIE: dois processos com o codigo na mesma pagina ({:#x})",
+        a >> 32
+    );
     Ok(())
 }
 

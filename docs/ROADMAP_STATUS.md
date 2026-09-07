@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `351f77d`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `ca5524d`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 189 · 🟡 61 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 190 · 🟡 60 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -349,7 +349,7 @@ Gate: ⬜ não iniciado.
 | 6.4 Rede | 0 | 0 | 14 | 0% |
 | 6.5 Desktop e experiência | 0 | 0 | 16 | 0% |
 | 6.6 Aplicativos e SDK | 0 | 0 | 18 | 0% |
-| 6.7 Segurança e privacidade | 1 | 2 | 14 | 12% |
+| 6.7 Segurança e privacidade | 2 | 1 | 14 | 15% |
 | 6.8 Qualidade e confiabilidade | 3 | 2 | 11 | 25% |
 | 6.9 Acessibilidade e internacionalização | 0 | 0 | 14 | 0% |
 | 6.10 Distribuição e operação | 0 | 1 | 13 | 4% |
@@ -483,7 +483,7 @@ Gate: ⬜ não iniciado.
 | ✅ | threat model atualizado | v1 (2026-09-07) em SECURITY.md: ativos, vetores, mitigações e lacunas do sistema com modo usuário, capabilities, rede, disco, compositor mediado, consentimento/revogação e atualizações A/B; o v0 só cobria o kernel em ring 0 |
 | ⬜ | privilégio mínimo |  |
 | ⬜ | isolamento de drivers e serviços |  |
-| 🟡 | W^X, NX, ASLR e guard pages | W^X, NX e guard pages ativos; **ASLR de pilha** (topo aleatório numa janela de 1 GiB, 18 bits) **e de mapeamentos** (região começa num deslocamento aleatório de até 4 GiB, 20 bits) por processo, `rdrand` ou xorshift semeado pelo TSC — auto-teste `user_aslr` (bloco 100); o código do ELF é fixo: PIE pendente |
+| ✅ | W^X, NX, ASLR e guard pages | W^X, NX e guard pages ativos; **ASLR completo** por processo: pilha (janela de 1 GiB, 18 bits), mapeamentos (4 GiB, 20 bits) e **código** — os programas Rust são PIE (`ET_DYN`) carregados numa base aleatória (1 TiB, 28 bits) com as relocações `R_X86_64_RELATIVE` aplicadas pelo kernel; `rdrand` ou xorshift semeado pelo TSC — auto-teste `user_aslr` (blocos 100 e 102). Programas C do toolchain continuam `ET_EXEC` em endereço fixo |
 | ⬜ | IOMMU |  |
 | ⬜ | consentimento de câmera/microfone/rede/arquivos |  |
 | ⬜ | indicadores de privacidade resistentes a falsificação |  |

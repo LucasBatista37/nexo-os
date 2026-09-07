@@ -29,6 +29,11 @@ pub const USER_STACK_WINDOW: u64 = 1 << 30;
 /// Janela do ASLR dos mapeamentos: a região de dispositivos/objetos de memória de cada
 /// processo começa até 4 GiB depois de `USER_DEVICE_REGION` (20 bits de entropia).
 pub const USER_MAP_WINDOW: u64 = 4 << 30;
+/// Base mínima de um PIE e janela do ASLR de código: a base é aleatória (alinhada a página)
+/// em `[USER_CODE_BASE, USER_CODE_BASE + USER_CODE_WINDOW)` (28 bits de entropia).
+pub const USER_CODE_BASE: u64 = 0x1000_0000;
+/// Ver [`USER_CODE_BASE`].
+pub const USER_CODE_WINDOW: u64 = 1 << 40;
 
 /// Espaço de endereçamento de um processo.
 pub struct AddressSpace {
@@ -269,12 +274,25 @@ pub fn spawn_elf_with_handles(
     arg: u64,
     handles: Vec<crate::ipc::Handle>,
 ) -> Result<Arc<Process>, &'static str> {
-    let elf = ElfFile::parse(elf_bytes).map_err(|_| "ELF invalido")?;
+    let elf = ElfFile::parse_any(elf_bytes).map_err(|_| "ELF invalido")?;
     let space = AddressSpace::new().ok_or("sem memoria para o espaco")?;
+    // PIE: base aleatória (ASLR de código); ET_EXEC: endereços do arquivo (base 0)
+    let base = if elf.is_dyn() {
+        USER_CODE_BASE + crate::aslr::page_offset(USER_CODE_WINDOW / PAGE_SIZE)
+    } else {
+        0
+    };
     let (lo, hi) = elf.address_range().ok_or("ELF sem segmentos")?;
+    let (lo, hi) = (
+        lo.checked_add(base)
+            .ok_or("segmentos fora da faixa de usuario")?,
+        hi.checked_add(base)
+            .ok_or("segmentos fora da faixa de usuario")?,
+    );
     if lo < PAGE_SIZE || hi > USER_STACK_TOP - USER_STACK_WINDOW - USER_STACK_SIZE - PAGE_SIZE {
         return Err("segmentos fora da faixa de usuario");
     }
+    let entry = elf.entry.wrapping_add(base);
     for ph in elf.load_segments() {
         if ph.writable() && ph.executable() {
             return Err("segmento W+X");
@@ -289,8 +307,8 @@ pub fn spawn_elf_with_handles(
         if !ph.executable() {
             flags |= PageFlags::NO_EXECUTE;
         }
-        let vstart = align_down(ph.p_vaddr, PAGE_SIZE);
-        let vend = align_up(ph.p_vaddr + ph.p_memsz, PAGE_SIZE);
+        let vstart = align_down(ph.p_vaddr + base, PAGE_SIZE);
+        let vend = align_up(ph.p_vaddr + base + ph.p_memsz, PAGE_SIZE);
         let mut v = vstart;
         while v < vend {
             match space.map_user_page(VirtAddr::new(v), flags) {
@@ -301,11 +319,30 @@ pub fn spawn_elf_with_handles(
             v += PAGE_SIZE;
         }
         space
-            .write(VirtAddr::new(ph.p_vaddr), data)
+            .write(VirtAddr::new(ph.p_vaddr + base), data)
             .map_err(|_| "falha ao copiar segmento")?;
     }
-    if !(lo..hi).contains(&elf.entry) {
+    if !(lo..hi).contains(&entry) {
         return Err("entrada fora dos segmentos");
+    }
+    // PIE: aplica as relocações (só R_X86_64_RELATIVE existe num PIE estático: base + adendo)
+    if elf.is_dyn() {
+        let relas = elf
+            .relocations()
+            .map_err(|_| "tabela de relocacao invalida")?;
+        for r in relas {
+            if r.kind != nexo_elf::R_X86_64_RELATIVE {
+                return Err("relocacao nao suportada");
+            }
+            let at = r.offset.wrapping_add(base);
+            if at < lo || at.checked_add(8).is_none_or(|end| end > hi) {
+                return Err("relocacao fora dos segmentos");
+            }
+            let val = (base as i64).wrapping_add(r.addend) as u64;
+            space
+                .write(VirtAddr::new(at), &val.to_le_bytes())
+                .map_err(|_| "falha ao aplicar relocacao")?;
+        }
     }
     // ASLR: o topo da pilha é aleatório (alinhado a página) numa janela de 1 GiB abaixo de
     // `USER_STACK_TOP` — nada no espaço de usuário depende do endereço fixo (a pilha chega em RSP)
@@ -348,7 +385,7 @@ pub fn spawn_elf_with_handles(
     }
     SPAWNED.fetch_add(1, Ordering::Relaxed);
     let start = alloc::boxed::Box::new(UserStart {
-        entry: elf.entry,
+        entry,
         user_sp: stack_top - 8,
         arg,
     });
@@ -363,7 +400,7 @@ pub fn spawn_elf_with_handles(
         "process: '{}' pid {} entry {:#x} ({} quadros) thread {} arg {} pilha {:#x}",
         name,
         process.pid,
-        elf.entry,
+        entry,
         process.space.frame_count(),
         tid,
         arg,
