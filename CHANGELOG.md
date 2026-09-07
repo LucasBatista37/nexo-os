@@ -328,6 +328,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Quatro cláusulas do plano estavam atrás do código: "ABI C pendente" (existe: `nexo.h`, protocolos C gerados, nexo-libc, toolchain), "falta SMP/afinidade" no item de memória (é o item seguinte, `[x]`), "v0 instável" nas syscalls versionadas (`ABI_VERSION = 1` com política aditiva) e "dump completo pendente" (o dump em disco existe desde a Fase 8) — agora `[x]` com o que há e o que fica para os itens certos.
 - Relatório `docs/progress/2026-09-05-contextos-e-kernel.md`: blocos 89–95 — sockets em C, painel de escala (e o bug das coordenadas do ponteiro), documentos por Contexto, ADR-0017, revogação fina por proxy, o **bug do escalonador** que ela revelou (despertar espúrio no `join`) e as ações nos avisos.
 
+### Adicionado (Fase 6, bloco 97 — espera múltipla com prazo)
+- Syscall **34 `channel_wait_any_timeout`** (aditiva): como `channel_wait_any`, com prazo em ns (`rdx`; 0 = só sonda) e novo `Status::TimedOut` (12). Granularidade do tique de cobertura (10 ms). É o timer de usuário simples: um laço de eventos dorme até o próximo evento OU o fim do prazo. `nexo-sys::channel_wait_any_timeout`; spec e nomes atualizados; o fuzz de syscalls a exclui (bloqueante).
+- Lançador: a permissão temporária deixa de sondar a cada 20 ms (espera com prazo); o proxy da sessão é recolhido quando uma ponta morre (uma ponta fechada fica "pronta" para sempre e transformaria a espera em sondagem).
+- Teste `user_wait_any` (modo 16): prazo sem mensagem → `TimedOut` em ≥ 50 ms (< 1 s); com mensagem na fila → índice sem esperar; prazo zero = sonda.
+
 ### Adicionado (Fase 6, bloco 95 — ações nos avisos)
 - Um clique no banner de notificação **ativa a janela de origem** do aviso (a de topo da sessão publicante no `notify`: sobe, ganha o foco, evento a11y) e recolhe o banner. A origem acompanha o aviso que espera por um Contexto inativo; origem morta ou de outro Contexto só recolhe. Sem mudança de protocolo.
 - Teste `user_wm_notify`: a janela vermelha de origem é coberta por um clique na azul; o clique no banner a traz de volta e o banner some. Fecha o item de notificações: banner, dismiss, não-perturbe, Central (registro de 8 + limpar), avisos por Contexto e ação.

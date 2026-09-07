@@ -316,6 +316,7 @@ fn syscall_fuzz(seed: u64) -> ! {
             || n == SYS_CHANNEL_RECV
             || n == SYS_PROCESS_WAIT
             || n == SYS_CHANNEL_WAIT_ANY
+            || n == SYS_CHANNEL_WAIT_ANY_TIMEOUT
             || n == SYS_MEMORY_CREATE
             || n == SYS_MEMORY_UNMAP
         {
@@ -5089,7 +5090,43 @@ fn wait_any_test() -> ! {
     if nexo_sys::channel_wait_any(&[9999]) != Err(Status::BadHandle) {
         nexo_sys::exit(408);
     }
-    nexo_sys::log("utest: wait_any ok");
+    // 5. COM PRAZO: nada chega em a1 -> TimedOut depois de >= 50 ms (e bem antes de 1 s)
+    let t0 = nexo_sys::time_now();
+    match nexo_sys::channel_wait_any_timeout(&[a1], 50_000_000) {
+        Err(Status::TimedOut) => {}
+        r => {
+            nexo_rt::log!("utest: wait_any_timeout sem mensagem devolveu {:?}", r);
+            nexo_sys::exit(409)
+        }
+    }
+    let dt = nexo_sys::time_now() - t0;
+    if !(50_000_000..1_000_000_000).contains(&dt) {
+        nexo_rt::log!("utest: wait_any_timeout esperou {} ns", dt);
+        nexo_sys::exit(410);
+    }
+    // 6. com prazo mas mensagem na fila -> indice, sem esperar o prazo
+    if nexo_sys::channel_send(b1, b"agora", &[]) != Status::Ok {
+        nexo_sys::exit(411);
+    }
+    let t0 = nexo_sys::time_now();
+    match nexo_sys::channel_wait_any_timeout(&[a1], 2_000_000_000) {
+        Ok(0) => {}
+        r => {
+            nexo_rt::log!("utest: wait_any_timeout com mensagem devolveu {:?}", r);
+            nexo_sys::exit(412)
+        }
+    }
+    if nexo_sys::time_now() - t0 >= 1_000_000_000 {
+        nexo_sys::exit(413); // esperou o prazo inteiro com mensagem na fila
+    }
+    // 7. prazo zero = sonda: fila vazia -> TimedOut imediato
+    let _ = nexo_sys::channel_recv(a1, &mut buf, &mut hs);
+    if nexo_sys::channel_wait_any_timeout(&[a1], 0) != Err(Status::TimedOut) {
+        nexo_sys::exit(414);
+    }
+    nexo_sys::log(
+        "utest: wait_any ok — pronto, indice, par fechado, erros e PRAZO (timeout/imediato/sonda)",
+    );
     nexo_sys::exit(0)
 }
 

@@ -428,6 +428,22 @@ pub fn channel_wait_any(handles: &[Handle]) -> Result<usize, Status> {
     if st.is_ok() { Ok(v as usize) } else { Err(st) }
 }
 
+/// Como [`channel_wait_any`], mas desiste depois de `timeout_ns` (0 = só sonda) com
+/// `Err(Status::TimedOut)`. Granularidade de 10 ms. Serve de timer de usuário: um laço de
+/// eventos com prazo dorme até o próximo evento OU o fim do prazo, sem sondar.
+pub fn channel_wait_any_timeout(handles: &[Handle], timeout_ns: u64) -> Result<usize, Status> {
+    // SAFETY: ponteiro e tamanho vêm de uma slice válida.
+    let (st, v) = unsafe {
+        raw(
+            abi::SYS_CHANNEL_WAIT_ANY_TIMEOUT,
+            handles.as_ptr() as u64,
+            handles.len() as u64,
+            timeout_ns,
+        )
+    };
+    if st.is_ok() { Ok(v as usize) } else { Err(st) }
+}
+
 /// Cria um objeto de memória compartilhável de `pages` páginas de 4 KiB (zeradas).
 pub fn memory_create(pages: u64) -> Result<Handle, Status> {
     // SAFETY: sem ponteiros.

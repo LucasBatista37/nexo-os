@@ -110,8 +110,14 @@ pub const SYS_PROCESS_SPAWN_MEM: u64 = 32;
 /// eventos `{tsc: u64, pid: u32, nr: u16, _: u16}`; anel global com os últimos 4096.
 pub const SYS_TRACE: u64 = 33;
 
+/// Como [`SYS_CHANNEL_WAIT_ANY`], com **prazo**: `rdx` = nanossegundos (0 = só sonda).
+/// Devolve o índice do primeiro canal pronto ou [`Status::TimedOut`] ao esgotar o prazo
+/// (granularidade do tique de cobertura, 10 ms). Cobre timers de usuário simples sem um
+/// objeto novo. Aditivo (2026-09-05).
+pub const SYS_CHANNEL_WAIT_ANY_TIMEOUT: u64 = 34;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 33;
+pub const SYS_MAX: u64 = 34;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -321,6 +327,8 @@ pub enum Status {
     TooBig = 10,
     /// Fila cheia.
     QueueFull = 11,
+    /// O prazo de uma espera esgotou sem nenhum canal pronto.
+    TimedOut = 12,
     /// Valor desconhecido (reservado).
     Unknown = u64::MAX,
 }
@@ -341,6 +349,7 @@ impl Status {
             9 => Status::WouldBlock,
             10 => Status::TooBig,
             11 => Status::QueueFull,
+            12 => Status::TimedOut,
             _ => Status::Unknown,
         }
     }
@@ -363,6 +372,7 @@ impl Status {
             Status::WouldBlock => "would-block",
             Status::TooBig => "too-big",
             Status::QueueFull => "queue-full",
+            Status::TimedOut => "timed-out",
             Status::Unknown => "unknown",
         }
     }
@@ -405,6 +415,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_FB_INFO => "fb_info",
         SYS_PROCESS_SPAWN_MEM => "process_spawn_mem",
         SYS_TRACE => "trace",
+        SYS_CHANNEL_WAIT_ANY_TIMEOUT => "channel_wait_any_timeout",
         _ => "?",
     }
 }
@@ -427,6 +438,7 @@ mod tests {
             Status::BadHandle,
             Status::TooBig,
             Status::QueueFull,
+            Status::TimedOut,
         ] {
             assert_eq!(Status::from_u64(s as u64), s);
         }

@@ -36,12 +36,19 @@ fn fail(code: i64, what: &str) -> ! {
 
 /// Retransmite tudo o que estiver enfileirado em `de` para `para` — mensagens E handles (um
 /// `create_surface` devolve um MemoryObject; ele atravessa o proxy). Para quando a fila
-/// esvazia ou a ponta morreu (a revogacao/encerramento cuida do resto).
-fn relay(de: Handle, para: Handle) {
+/// esvazia; devolve `true` se a ponta `de` morreu (o chamador recolhe o proxy — uma ponta
+/// fechada fica "pronta" para sempre e transformaria a espera em sondagem).
+fn relay(de: Handle, para: Handle) -> bool {
     let mut msg = [0u8; 4096];
     let mut hs = [0u32; 2];
-    while let Ok((n, k)) = nexo_sys::channel_try_recv(de, &mut msg, &mut hs) {
-        let _ = nexo_sys::channel_send(para, &msg[..n], &hs[..k]);
+    loop {
+        match nexo_sys::channel_try_recv(de, &mut msg, &mut hs) {
+            Ok((n, k)) => {
+                let _ = nexo_sys::channel_send(para, &msg[..n], &hs[..k]);
+            }
+            Err(Status::PeerClosed) => return true,
+            Err(_) => return false,
+        }
     }
 }
 
@@ -249,9 +256,12 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         // orquestrador e vigia o prazo da permissao temporaria. Sem proxy nem prazo, bloqueia
         // no orquestrador como sempre.
         let (n, nh) = loop {
-            if let Some((pa, real)) = proxy {
-                relay(pa, real);
-                relay(real, pa);
+            if let Some((pa, real)) = proxy
+                && (relay(pa, real) || relay(real, pa))
+            {
+                let _ = nexo_sys::handle_close(pa);
+                let _ = nexo_sys::handle_close(real);
+                proxy = None;
             }
             match nexo_sys::channel_try_recv(PIPE, &mut buf, &mut hs) {
                 Ok(v) => break v,
@@ -279,8 +289,15 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 let _ = nexo_sys::channel_send(PIPE, b"expirou", &[]);
                 continue 'pedidos;
             }
-            if prazo.is_some() {
-                nexo_sys::sleep_ns(20_000_000);
+            if let Some(fim) = prazo {
+                // dorme ate o proximo evento OU o fim do prazo — sem sondagem
+                let resto = fim.saturating_sub(nexo_sys::time_now()).max(1);
+                let _ = match proxy {
+                    Some((pa, real)) => {
+                        nexo_sys::channel_wait_any_timeout(&[PIPE, pa, real], resto)
+                    }
+                    None => nexo_sys::channel_wait_any_timeout(&[PIPE], resto),
+                };
             } else if let Some((pa, real)) = proxy {
                 let _ = nexo_sys::channel_wait_any(&[PIPE, pa, real]);
             } else {
