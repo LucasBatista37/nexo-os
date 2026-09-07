@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `1e6817a`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `351f77d`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 189 · 🟡 61 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -483,7 +483,7 @@ Gate: ⬜ não iniciado.
 | ✅ | threat model atualizado | v1 (2026-09-07) em SECURITY.md: ativos, vetores, mitigações e lacunas do sistema com modo usuário, capabilities, rede, disco, compositor mediado, consentimento/revogação e atualizações A/B; o v0 só cobria o kernel em ring 0 |
 | ⬜ | privilégio mínimo |  |
 | ⬜ | isolamento de drivers e serviços |  |
-| 🟡 | W^X, NX, ASLR e guard pages | W^X, NX e guard pages ativos; ASLR pendente |
+| 🟡 | W^X, NX, ASLR e guard pages | W^X, NX e guard pages ativos; **ASLR de pilha** (topo aleatório numa janela de 1 GiB, 18 bits) **e de mapeamentos** (região começa num deslocamento aleatório de até 4 GiB, 20 bits) por processo, `rdrand` ou xorshift semeado pelo TSC — auto-teste `user_aslr` (bloco 100); o código do ELF é fixo: PIE pendente |
 | ⬜ | IOMMU |  |
 | ⬜ | consentimento de câmera/microfone/rede/arquivos |  |
 | ⬜ | indicadores de privacidade resistentes a falsificação |  |

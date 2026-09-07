@@ -328,6 +328,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Quatro cláusulas do plano estavam atrás do código: "ABI C pendente" (existe: `nexo.h`, protocolos C gerados, nexo-libc, toolchain), "falta SMP/afinidade" no item de memória (é o item seguinte, `[x]`), "v0 instável" nas syscalls versionadas (`ABI_VERSION = 1` com política aditiva) e "dump completo pendente" (o dump em disco existe desde a Fase 8) — agora `[x]` com o que há e o que fica para os itens certos.
 - Relatório `docs/progress/2026-09-05-contextos-e-kernel.md`: blocos 89–95 — sockets em C, painel de escala (e o bug das coordenadas do ponteiro), documentos por Contexto, ADR-0017, revogação fina por proxy, o **bug do escalonador** que ela revelou (despertar espúrio no `join`) e as ações nos avisos.
 
+### Adicionado (Fase 8, bloco 100 — ASLR de pilha e de mapeamentos)
+- Cada processo recebe a **pilha num topo aleatório** (alinhado a página, janela de 1 GiB abaixo de `USER_STACK_TOP`: 18 bits) e a **região de mapeamentos** (`memory_map`, MMIO, DMA) começando num deslocamento aleatório de até 4 GiB (20 bits). Entropia em `kernel/src/aslr.rs`: `rdrand` quando a CPU tem (CPUID.1:ECX bit 30), senão xorshift64* semeado pelo TSC — para dispersar endereços, não para chaves. O código do ELF continua fixo (sem PIE — próximo passo do item).
+- Nada no espaço de usuário dependia do endereço fixo (a pilha chega em `RSP`; mapeamentos devolvem o endereço). Auto-teste `user_aslr`: dois processos do mesmo ELF (modo 73) devolvem páginas de pilha e de mapeamento diferentes. Spec e threat model atualizados.
+
 ### Corrigido (bloco 101 — flake do driver da calculadora)
 - O driver do teste `user_calc` esperava 300 ms fixos pela janela da calc antes de clicar; no cenário `gdb` (gdbstub, mais lento) os primeiros cliques caíam antes de a janela existir e o resultado lido do clipboard não era "3" (visto uma vez na varredura do bloco 97; passou na repetição). Agora espera a janela aparecer (`surface_info`, até 10 s) e só então clica.
 

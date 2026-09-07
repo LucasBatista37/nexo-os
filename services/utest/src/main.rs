@@ -116,6 +116,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         70 => backup_agenda_driver(),
         71 => repo_net_client(param as u16),
         72 => priority_test(),
+        73 => aslr_probe(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5043,6 +5044,17 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
     }
     nexo_sys::exit(0)
+}
+
+/// Modo 73: sonda do ASLR — devolve no código de saída 16 bits da página da pilha e 16 bits
+/// da página do primeiro mapeamento; o kernel compara duas execuções.
+fn aslr_probe() -> ! {
+    let marker = 0u8;
+    let sp = core::ptr::addr_of!(marker) as u64;
+    let obj = nexo_sys::memory_create(1).unwrap_or_else(|_| nexo_sys::exit(430));
+    let base = nexo_sys::memory_map(obj).unwrap_or_else(|_| nexo_sys::exit(431));
+    let code = (((sp >> 12) & 0xffff) << 16) | ((base >> 12) & 0xffff);
+    nexo_sys::exit(code as i64)
 }
 
 /// Modo 72: `set_priority` — 1 (baixa) e 0 (normal) aceitos, 9 recusado com InvalidArgs.

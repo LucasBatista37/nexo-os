@@ -113,6 +113,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_vfs", test_user_vfs),
     ("user_wait_any", test_user_wait_any),
     ("user_priority", test_user_priority),
+    ("user_aslr", test_user_aslr),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1057,6 +1058,19 @@ fn test_threads_priority() -> TestResult {
 fn test_user_priority() -> TestResult {
     let code = run_utest(72)?;
     check!(code == 0, "set_priority saiu com {code}");
+    Ok(())
+}
+
+/// ASLR: dois processos do mesmo ELF recebem pilha e região de mapeamentos em endereços
+/// diferentes (16 bits de cada página no código de saída da sonda; coincidência ~2^-32).
+fn test_user_aslr() -> TestResult {
+    let a = run_utest(73)?;
+    let b = run_utest(73)?;
+    check!(a > 0 && b > 0, "sonda do ASLR falhou ({a}, {b})");
+    check!(
+        a != b,
+        "dois processos com pilha e mapeamentos nos mesmos enderecos ({a:#x})"
+    );
     Ok(())
 }
 

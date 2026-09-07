@@ -94,7 +94,7 @@ Todo ponteiro de usuário é validado antes do acesso: faixa `[ptr, ptr+len)` ab
 
 ## 5. Processos nesta versão
 
-- Espaço de endereçamento por processo (PML4 própria; metade do kernel compartilhada), carregado de um ELF64 estático com segmentos W^X; pilha de 256 KiB abaixo de `0x0000_7fff_fff0_0000` (guard page abaixo).
+- Espaço de endereçamento por processo (PML4 própria; metade do kernel compartilhada), carregado de um ELF64 estático com segmentos W^X; pilha de 256 KiB com topo **aleatório** (ASLR: alinhado a página, numa janela de 1 GiB abaixo de `0x0000_7fff_fff0_0000`; chega em `RSP`) e região de mapeamentos (`memory_map`/MMIO/DMA) começando num deslocamento aleatório de até 4 GiB acima de `USER_DEVICE_REGION`; o código do ELF é fixo (sem PIE).
 - Uma thread por processo; `RDI` na entrada carrega um argumento inteiro.
 - Falha em modo usuário (`#PF`, `#GP`, `#UD`…) encerra apenas o processo com código `-1` e motivo registrado no log; o kernel continua.
 - Handles com direitos, canais com transferência de handles e processos como objetos (spawn por nome do initrd, wait, info) existem (§3.1–3.2, syscalls 14–16); espera múltipla de canais (`channel_wait_any`, 26; com prazo, `channel_wait_any_timeout`, 34 — o timer de usuário simples) e memória compartilhada (`memory_create`/`memory_map`/`memory_unmap`, 28/29/30) existem; jobs/domínios e objetos de evento genéricos vêm nos próximos blocos.

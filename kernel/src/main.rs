@@ -13,6 +13,7 @@ extern crate alloc;
 #[macro_use]
 mod klog;
 mod acpi;
+mod aslr;
 mod boot;
 mod cell;
 mod console;

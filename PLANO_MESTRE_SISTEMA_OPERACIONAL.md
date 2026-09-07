@@ -786,7 +786,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [x] threat model atualizado — *v1 (2026-09-07) em SECURITY.md: ativos, vetores, mitigações e lacunas do sistema com modo usuário, capabilities, rede, disco, compositor mediado, consentimento/revogação e atualizações A/B; o v0 só cobria o kernel em ring 0*;
 - [ ] privilégio mínimo;
 - [ ] isolamento de drivers e serviços;
-- [-] W^X, NX, ASLR e guard pages — *W^X, NX e guard pages ativos; ASLR pendente*;
+- [-] W^X, NX, ASLR e guard pages — *W^X, NX e guard pages ativos; **ASLR de pilha** (topo aleatório numa janela de 1 GiB, 18 bits) **e de mapeamentos** (região começa num deslocamento aleatório de até 4 GiB, 20 bits) por processo, `rdrand` ou xorshift semeado pelo TSC — auto-teste `user_aslr` (bloco 100); o código do ELF é fixo: PIE pendente*;
 - [ ] IOMMU;
 - [ ] consentimento de câmera/microfone/rede/arquivos;
 - [ ] indicadores de privacidade resistentes a falsificação;

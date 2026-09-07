@@ -23,6 +23,12 @@ pub type Pid = u64;
 pub const USER_STACK_TOP: u64 = 0x0000_7fff_fff0_0000;
 /// Tamanho da pilha de usuário.
 pub const USER_STACK_SIZE: u64 = 256 * 1024;
+/// Janela do ASLR da pilha: o topo real de cada processo fica até 1 GiB abaixo de
+/// [`USER_STACK_TOP`], alinhado a página (18 bits de entropia).
+pub const USER_STACK_WINDOW: u64 = 1 << 30;
+/// Janela do ASLR dos mapeamentos: a região de dispositivos/objetos de memória de cada
+/// processo começa até 4 GiB depois de `USER_DEVICE_REGION` (20 bits de entropia).
+pub const USER_MAP_WINDOW: u64 = 4 << 30;
 
 /// Espaço de endereçamento de um processo.
 pub struct AddressSpace {
@@ -194,8 +200,11 @@ pub struct Process {
     pub handles: IrqLock<crate::ipc::HandleTable>,
     /// Threads bloqueadas em `wait` sobre este processo.
     pub exit_waiters: IrqLock<Vec<crate::sched::ThreadId>>,
-    /// Próximo endereço livre na região de dispositivos (MMIO/DMA) do processo.
+    /// Próximo endereço livre na região de dispositivos (MMIO/DMA) do processo — começa num
+    /// deslocamento aleatório (ASLR dos mapeamentos).
     pub device_next: AtomicU64,
+    /// Topo da pilha de usuário deste processo (aleatório — ASLR da pilha).
+    pub stack_top: u64,
 }
 
 static TABLE: IrqLock<Vec<Arc<Process>>> = IrqLock::new(Vec::new());
@@ -263,7 +272,7 @@ pub fn spawn_elf_with_handles(
     let elf = ElfFile::parse(elf_bytes).map_err(|_| "ELF invalido")?;
     let space = AddressSpace::new().ok_or("sem memoria para o espaco")?;
     let (lo, hi) = elf.address_range().ok_or("ELF sem segmentos")?;
-    if lo < PAGE_SIZE || hi > USER_STACK_TOP - USER_STACK_SIZE - PAGE_SIZE {
+    if lo < PAGE_SIZE || hi > USER_STACK_TOP - USER_STACK_WINDOW - USER_STACK_SIZE - PAGE_SIZE {
         return Err("segmentos fora da faixa de usuario");
     }
     for ph in elf.load_segments() {
@@ -298,8 +307,11 @@ pub fn spawn_elf_with_handles(
     if !(lo..hi).contains(&elf.entry) {
         return Err("entrada fora dos segmentos");
     }
-    let mut v = USER_STACK_TOP - USER_STACK_SIZE;
-    while v < USER_STACK_TOP {
+    // ASLR: o topo da pilha é aleatório (alinhado a página) numa janela de 1 GiB abaixo de
+    // `USER_STACK_TOP` — nada no espaço de usuário depende do endereço fixo (a pilha chega em RSP)
+    let stack_top = USER_STACK_TOP - crate::aslr::page_offset(USER_STACK_WINDOW / PAGE_SIZE);
+    let mut v = stack_top - USER_STACK_SIZE;
+    while v < stack_top {
         space
             .map_user_page(VirtAddr::new(v), PageFlags::KERNEL_RW)
             .map_err(|_| "sem memoria para a pilha")?;
@@ -317,7 +329,11 @@ pub fn spawn_elf_with_handles(
         kill_reason: IrqLock::new(None),
         handles: IrqLock::new(crate::ipc::HandleTable::new()),
         exit_waiters: IrqLock::new(Vec::new()),
-        device_next: AtomicU64::new(nexo_syscall_abi::USER_DEVICE_REGION),
+        device_next: AtomicU64::new(
+            nexo_syscall_abi::USER_DEVICE_REGION
+                + crate::aslr::page_offset(USER_MAP_WINDOW / PAGE_SIZE),
+        ),
+        stack_top,
     });
     {
         let mut table = process.handles.lock();
@@ -333,7 +349,7 @@ pub fn spawn_elf_with_handles(
     SPAWNED.fetch_add(1, Ordering::Relaxed);
     let start = alloc::boxed::Box::new(UserStart {
         entry: elf.entry,
-        user_sp: USER_STACK_TOP - 8,
+        user_sp: stack_top - 8,
         arg,
     });
     let tid = sched::spawn_process_thread(
@@ -344,13 +360,14 @@ pub fn spawn_elf_with_handles(
     );
     process.main_thread.store(tid, Ordering::Release);
     kinfo!(
-        "process: '{}' pid {} entry {:#x} ({} quadros) thread {} arg {}",
+        "process: '{}' pid {} entry {:#x} ({} quadros) thread {} arg {} pilha {:#x}",
         name,
         process.pid,
         elf.entry,
         process.space.frame_count(),
         tid,
-        arg
+        arg,
+        process.stack_top,
     );
     Ok(process)
 }
