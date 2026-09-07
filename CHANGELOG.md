@@ -328,6 +328,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Quatro cláusulas do plano estavam atrás do código: "ABI C pendente" (existe: `nexo.h`, protocolos C gerados, nexo-libc, toolchain), "falta SMP/afinidade" no item de memória (é o item seguinte, `[x]`), "v0 instável" nas syscalls versionadas (`ABI_VERSION = 1` com política aditiva) e "dump completo pendente" (o dump em disco existe desde a Fase 8) — agora `[x]` com o que há e o que fica para os itens certos.
 - Relatório `docs/progress/2026-09-05-contextos-e-kernel.md`: blocos 89–95 — sockets em C, painel de escala (e o bug das coordenadas do ponteiro), documentos por Contexto, ADR-0017, revogação fina por proxy, o **bug do escalonador** que ela revelou (despertar espúrio no `join`) e as ações nos avisos.
 
+### Corrigido (bloco 101 — flake do driver da calculadora)
+- O driver do teste `user_calc` esperava 300 ms fixos pela janela da calc antes de clicar; no cenário `gdb` (gdbstub, mais lento) os primeiros cliques caíam antes de a janela existir e o resultado lido do clipboard não era "3" (visto uma vez na varredura do bloco 97; passou na repetição). Agora espera a janela aparecer (`surface_info`, até 10 s) e só então clica.
+
 ### Documentação (bloco 99 — threat model v1)
 - `SECURITY.md` ganhou o **threat model v1**: o v0 descrevia um kernel em ring 0 sem modo usuário; o v1 cobre o sistema de hoje — isolamento e confinamento por capabilities, mensagens IPC e pacotes malformados, disco sob corte de energia, drivers com concessões por função PCI, concorrência SMP (com o bug do bloco 94 como caso), atualizações A/B com rollback, vazamento entre janelas/Contextos e negação de serviço — com o que mitiga cada vetor e o que fica para depois (assinatura, TLS, ASLR, quotas de CPU).
 

@@ -5478,9 +5478,35 @@ fn calc_driver() -> ! {
         _ => nexo_sys::exit(1178),
     }
 
-    // espera a calc criar a janela: da um tempo curto e clica; a FIFO do canal de entrada
+    // espera a calc criar a janela (surface_info: alguma superficie alem da nossa) e so entao
+    // clica — um tempo fixo falhava sob o gdbstub, mais lento; a FIFO do canal de entrada
     // garante a ordem entre os cliques, e o "eq" no pipe sincroniza o fim.
-    nexo_sys::sleep_ns(300_000_000);
+    let start = nexo_sys::time_now();
+    'janela: loop {
+        for idx in 0..8u32 {
+            if idx == _w {
+                continue;
+            }
+            let m = nexo_proto::wm::SurfaceInfoRequest { index: idx }
+                .encode_msg(&mut out)
+                .unwrap_or_else(|_| nexo_sys::exit(1186));
+            if nexo_sys::channel_send(s1, &out[..m], &[]) != Status::Ok {
+                nexo_sys::exit(1187);
+            }
+            let (n, _) = nexo_sys::channel_recv(s1, &mut buf, &mut hs)
+                .unwrap_or_else(|_| nexo_sys::exit(1188));
+            let info = nexo_proto::wm::decode_surface_info_response(&buf[..n])
+                .unwrap_or_else(|_| nexo_sys::exit(1189));
+            if info.used == 1 {
+                break 'janela;
+            }
+        }
+        if nexo_sys::time_now() - start > 10_000_000_000 {
+            nexo_sys::exit(1190); // a calc nunca criou a janela
+        }
+        nexo_sys::sleep_ns(20_000_000);
+    }
+    nexo_sys::sleep_ns(50_000_000); // primeira pintura
     // botoes (janela da calc em (8,8); botao k no centro local (4+k*8, 18)):
     for k in [0i32, 1, 2, 3] {
         wm_click(inj, 12 + k * 8, 26);
