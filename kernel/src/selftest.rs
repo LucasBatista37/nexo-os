@@ -115,6 +115,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_wait_any", test_user_wait_any),
     ("user_priority", test_user_priority),
     ("user_aslr", test_user_aslr),
+    ("user_jobs", test_user_jobs),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1131,6 +1132,27 @@ fn test_timer_resolution() -> TestResult {
     }
     Ok(())
 }
+/// Jobs: o driver (modo 74) anexa dois filhos, um deles cria um neto que herda o job, e o
+/// `job_kill` mata os três — inclusive o neto, que o driver não conhece (a contagem de
+/// processos vivos volta ao valor inicial).
+fn test_user_jobs() -> TestResult {
+    let n0 = crate::process::count();
+    let code = run_utest(74)?;
+    check!(code == 0, "jobs saiu com {code}");
+    let start = crate::time::monotonic_ns();
+    while crate::process::count() > n0 {
+        if crate::time::monotonic_ns() - start > 3_000_000_000 {
+            return Err(alloc::format!(
+                "processos vivos nao voltaram a {n0} (ha {}): o neto sobreviveu ao job?",
+                crate::process::count()
+            ));
+        }
+        sched::sleep_ms(5);
+    }
+    sched::reap();
+    Ok(())
+}
+
 fn run_utest(mode: u64) -> Result<i64, String> {
     let p = crate::process::spawn_named("utest", mode, Vec::new()).map_err(String::from)?;
     Ok(crate::process::wait_and_reap(&p))

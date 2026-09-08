@@ -452,6 +452,25 @@ pub fn set_priority(prio: u8) -> Status {
     unsafe { raw(abi::SYS_SET_PRIORITY, prio as u64, 0, 0) }.0
 }
 
+/// Cria um job (grupo de processos com morte em cascata) e devolve o handle.
+pub fn job_create() -> Result<Handle, Status> {
+    // SAFETY: syscall sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_JOB_CREATE, 0, 0, 0) };
+    if st.is_ok() { Ok(v as Handle) } else { Err(st) }
+}
+
+/// Anexa o processo `process` ao job `job`; os processos que ele criar depois herdam o job.
+pub fn job_attach(job: Handle, process: Handle) -> Status {
+    // SAFETY: syscall sem ponteiros.
+    unsafe { raw(abi::SYS_JOB_ATTACH, job as u64, process as u64, 0) }.0
+}
+
+/// Mata todos os membros vivos do job (idempotente). Se o chamador for membro, morre também.
+pub fn job_kill(job: Handle) -> Status {
+    // SAFETY: syscall sem ponteiros.
+    unsafe { raw(abi::SYS_JOB_KILL, job as u64, 0, 0) }.0
+}
+
 /// Cria um objeto de memória compartilhável de `pages` páginas de 4 KiB (zeradas).
 pub fn memory_create(pages: u64) -> Result<Handle, Status> {
     // SAFETY: sem ponteiros.

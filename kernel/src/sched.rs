@@ -600,6 +600,9 @@ pub fn sleep_ns(ns: u64) {
         crate::time::notify_deadline(wake_at);
         schedule_locked(g, State::Sleeping);
     });
+    if crate::process::killed_current() {
+        return; // morto pelo job: a syscall devolve e o dispatcher encerra o processo
+    }
     // Garante o tempo mínimo mesmo com granularidade de tick.
     while crate::time::monotonic_ns() < wake_at {
         yield_now();

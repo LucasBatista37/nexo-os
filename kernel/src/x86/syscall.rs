@@ -388,6 +388,9 @@ fn wait_any_impl(p: &process::Process, f: &TrapFrame, deadline: Option<u64>) -> 
         {
             return (Status::TimedOut, 0);
         }
+        if process::killed_current() {
+            return (Status::PeerClosed, 0);
+        }
         crate::sched::sleep_ms(10);
     }
 }
@@ -752,6 +755,70 @@ fn sys_device(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
     }
 }
 
+fn sys_job_create(p: &process::Process) -> (Status, u64) {
+    let job = Arc::new(process::Job::new());
+    match p.handles.lock().insert(Handle {
+        object: Object::Job(job),
+        rights: Rights(RIGHTS_JOB_DEFAULT),
+    }) {
+        Ok(h) => (Status::Ok, h as u64),
+        Err(e) => (e, 0),
+    }
+}
+
+fn sys_job_attach(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
+    let (job, target) = {
+        let table = p.handles.lock();
+        let job = match table.get(f.rdi as u32) {
+            Ok(Handle {
+                object: Object::Job(j),
+                rights,
+            }) => {
+                if !rights.contains(RIGHT_ADMIN) {
+                    return (Status::Denied, 0);
+                }
+                j
+            }
+            Ok(_) => return (Status::InvalidArgs, 0),
+            Err(e) => return (e, 0),
+        };
+        let target = match table.get(f.rsi as u32) {
+            Ok(Handle {
+                object: Object::Process(t),
+                rights,
+            }) => {
+                if !rights.contains(RIGHT_READ) {
+                    return (Status::Denied, 0);
+                }
+                t
+            }
+            Ok(_) => return (Status::InvalidArgs, 0),
+            Err(e) => return (e, 0),
+        };
+        (job, target)
+    };
+    job.attach(&target);
+    (Status::Ok, 0)
+}
+
+fn sys_job_kill(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
+    let job = match p.handles.lock().get(f.rdi as u32) {
+        Ok(Handle {
+            object: Object::Job(j),
+            rights,
+        }) => {
+            if !rights.contains(RIGHT_ADMIN) {
+                return (Status::Denied, 0);
+            }
+            j
+        }
+        Ok(_) => return (Status::InvalidArgs, 0),
+        Err(e) => return (e, 0),
+    };
+    job.kill();
+    (Status::Ok, 0)
+}
+
 /// `true` se `h` na tabela de `p` é a capability de depuração (com direito de leitura).
 fn holds_debug(p: &process::Process, h: u32) -> bool {
     matches!(
@@ -768,6 +835,10 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         return (Status::Denied, 0);
     };
     p.syscalls.fetch_add(1, Ordering::Relaxed);
+    if p.killed.load(Ordering::Acquire) {
+        drop(p);
+        process::exit_current(EXIT_KILLED, Some("morto pelo job"));
+    }
     let n = f.rax;
     if crate::trace::enabled() {
         crate::trace::record(p.pid, n);
@@ -778,7 +849,7 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         drop(p);
         process::exit_current(code, None);
     }
-    match n {
+    let r = match n {
         SYS_LOG => {
             if f.rsi as usize > LOG_MAX {
                 return (Status::InvalidArgs, 0);
@@ -914,6 +985,9 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_CHANNEL_WAIT_ANY => sys_channel_wait_any(&p, f),
         SYS_CHANNEL_WAIT_ANY_TIMEOUT => sys_channel_wait_any_timeout(&p, f),
         SYS_SET_PRIORITY => sys_set_priority(f),
+        SYS_JOB_CREATE => sys_job_create(&p),
+        SYS_JOB_ATTACH => sys_job_attach(&p, f),
+        SYS_JOB_KILL => sys_job_kill(&p, f),
         SYS_IRQ_CHANNEL => sys_irq_channel(&p, f),
         SYS_MEMORY_CREATE => sys_memory_create(&p, f),
         SYS_MEMORY_MAP => sys_memory_map(&p, f),
@@ -962,7 +1036,13 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             kdebug!("syscall desconhecida {} do pid {}", n, p.pid);
             (Status::NotSupported, 0)
         }
+    };
+    // morto pelo job durante a syscall (uma espera devolveu): os `Arc`s locais já caíram
+    if p.killed.load(Ordering::Acquire) {
+        drop(p);
+        process::exit_current(EXIT_KILLED, Some("morto pelo job"));
     }
+    r
 }
 
 /// Chamado pela entrada em assembly com o frame da syscall (interrupções desabilitadas).

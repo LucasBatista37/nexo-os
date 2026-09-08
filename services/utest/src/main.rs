@@ -117,6 +117,9 @@ pub extern "C" fn _start(mode: u64) -> ! {
         71 => repo_net_client(param as u16),
         72 => priority_test(),
         73 => aslr_probe(),
+        74 => job_driver(),
+        75 => job_sleeper(),
+        76 => job_parent(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -320,6 +323,7 @@ fn syscall_fuzz(seed: u64) -> ! {
             || n == SYS_CHANNEL_WAIT_ANY
             || n == SYS_CHANNEL_WAIT_ANY_TIMEOUT
             || n == SYS_SET_PRIORITY
+            || n == SYS_JOB_KILL
             || n == SYS_MEMORY_CREATE
             || n == SYS_MEMORY_UNMAP
         {
@@ -5044,6 +5048,57 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
     }
     nexo_sys::exit(0)
+}
+
+/// Modo 74: jobs — dois filhos que só dormem (um deles cria um neto, que herda o job);
+/// `job_kill` mata os três; os filhos devolvem EXIT_KILLED depressa; erros de handle.
+fn job_driver() -> ! {
+    let job = nexo_sys::job_create().unwrap_or_else(|_| nexo_sys::exit(440));
+    let a = nexo_sys::process_spawn("utest", 75, &[]).unwrap_or_else(|_| nexo_sys::exit(441));
+    let b = nexo_sys::process_spawn("utest", 76, &[]).unwrap_or_else(|_| nexo_sys::exit(442));
+    if nexo_sys::job_attach(job, a) != Status::Ok || nexo_sys::job_attach(job, b) != Status::Ok {
+        nexo_sys::exit(443);
+    }
+    if nexo_sys::job_attach(job, 9999) != Status::BadHandle {
+        nexo_sys::exit(444);
+    }
+    if nexo_sys::job_attach(job, job) != Status::InvalidArgs {
+        nexo_sys::exit(445); // um job nao e um processo
+    }
+    if nexo_sys::job_kill(a) != Status::InvalidArgs {
+        nexo_sys::exit(446); // um processo nao e um job
+    }
+    nexo_sys::sleep_ns(150_000_000); // o filho b cria o neto (que herda o job)
+    if nexo_sys::job_kill(job) != Status::Ok {
+        nexo_sys::exit(447);
+    }
+    let t0 = nexo_sys::time_now();
+    if nexo_sys::process_wait(a) != Ok(-1) || nexo_sys::process_wait(b) != Ok(-1) {
+        nexo_sys::exit(448); // membros devem sair com EXIT_KILLED
+    }
+    if nexo_sys::time_now() - t0 > 2_000_000_000 {
+        nexo_sys::exit(449); // demoraram a morrer (esperas nao acordaram)
+    }
+    if nexo_sys::job_kill(job) != Status::Ok {
+        nexo_sys::exit(450); // idempotente
+    }
+    nexo_sys::log("utest: jobs ok — anexar, herdar (neto), matar em cascata, erros de handle");
+    nexo_sys::exit(0)
+}
+
+/// Modo 75: membro de job que só dorme (morre pelo `job_kill`).
+fn job_sleeper() -> ! {
+    loop {
+        nexo_sys::sleep_ns(10_000_000);
+    }
+}
+
+/// Modo 76: membro de job que cria um neto (herda o job) e depois só dorme.
+fn job_parent() -> ! {
+    let _neto = nexo_sys::process_spawn("utest", 75, &[]).unwrap_or_else(|_| nexo_sys::exit(451));
+    loop {
+        nexo_sys::sleep_ns(10_000_000);
+    }
 }
 
 /// Modo 73: sonda do ASLR — devolve no código de saída 16 bits da página do código (PIE),

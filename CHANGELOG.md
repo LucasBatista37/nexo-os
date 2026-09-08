@@ -328,6 +328,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 - Quatro cláusulas do plano estavam atrás do código: "ABI C pendente" (existe: `nexo.h`, protocolos C gerados, nexo-libc, toolchain), "falta SMP/afinidade" no item de memória (é o item seguinte, `[x]`), "v0 instável" nas syscalls versionadas (`ABI_VERSION = 1` com política aditiva) e "dump completo pendente" (o dump em disco existe desde a Fase 8) — agora `[x]` com o que há e o que fica para os itens certos.
 - Relatório `docs/progress/2026-09-05-contextos-e-kernel.md`: blocos 89–95 — sockets em C, painel de escala (e o bug das coordenadas do ponteiro), documentos por Contexto, ADR-0017, revogação fina por proxy, o **bug do escalonador** que ela revelou (despertar espúrio no `join`) e as ações nos avisos.
 
+### Adicionado (Fase 2, bloco 105 — jobs: grupos de processos com morte em cascata)
+- Objeto **job** (`KIND_JOB` = 6) e três syscalls aditivas: **36 `job_create`**, **37 `job_attach`** (job `ADMIN` + processo `READ`; os processos que o membro criar depois **herdam** o job) e **38 `job_kill`** (mata todos os membros vivos: as tabelas de handles são fechadas na hora — os pares veem `PeerClosed` —, cada membro sai com `EXIT_KILLED` na próxima syscall ou ao acordar de `recv`/`wait_any`/`process_wait`/`sleep`; idempotente; matar o próprio job mata o chamador por último). Sem hierarquia de jobs (um processo pertence a no máximo um).
+- Espera bloqueante que devolve ao ser morta (em vez de sair dentro dela): a syscall solta os `Arc`s locais (a ponta de canal fecha de verdade) e o dispatcher encerra o processo na volta. `nexo-sys::{job_create, job_attach, job_kill}`; spec; o fuzz exclui `job_kill`.
+- Teste `user_jobs` (modo 74): dois filhos que só dormem, um deles cria um neto que herda o job; `job_kill` mata os três — o neto, que o driver não conhece, também (a contagem de processos vivos do kernel volta ao inicial); erros de handle (não-job, não-processo, inexistente).
+
 ### Documentação (bloco 104 — relatório 96–103)
 - `docs/progress/2026-09-07-kernel-prazo-prioridade-aslr.md`: espera com prazo, prioridades, ASLR completo (pilha, mapeamentos e PIE), tique dinâmico, plano em dia e threat model v1 — com as lições de método (sondagens são dívida; flakes aparecem no cenário mais lento; armadilhas dos scripts de cadeia).
 

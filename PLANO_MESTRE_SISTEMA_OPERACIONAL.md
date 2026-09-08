@@ -420,7 +420,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 - [x] entrar em ring 3 e retornar por syscall — *GDT de usuário, `syscall`/`sysret`, `swapgs`; `services/init` roda em ring 3*;
 - [x] definir ABI de syscall e convenções de erro — *ABI v0 em `abi/syscall` + `docs/spec/syscall-abi.md`*;
-- [-] implementar processos, threads de usuário e jobs/domínios — *processos como objetos (spawn/wait/info), uma thread cada; múltiplas threads de usuário e jobs/domínios pendentes*;
+- [-] implementar processos, threads de usuário e jobs/domínios — *processos como objetos (spawn/wait/info), uma thread cada; **jobs** (bloco 105): `job_create`/`job_attach`/`job_kill` (syscalls 36–38) — grupo de processos herdado no spawn, morte em cascata (handles fechados, esperas acordam, `EXIT_KILLED`); auto-teste `user_jobs` (o neto que o criador não conhece morre junto). Pendem múltiplas threads de usuário e domínios (isolamento além do job)*;
 - [x] implementar handles e tabela por processo — *`kernel/src/ipc.rs`, syscalls 8–13*;
 - [-] implementar direitos: ler, escrever, sinalizar, mapear, transferir e administrar — *ler/escrever/transferir/duplicar aplicados; sinalizar/mapear/administrar definidos, sem objetos que os usem*;
 - [x] implementar canais IPC e transferência de handles — *canais com filas por extremidade, bloqueio em recv, transferência testada entre processos*;

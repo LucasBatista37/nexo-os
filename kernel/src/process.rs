@@ -182,6 +182,66 @@ impl Drop for AddressSpace {
 }
 
 /// Um processo.
+/// Job: grupo de processos com morte em cascata. Um processo entra num job por `job_attach`
+/// ou por herança (os processos que um membro cria nascem no job dele). `kill` mata todos os
+/// membros vivos: fecha as tabelas de handles (os pares veem `PeerClosed`), marca `killed` e
+/// acorda a thread principal; cada membro sai com [`EXIT_KILLED`] na próxima syscall ou ao
+/// acordar de uma espera. Não há hierarquia de jobs (um processo pertence a no máximo um).
+pub struct Job {
+    members: IrqLock<Vec<alloc::sync::Weak<Process>>>,
+}
+
+impl Job {
+    /// Job vazio.
+    pub fn new() -> Job {
+        Job {
+            members: IrqLock::new(Vec::new()),
+        }
+    }
+
+    /// Anexa `p` (e marca nele o job, para a herança).
+    pub fn attach(self: &Arc<Job>, p: &Arc<Process>) {
+        let mut m = self.members.lock();
+        m.retain(|w| w.strong_count() > 0);
+        if !m.iter().any(|w| w.as_ptr() == Arc::as_ptr(p)) {
+            m.push(Arc::downgrade(p));
+        }
+        drop(m);
+        *p.job.lock() = Some(self.clone());
+    }
+
+    /// Mata todos os membros vivos. O chamador, se for membro, morre ao sair da syscall.
+    pub fn kill(&self) {
+        let members: Vec<Arc<Process>> = self
+            .members
+            .lock()
+            .iter()
+            .filter_map(|w| w.upgrade())
+            .collect();
+        for p in members {
+            if p.exited.load(Ordering::Acquire) || p.killed.swap(true, Ordering::AcqRel) {
+                continue;
+            }
+            // fecha os handles já aqui: os pares veem PeerClosed sem esperar o membro sair
+            let table = core::mem::take(&mut *p.handles.lock());
+            drop(table);
+            crate::ipc::collect_unreachable();
+            sched::unpark(p.main_thread.load(Ordering::Acquire));
+        }
+    }
+}
+
+impl Default for Job {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// `true` se o processo atual foi morto pelo job (deve sair na próxima oportunidade).
+pub fn killed_current() -> bool {
+    current().is_some_and(|p| p.killed.load(Ordering::Acquire))
+}
+
 pub struct Process {
     /// PID.
     pub pid: Pid,
@@ -210,6 +270,10 @@ pub struct Process {
     pub device_next: AtomicU64,
     /// Topo da pilha de usuário deste processo (aleatório — ASLR da pilha).
     pub stack_top: u64,
+    /// Job a que pertence (herdado por quem ele criar), se algum.
+    pub job: IrqLock<Option<Arc<Job>>>,
+    /// Morto pelo job: sai com `EXIT_KILLED` na próxima syscall ou ao acordar de uma espera.
+    pub killed: AtomicBool,
 }
 
 static TABLE: IrqLock<Vec<Arc<Process>>> = IrqLock::new(Vec::new());
@@ -371,7 +435,15 @@ pub fn spawn_elf_with_handles(
                 + crate::aslr::page_offset(USER_MAP_WINDOW / PAGE_SIZE),
         ),
         stack_top,
+        // herda o job de quem cria (um app em segundo plano puxa os filhos para o job dele)
+        job: IrqLock::new(current().and_then(|c| c.job.lock().clone())),
+        killed: AtomicBool::new(false),
     });
+    // (o guard do `lock()` não pode viver dentro do `if let`: `attach` volta a travar `job`)
+    let herdado = process.job.lock().clone();
+    if let Some(job) = herdado {
+        job.attach(&process);
+    }
     {
         let mut table = process.handles.lock();
         for h in handles {
@@ -460,6 +532,9 @@ pub fn kill_current(reason: &'static str) -> ! {
 /// Bloqueia até `p` terminar; devolve o código de saída. Não recolhe threads.
 pub fn wait_process(p: &Arc<Process>) -> i64 {
     loop {
+        if killed_current() {
+            return EXIT_KILLED; // morto pelo job enquanto esperava: sai na volta da syscall
+        }
         let mut waiters = p.exit_waiters.lock();
         if p.exited.load(Ordering::Acquire) {
             break;

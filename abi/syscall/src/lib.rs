@@ -122,8 +122,19 @@ pub const SYS_CHANNEL_WAIT_ANY_TIMEOUT: u64 = 34;
 /// prioridade. `InvalidArgs` fora de 0/1. Aditivo (2026-09-05).
 pub const SYS_SET_PRIORITY: u64 = 35;
 
+/// Cria um **job** (grupo de processos): → handle ([`KIND_JOB`], [`RIGHTS_JOB_DEFAULT`]).
+/// Aditivo (2026-09-07).
+pub const SYS_JOB_CREATE: u64 = 36;
+/// Anexa um processo a um job: `rdi` = job (`ADMIN`), `rsi` = processo (`READ`). Os processos
+/// que o membro criar depois herdam o job. `InvalidArgs` se os handles não são job/processo.
+pub const SYS_JOB_ATTACH: u64 = 37;
+/// Mata todos os membros vivos do job (`rdi`, `ADMIN`): as tabelas de handles são fechadas
+/// (pares veem `PeerClosed`) e cada membro sai com [`EXIT_KILLED`] na próxima syscall ou ao
+/// acordar de uma espera. Idempotente. Matar o próprio job mata o chamador por último.
+pub const SYS_JOB_KILL: u64 = 38;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 35;
+pub const SYS_MAX: u64 = 38;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -135,6 +146,8 @@ pub const SHM_PAGES_MAX_PER_PROCESS: u64 = 4096;
 pub const KIND_MEMORY: u32 = 4;
 /// Capability de depuração: exigida para ligar/ler o trace de syscalls ([`SYS_TRACE`]).
 pub const KIND_DEBUG: u32 = 5;
+/// Job: grupo de processos com morte em cascata (`SYS_JOB_*`).
+pub const KIND_JOB: u32 = 6;
 /// Direitos padrão de um handle de depuração.
 pub const RIGHTS_DEBUG_DEFAULT: u32 = RIGHT_READ | RIGHT_TRANSFER | RIGHT_DUPLICATE;
 /// Direitos padrão de um objeto de memória.
@@ -293,6 +306,9 @@ pub const KIND_CHANNEL: u32 = 1;
 pub const KIND_PROCESS: u32 = 2;
 /// Direitos padrão de um handle de processo (`READ` = esperar/consultar).
 pub const RIGHTS_PROCESS_DEFAULT: u32 = RIGHT_READ | RIGHT_TRANSFER | RIGHT_DUPLICATE;
+/// Direitos de um handle de job recém-criado (`ADMIN` = pode anexar e matar).
+pub const RIGHTS_JOB_DEFAULT: u32 =
+    RIGHT_READ | RIGHT_WRITE | RIGHT_TRANSFER | RIGHT_DUPLICATE | RIGHT_ADMIN;
 /// Bit de "terminou" em `SYS_PROCESS_INFO`.
 pub const PROCESS_INFO_EXITED: u64 = 1 << 63;
 
@@ -423,6 +439,9 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_TRACE => "trace",
         SYS_CHANNEL_WAIT_ANY_TIMEOUT => "channel_wait_any_timeout",
         SYS_SET_PRIORITY => "set_priority",
+        SYS_JOB_CREATE => "job_create",
+        SYS_JOB_ATTACH => "job_attach",
+        SYS_JOB_KILL => "job_kill",
         _ => "?",
     }
 }

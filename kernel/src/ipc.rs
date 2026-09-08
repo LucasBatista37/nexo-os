@@ -43,6 +43,8 @@ pub enum Object {
     Device(Arc<DeviceGrant>),
     /// Memória compartilhável (frames físicos possuídos por este objeto).
     Memory(Arc<MemoryObject>),
+    /// Job: grupo de processos com morte em cascata.
+    Job(Arc<crate::process::Job>),
     /// Capability de depuração (trace de syscalls); sem estado — o valor é possuí-la.
     Debug,
 }
@@ -119,6 +121,7 @@ impl Object {
             Object::Process(_) => KIND_PROCESS,
             Object::Device(_) => KIND_DEVICE,
             Object::Memory(_) => KIND_MEMORY,
+            Object::Job(_) => KIND_JOB,
             Object::Debug => KIND_DEBUG,
         }
     }
@@ -471,6 +474,11 @@ impl ChannelEnd {
     /// guarda NÃO é mantida enquanto bloqueia — só nasce no pop.
     pub fn recv_guarded(&self) -> Result<(Message, InFlight), Status> {
         loop {
+            // morto pelo job enquanto esperava: devolve à syscall (que solta o `Arc` da ponta
+            // e deixa o dispatcher encerrar o processo)
+            if crate::process::killed_current() {
+                return Err(Status::PeerClosed);
+            }
             let mut g = self.inner.lock();
             if let Some(m) = g.queues[self.side].pop_front() {
                 let guard = InFlight::new();
@@ -499,6 +507,9 @@ impl ChannelEnd {
 
     pub fn recv(&self) -> Result<Message, Status> {
         loop {
+            if crate::process::killed_current() {
+                return Err(Status::PeerClosed);
+            }
             let mut g = self.inner.lock();
             if let Some(m) = g.queues[self.side].pop_front() {
                 return Ok(m);

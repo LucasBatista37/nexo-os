@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `cb7e79b`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-07 (commit `e5500f1`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 191 · 🟡 59 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -96,7 +96,7 @@ Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem re
 |---|---|---|
 | ✅ | entrar em ring 3 e retornar por syscall | GDT de usuário, `syscall`/`sysret`, `swapgs`; `services/init` roda em ring 3 |
 | ✅ | definir ABI de syscall e convenções de erro | ABI v0 em `abi/syscall` + `docs/spec/syscall-abi.md` |
-| 🟡 | implementar processos, threads de usuário e jobs/domínios | processos como objetos (spawn/wait/info), uma thread cada; múltiplas threads de usuário e jobs/domínios pendentes |
+| 🟡 | implementar processos, threads de usuário e jobs/domínios | processos como objetos (spawn/wait/info), uma thread cada; **jobs** (bloco 105): `job_create`/`job_attach`/`job_kill` (syscalls 36–38) — grupo de processos herdado no spawn, morte em cascata (handles fechados, esperas acordam, `EXIT_KILLED`); auto-teste `user_jobs` (o neto que o criador não conhece morre junto). Pendem múltiplas threads de usuário e domínios (isolamento além do job) |
 | ✅ | implementar handles e tabela por processo | `kernel/src/ipc.rs`, syscalls 8–13 |
 | 🟡 | implementar direitos: ler, escrever, sinalizar, mapear, transferir e administrar | ler/escrever/transferir/duplicar aplicados; sinalizar/mapear/administrar definidos, sem objetos que os usem |
 | ✅ | implementar canais IPC e transferência de handles | canais com filas por extremidade, bloqueio em recv, transferência testada entre processos |
