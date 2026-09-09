@@ -471,6 +471,38 @@ pub fn job_kill(job: Handle) -> Status {
     unsafe { raw(abi::SYS_JOB_KILL, job as u64, 0, 0) }.0
 }
 
+/// Cria uma thread neste processo: `entry(arg)` numa pilha própria de 256 KiB; a função deve
+/// terminar com [`thread_exit`]. Threads partilham handles e memória.
+pub fn thread_create(entry: extern "C" fn(u64) -> !, arg: u64) -> Result<Handle, Status> {
+    // SAFETY: syscall sem ponteiros de dados; a entrada é um endereço de código válido.
+    let (st, v) = unsafe {
+        raw(
+            abi::SYS_THREAD_CREATE,
+            entry as *const () as usize as u64,
+            arg,
+            0,
+        )
+    };
+    if st.is_ok() { Ok(v as Handle) } else { Err(st) }
+}
+
+/// Termina a thread atual (a última viva termina o processo com 0).
+pub fn thread_exit() -> ! {
+    // SAFETY: syscall sem ponteiros; nunca retorna.
+    unsafe {
+        raw(abi::SYS_THREAD_EXIT, 0, 0, 0);
+    }
+    loop {
+        core::hint::spin_loop();
+    }
+}
+
+/// Espera a thread `h` terminar.
+pub fn thread_join(h: Handle) -> Status {
+    // SAFETY: syscall sem ponteiros.
+    unsafe { raw(abi::SYS_THREAD_JOIN, h as u64, 0, 0) }.0
+}
+
 /// Cria um objeto de memória compartilhável de `pages` páginas de 4 KiB (zeradas).
 pub fn memory_create(pages: u64) -> Result<Handle, Status> {
     // SAFETY: sem ponteiros.

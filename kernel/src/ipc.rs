@@ -45,6 +45,8 @@ pub enum Object {
     Memory(Arc<MemoryObject>),
     /// Job: grupo de processos com morte em cascata.
     Job(Arc<crate::process::Job>),
+    /// Thread de usuário (ID no escalonador) do processo dono da tabela.
+    Thread(crate::sched::ThreadId),
     /// Capability de depuração (trace de syscalls); sem estado — o valor é possuí-la.
     Debug,
 }
@@ -122,6 +124,7 @@ impl Object {
             Object::Device(_) => KIND_DEVICE,
             Object::Memory(_) => KIND_MEMORY,
             Object::Job(_) => KIND_JOB,
+            Object::Thread(_) => KIND_THREAD,
             Object::Debug => KIND_DEBUG,
         }
     }

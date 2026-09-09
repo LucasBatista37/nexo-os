@@ -226,7 +226,9 @@ impl Job {
             let table = core::mem::take(&mut *p.handles.lock());
             drop(table);
             crate::ipc::collect_unreachable();
-            sched::unpark(p.main_thread.load(Ordering::Acquire));
+            for t in p.threads.lock().iter().copied() {
+                sched::unpark(t);
+            }
         }
     }
 }
@@ -235,6 +237,56 @@ impl Default for Job {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Cria uma thread de usuário em `p`: pilha própria de [`USER_STACK_SIZE`] numa região do
+/// processo (endereço aleatório, guard page abaixo), entrada `entry` com `RDI = arg`.
+pub fn create_user_thread(
+    p: &Arc<Process>,
+    entry: u64,
+    arg: u64,
+) -> Result<crate::sched::ThreadId, &'static str> {
+    if entry == 0 || entry >= USER_ADDRESS_LIMIT {
+        return Err("entrada fora da faixa de usuario");
+    }
+    let base = p.reserve_device_region(USER_STACK_SIZE + PAGE_SIZE) + PAGE_SIZE; // guard abaixo
+    let top = base + USER_STACK_SIZE;
+    let mut v = base;
+    while v < top {
+        p.space
+            .map_user_page(VirtAddr::new(v), PageFlags::KERNEL_RW)
+            .map_err(|_| "sem memoria para a pilha da thread")?;
+        v += PAGE_SIZE;
+    }
+    let start = alloc::boxed::Box::new(UserStart {
+        entry,
+        user_sp: top - 8,
+        arg,
+    });
+    let tid = sched::spawn_process_thread(
+        "uthread",
+        user_thread_main,
+        alloc::boxed::Box::into_raw(start) as usize,
+        p.clone(),
+    );
+    p.threads.lock().push(tid);
+    Ok(tid)
+}
+
+/// Termina a thread atual; se era a última viva do processo, termina o processo com 0.
+pub fn thread_exit_current() -> ! {
+    if let Some(p) = current() {
+        let me = sched::current().map_or(usize::MAX, |t| t.id);
+        let mut threads = p.threads.lock();
+        threads.retain(|t| *t != me);
+        let last = threads.is_empty();
+        drop(threads);
+        if last {
+            drop(p);
+            exit_current(0, None);
+        }
+    }
+    sched::exit_current()
 }
 
 /// `true` se o processo atual foi morto pelo job (deve sair na próxima oportunidade).
@@ -272,8 +324,11 @@ pub struct Process {
     pub stack_top: u64,
     /// Job a que pertence (herdado por quem ele criar), se algum.
     pub job: IrqLock<Option<Arc<Job>>>,
-    /// Morto pelo job: sai com `EXIT_KILLED` na próxima syscall ou ao acordar de uma espera.
+    /// Morto pelo job (ou o processo já terminou por outra thread): sai com `EXIT_KILLED` na
+    /// próxima syscall ou ao acordar de uma espera.
     pub killed: AtomicBool,
+    /// Threads vivas do processo (a principal e as de `thread_create`).
+    pub threads: IrqLock<Vec<crate::sched::ThreadId>>,
 }
 
 static TABLE: IrqLock<Vec<Arc<Process>>> = IrqLock::new(Vec::new());
@@ -438,6 +493,7 @@ pub fn spawn_elf_with_handles(
         // herda o job de quem cria (um app em segundo plano puxa os filhos para o job dele)
         job: IrqLock::new(current().and_then(|c| c.job.lock().clone())),
         killed: AtomicBool::new(false),
+        threads: IrqLock::new(Vec::new()),
     });
     // (o guard do `lock()` não pode viver dentro do `if let`: `attach` volta a travar `job`)
     let herdado = process.job.lock().clone();
@@ -468,6 +524,7 @@ pub fn spawn_elf_with_handles(
         process.clone(),
     );
     process.main_thread.store(tid, Ordering::Release);
+    process.threads.lock().push(tid);
     kinfo!(
         "process: '{}' pid {} entry {:#x} ({} quadros) thread {} arg {} pilha {:#x}",
         name,
@@ -497,9 +554,18 @@ pub fn current() -> Option<Arc<Process>> {
 /// Encerra o processo atual com `code` (e motivo, quando morto pelo kernel). Nunca retorna.
 pub fn exit_current(code: i64, reason: Option<&'static str>) -> ! {
     if let Some(p) = current() {
+        if p.exited.swap(true, Ordering::AcqRel) {
+            // outra thread já encerrou o processo: esta só morre
+            sched::exit_current();
+        }
         p.exit_code.store(code, Ordering::Release);
         *p.kill_reason.lock() = reason;
-        p.exited.store(true, Ordering::Release);
+        // as outras threads do processo morrem na próxima syscall ou ao acordar
+        p.killed.store(true, Ordering::Release);
+        let me = sched::current().map_or(usize::MAX, |t| t.id);
+        for t in p.threads.lock().iter().copied().filter(|t| *t != me) {
+            sched::unpark(t);
+        }
         // Fecha os handles já aqui: pares de canal veem PeerClosed sem esperar o reap.
         let table = core::mem::take(&mut *p.handles.lock());
         drop(table);
@@ -545,9 +611,11 @@ pub fn wait_process(p: &Arc<Process>) -> i64 {
         waiters.push(me);
         sched::park_with(waiters);
     }
-    // Garante que a thread principal terminou de sair (pilha fora de uso).
-    let tid = p.main_thread.load(Ordering::Acquire);
-    sched::join(tid);
+    // Garante que TODAS as threads terminaram de sair (pilhas fora de uso).
+    let tids: Vec<crate::sched::ThreadId> = p.threads.lock().clone();
+    for tid in tids {
+        sched::join(tid);
+    }
     p.exit_code.load(Ordering::Acquire)
 }
 

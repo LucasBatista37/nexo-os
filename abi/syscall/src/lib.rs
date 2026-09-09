@@ -133,8 +133,20 @@ pub const SYS_JOB_ATTACH: u64 = 37;
 /// acordar de uma espera. Idempotente. Matar o próprio job mata o chamador por último.
 pub const SYS_JOB_KILL: u64 = 38;
 
+/// Cria uma **thread** no processo chamador: `rdi` = entrada (função `extern "C" fn(u64) -> !`,
+/// que deve terminar com [`SYS_THREAD_EXIT`]), `rsi` = argumento (chega em `RDI`). O kernel
+/// mapeia uma pilha própria de 256 KiB (endereço aleatório). → handle ([`KIND_THREAD`],
+/// `READ|TRANSFER|DUPLICATE`). Threads partilham handles e memória; `exit` do processo (ou
+/// `job_kill`) mata todas. Aditivo (2026-09-07).
+pub const SYS_THREAD_CREATE: u64 = 39;
+/// Termina a thread chamadora; se era a última viva, o processo termina com código 0.
+pub const SYS_THREAD_EXIT: u64 = 40;
+/// Espera a thread `rdi` (handle deste processo) terminar. `InvalidArgs` se não é thread deste
+/// processo ou é a própria. Bloqueia.
+pub const SYS_THREAD_JOIN: u64 = 41;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 38;
+pub const SYS_MAX: u64 = 41;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -148,6 +160,8 @@ pub const KIND_MEMORY: u32 = 4;
 pub const KIND_DEBUG: u32 = 5;
 /// Job: grupo de processos com morte em cascata (`SYS_JOB_*`).
 pub const KIND_JOB: u32 = 6;
+/// Thread de usuário do próprio processo (`SYS_THREAD_*`).
+pub const KIND_THREAD: u32 = 7;
 /// Direitos padrão de um handle de depuração.
 pub const RIGHTS_DEBUG_DEFAULT: u32 = RIGHT_READ | RIGHT_TRANSFER | RIGHT_DUPLICATE;
 /// Direitos padrão de um objeto de memória.
@@ -442,6 +456,9 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_JOB_CREATE => "job_create",
         SYS_JOB_ATTACH => "job_attach",
         SYS_JOB_KILL => "job_kill",
+        SYS_THREAD_CREATE => "thread_create",
+        SYS_THREAD_EXIT => "thread_exit",
+        SYS_THREAD_JOIN => "thread_join",
         _ => "?",
     }
 }

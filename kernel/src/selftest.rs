@@ -116,6 +116,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_priority", test_user_priority),
     ("user_aslr", test_user_aslr),
     ("user_jobs", test_user_jobs),
+    ("user_threads", test_user_threads),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1155,6 +1156,30 @@ fn test_user_jobs() -> TestResult {
         sched::sleep_ms(5);
     }
     sched::reap();
+    Ok(())
+}
+
+/// Threads de usuário: trabalhadoras + join (modo 77); `exit` do processo com uma thread
+/// dormindo termina o processo e recolhe todas as pilhas (modo 78; as contagens de processos
+/// e de threads voltam ao inicial).
+fn test_user_threads() -> TestResult {
+    let n0 = crate::process::count();
+    let t0 = sched::stats().alive;
+    let code = run_utest(77)?;
+    check!(code == 0, "threads saiu com {code}");
+    let code = run_utest(78)?;
+    check!(code == 0, "exit com thread viva saiu com {code}");
+    sched::reap();
+    check!(
+        crate::process::count() == n0,
+        "processos vivos nao voltaram ({} != {n0})",
+        crate::process::count()
+    );
+    let t1 = sched::stats().alive;
+    check!(
+        t1 <= t0,
+        "threads vivas cresceram ({t0} -> {t1}): alguma thread de usuario sobreviveu"
+    );
     Ok(())
 }
 

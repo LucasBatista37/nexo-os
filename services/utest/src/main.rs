@@ -120,6 +120,8 @@ pub extern "C" fn _start(mode: u64) -> ! {
         74 => job_driver(),
         75 => job_sleeper(),
         76 => job_parent(),
+        77 => threads_test(),
+        78 => threads_exit_race(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -324,6 +326,11 @@ fn syscall_fuzz(seed: u64) -> ! {
             || n == SYS_CHANNEL_WAIT_ANY_TIMEOUT
             || n == SYS_SET_PRIORITY
             || n == SYS_JOB_KILL
+            || n == SYS_THREAD_EXIT
+            || n == SYS_THREAD_JOIN
+            // entrada aleatoria = a thread nova salta para lixo DENTRO do proprio processo e
+            // o mata (o processo ja podia saltar sozinho; nao e falha do kernel)
+            || n == SYS_THREAD_CREATE
             || n == SYS_MEMORY_CREATE
             || n == SYS_MEMORY_UNMAP
         {
@@ -5047,6 +5054,69 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         }
         nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
     }
+    nexo_sys::exit(0)
+}
+
+static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+extern "C" fn thread_worker(arg: u64) -> ! {
+    for _ in 0..1000 {
+        THREAD_SOMA.fetch_add(arg, core::sync::atomic::Ordering::Relaxed);
+    }
+    nexo_sys::thread_exit()
+}
+
+extern "C" fn thread_dorme(_: u64) -> ! {
+    nexo_sys::sleep_ns(30_000_000);
+    nexo_sys::thread_exit()
+}
+
+extern "C" fn thread_eterna(_: u64) -> ! {
+    loop {
+        nexo_sys::sleep_ns(5_000_000);
+    }
+}
+
+/// Modo 77: threads — quatro trabalhadoras somam num atomico (join espera todas), uma que
+/// dorme 30 ms (o join dura pelo menos isso), erros de handle.
+fn threads_test() -> ! {
+    let mut hs = [0 as nexo_sys::Handle; 4];
+    for (i, h) in hs.iter_mut().enumerate() {
+        *h = nexo_sys::thread_create(thread_worker, i as u64 + 1)
+            .unwrap_or_else(|_| nexo_sys::exit(460));
+    }
+    for h in hs {
+        if nexo_sys::thread_join(h) != Status::Ok {
+            nexo_sys::exit(461);
+        }
+    }
+    // 1000 * (1+2+3+4)
+    if THREAD_SOMA.load(core::sync::atomic::Ordering::Relaxed) != 10_000 {
+        nexo_sys::exit(462);
+    }
+    let t0 = nexo_sys::time_now();
+    let d = nexo_sys::thread_create(thread_dorme, 0).unwrap_or_else(|_| nexo_sys::exit(463));
+    if nexo_sys::thread_join(d) != Status::Ok || nexo_sys::time_now() - t0 < 30_000_000 {
+        nexo_sys::exit(464);
+    }
+    if nexo_sys::thread_join(9999) != Status::BadHandle {
+        nexo_sys::exit(465);
+    }
+    let (a, b) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(466));
+    if nexo_sys::thread_join(a) != Status::InvalidArgs {
+        nexo_sys::exit(467); // um canal nao e uma thread
+    }
+    let _ = nexo_sys::handle_close(b);
+    nexo_sys::log(
+        "utest: threads ok — 4 trabalhadoras somaram 10000, join espera, erros de handle",
+    );
+    nexo_sys::exit(0)
+}
+
+/// Modo 78: `exit` do processo com uma thread ainda dormindo — o processo termina mesmo assim.
+fn threads_exit_race() -> ! {
+    let _t = nexo_sys::thread_create(thread_eterna, 0).unwrap_or_else(|_| nexo_sys::exit(468));
+    nexo_sys::sleep_ns(20_000_000);
     nexo_sys::exit(0)
 }
 

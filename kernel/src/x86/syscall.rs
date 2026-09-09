@@ -849,6 +849,10 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         drop(p);
         process::exit_current(code, None);
     }
+    if n == SYS_THREAD_EXIT {
+        drop(p);
+        process::thread_exit_current();
+    }
     let r = match n {
         SYS_LOG => {
             if f.rsi as usize > LOG_MAX {
@@ -988,6 +992,38 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_JOB_CREATE => sys_job_create(&p),
         SYS_JOB_ATTACH => sys_job_attach(&p, f),
         SYS_JOB_KILL => sys_job_kill(&p, f),
+        SYS_THREAD_CREATE => match process::create_user_thread(&p, f.rdi, f.rsi) {
+            Ok(tid) => match p.handles.lock().insert(Handle {
+                object: Object::Thread(tid),
+                rights: Rights(RIGHT_READ | RIGHT_TRANSFER | RIGHT_DUPLICATE),
+            }) {
+                Ok(h) => (Status::Ok, h as u64),
+                Err(e) => (e, 0),
+            },
+            Err(_) => (Status::NoMemory, 0),
+        },
+        SYS_THREAD_JOIN => {
+            let h = p.handles.lock().get(f.rdi as u32);
+            match h {
+                Ok(Handle {
+                    object: Object::Thread(tid),
+                    rights,
+                }) => {
+                    if !rights.contains(RIGHT_READ) {
+                        return (Status::Denied, 0);
+                    }
+                    let me = sched::current().map_or(usize::MAX, |t| t.id);
+                    let mine = p.threads.lock().contains(&tid);
+                    if tid == me || (!mine && !sched::is_finished(tid)) {
+                        return (Status::InvalidArgs, 0);
+                    }
+                    sched::join(tid);
+                    (Status::Ok, 0)
+                }
+                Ok(_) => (Status::InvalidArgs, 0),
+                Err(e) => (e, 0),
+            }
+        }
         SYS_IRQ_CHANNEL => sys_irq_channel(&p, f),
         SYS_MEMORY_CREATE => sys_memory_create(&p, f),
         SYS_MEMORY_MAP => sys_memory_map(&p, f),
