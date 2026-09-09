@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""nexo-prazos — confere os compromissos de longa duracao de docs/COMPROMISSOS.md.
+
+Compromissos que fecham por tempo de relogio (uma execucao de dias, um agendamento semanal
+do CI, um incidente a espera de reincidencia) nao aparecem em nenhuma checklist do Plano
+Mestre nem em nenhuma bateria de validacao: quando sao esquecidos, o esquecimento e
+silencioso. Esta ferramenta le o livro de prazos, calcula quanto falta, confere se o
+processo que sustenta cada compromisso continua vivo, le o contador de saude no log e sai
+com codigo 1 quando algo venceu, cumpriu, morreu ou acusou erro — sempre exigindo uma acao
+humana descrita no proprio livro.
+
+Uso: tools/nexo-prazos [--curto] [--livro <caminho>] [--auto-teste]
+"""
+import re
+import socket
+import tempfile
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LIVRO = ROOT / "docs" / "COMPROMISSOS.md"
+CAUDA = 256 * 1024  # do log so interessa o fim (o do stress passa de 100 MB)
+
+# Estados que exigem acao: o codigo de saida 1 existe para interromper o ritual de validacao.
+COBRA_ACAO = {"VENCIDO", "CUMPRIDO", "MORTO", "ERRO", "ALERTA"}
+
+
+def parse(texto):
+    """Le o livro: `## <id>` em minusculas abre um compromisso, `- chave: valor` o preenche."""
+    compromissos, atual, em_codigo = [], None, False
+    for linha in texto.splitlines():
+        if linha.startswith("```"):
+            em_codigo = not em_codigo
+            continue
+        if em_codigo:
+            continue
+        cab = re.match(r"^##\s+([a-z0-9][a-z0-9-]*)\s*$", linha)
+        if cab:
+            atual = {"id": cab.group(1)}
+            compromissos.append(atual)
+            continue
+        if atual is None:
+            continue
+        campo = re.match(r"^-\s+([a-z-]+):\s*(.*)$", linha)
+        if campo:
+            atual[campo.group(1)] = campo.group(2).strip()
+    return compromissos
+
+
+def data(valor):
+    for formato in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(valor, formato)
+        except ValueError:
+            pass
+    return None
+
+
+def duracao(delta):
+    segundos = int(abs(delta.total_seconds()))
+    dias, resto = divmod(segundos, 86400)
+    horas, resto = divmod(resto, 3600)
+    minutos = resto // 60
+    if dias:
+        return f"{dias} d {horas} h"
+    if horas:
+        return f"{horas} h {minutos} min"
+    return f"{minutos} min"
+
+
+def esta_maquina(nome):
+    return nome.split(".")[0].lower() == socket.gethostname().split(".")[0].lower()
+
+
+def pids(padrao):
+    try:
+        saida = subprocess.run(
+            ["pgrep", "-f", padrao], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return [p for p in saida.stdout.split() if p.isdigit()]
+
+
+def cauda(caminho):
+    arquivo = ROOT / caminho
+    if not arquivo.is_file():
+        return None
+    with arquivo.open("rb") as f:
+        try:
+            f.seek(-CAUDA, 2)
+        except OSError:
+            f.seek(0)
+        return f.read().decode("utf-8", "replace")
+
+
+def ultimo(regex, texto):
+    """Devolve (grupo, trecho inteiro) do ultimo casamento — o trecho e o que se exibe."""
+    achados = list(re.finditer(regex, texto))
+    if not achados:
+        return None, None
+    return achados[-1].group(1), achados[-1].group(0).strip()
+
+
+def avalia(c, agora):
+    """Devolve (estado, notas). Estado em COBRA_ACAO significa codigo de saida 1."""
+    notas = []
+    if c.get("estado") == "fechado":
+        return "FECHADO", notas
+
+    prazo = data(c["vence"]) if c.get("vence") else None
+    log = cauda(c["log"]) if c.get("log") else None
+    aqui = esta_maquina(c["maquina"]) if c.get("maquina") else True
+
+    if log is None and c.get("log"):
+        notas.append(f"log {c['log']} ausente")
+
+    # 1. O compromisso ja deu seu veredito: cobra a acao ate alguem fecha-lo no livro.
+    if log and c.get("veredito") and c["veredito"] in log:
+        return "CUMPRIDO", notas + [f"veredito no log: {c['veredito']}"]
+
+    # 2. Fora da maquina que o sustenta nao da para conferir processo nem log.
+    if not aqui:
+        notas.append(f"roda em {c['maquina']}; nao verificavel aqui")
+        if prazo:
+            notas.append(f"vence em {duracao(prazo - agora)}")
+        return "REMOTO", notas
+
+    # 3. O processo que sustenta o compromisso precisa estar vivo antes do prazo.
+    if c.get("processo"):
+        vivos = pids(c["processo"])
+        if vivos is None:
+            notas.append("pgrep indisponivel")
+        elif not vivos:
+            return "MORTO", notas + [f"nenhum processo casa com {c['processo']!r}"]
+        else:
+            plural = "s" if len(vivos) > 1 else ""
+            notas.append(f"pid{plural} {', '.join(vivos)} vivo{plural}")
+
+    # 4. Progresso e saude vem do proprio log, nao de uma anotacao a parte.
+    if log and c.get("progresso"):
+        _, trecho = ultimo(c["progresso"], log)
+        notas.append(f"progresso {trecho}" if trecho else "progresso nao encontrado no log")
+    estado_saude = None
+    if log and c.get("saude"):
+        valor, trecho = ultimo(c["saude"], log)
+        if valor is None:
+            notas.append("contador de saude nao encontrado no log")
+        else:
+            notas.append(f"saude {trecho}")
+            if valor != "0":
+                estado_saude = "ERRO"
+    if estado_saude:
+        return estado_saude, notas
+
+    # 5. Comando externo de verificacao (workflows agendados, servicos remotos).
+    if c.get("verificar"):
+        try:
+            r = subprocess.run(
+                c["verificar"], shell=True, capture_output=True, text=True, timeout=120, cwd=ROOT
+            )
+            if r.returncode != 0:
+                detalhe = (r.stdout + r.stderr).strip().splitlines()
+                notas.append(f"verificar saiu {r.returncode}" + (f": {detalhe[-1]}" if detalhe else ""))
+                return "ALERTA", notas
+            notas.append("verificacao externa OK")
+        except subprocess.SubprocessError as erro:
+            notas.append(f"verificacao externa nao executou: {erro}")
+
+    if prazo is None:
+        return "VIGIA", notas + ["sem prazo: fecha por evento, nao por relogio"]
+    if agora >= prazo:
+        return "VENCIDO", notas + [f"venceu ha {duracao(agora - prazo)}"]
+    notas.append(f"faltam {duracao(prazo - agora)} (vence {prazo:%Y-%m-%d %H:%M})")
+    return "EM CURSO", notas
+
+
+# Livro sintetico do auto-teste: cada compromisso exercita um caminho de falha. Sem isto a
+# ferramenta so estaria provada no caso feliz — e uma vigia que nunca reprova nao vigia nada.
+AUTO_TESTE = """
+## venceu
+- estado: aberto
+- o-que: prazo no passado
+- vence: 2020-01-01
+- acao: fechar o compromisso
+
+## morreu
+- estado: aberto
+- o-que: o processo que sustenta o compromisso sumiu
+- vence: 2099-01-01
+- processo: processo-inexistente-nexo-prazos-auto-teste
+- acao: relancar
+
+## com-erro
+- estado: aberto
+- o-que: contador de saude diferente de zero
+- vence: 2099-01-01
+- log: {erro}
+- saude: erros=(\\d+)
+- acao: investigar
+
+## cumpriu
+- estado: aberto
+- o-que: o veredito ja saiu no log
+- vence: 2099-01-01
+- log: {passou}
+- veredito: [STRESS] PASS duracao=604800s
+- acao: escrever o relatorio
+
+## noutra-maquina
+- estado: aberto
+- o-que: roda noutro host
+- vence: 2099-01-01
+- maquina: host-que-certamente-nao-sou-eu
+- processo: irrelevante
+- acao: conferir la
+
+## em-curso
+- estado: aberto
+- o-que: prazo no futuro, sem processo nem log
+- vence: 2099-01-01
+- acao: esperar
+
+## historico
+- estado: fechado
+- o-que: compromisso ja encerrado
+- acao: nada
+"""
+
+ESPERADO = {
+    "venceu": "VENCIDO",
+    "morreu": "MORTO",
+    "com-erro": "ERRO",
+    "cumpriu": "CUMPRIDO",
+    "noutra-maquina": "REMOTO",
+    "em-curso": "EM CURSO",
+    "historico": "FECHADO",
+}
+
+
+def auto_teste():
+    """Confere que cada estado sai do avaliador — inclusive os que reprovam."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        (tmp / "erro.log").write_text("[STRESS] t=10s erros=3\n", encoding="utf-8")
+        (tmp / "passou.log").write_text(
+            "[STRESS] t=99s erros=0\n[STRESS] PASS duracao=604800s\n", encoding="utf-8"
+        )
+        livro = AUTO_TESTE.format(erro=tmp / "erro.log", passou=tmp / "passou.log")
+        agora = datetime.now()
+        falhas = []
+        for c in parse(livro):
+            estado, _ = avalia(c, agora)
+            if estado != ESPERADO[c["id"]]:
+                falhas.append(f"{c['id']}: esperado {ESPERADO[c['id']]}, veio {estado}")
+        cobrados = {i for i, e in ESPERADO.items() if e in COBRA_ACAO}
+        if cobrados != {"venceu", "morreu", "com-erro", "cumpriu"}:
+            falhas.append("o conjunto de estados que cobram acao mudou sem revisao")
+    for f in falhas:
+        print(f"nexo-prazos: FALHA {f}", file=sys.stderr)
+    if falhas:
+        return 1
+    print(f"nexo-prazos: auto-teste OK ({len(ESPERADO)} estados, 4 reprovam)")
+    return 0
+
+
+def main():
+    argv = sys.argv[1:]
+    if "--auto-teste" in argv:
+        return auto_teste()
+    curto = "--curto" in argv
+    livro = LIVRO
+    if "--livro" in argv:  # usado pelo auto-teste para exercitar os caminhos de falha
+        livro = Path(argv[argv.index("--livro") + 1])
+    if not livro.is_file():
+        print(f"erro: {livro} nao existe", file=sys.stderr)
+        return 2
+    compromissos = parse(livro.read_text(encoding="utf-8"))
+    if not compromissos:
+        print(f"erro: nenhum compromisso lido de {livro}", file=sys.stderr)
+        return 2
+
+    agora = datetime.now()
+    print(f"[prazos] {socket.gethostname()} — {agora:%Y-%m-%d %H:%M}")
+    print()
+    cobrando, abertos, fechados = [], 0, 0
+    for c in compromissos:
+        estado, notas = avalia(c, agora)
+        fechados += estado == "FECHADO"
+        abertos += estado != "FECHADO"
+        if estado in COBRA_ACAO:
+            cobrando.append((c, estado))
+        if curto and estado in ("FECHADO", "REMOTO"):
+            continue
+        print(f"  {estado:9} {c['id']}")
+        if not curto:
+            print(f"            {c.get('o-que', '(sem descricao)')}")
+            for nota in notas:
+                print(f"            {nota}")
+            if estado in COBRA_ACAO:
+                print(f"            ACAO: {c.get('acao', '(sem acao registrada)')}")
+            if c.get("cuidado"):
+                print(f"            cuidado: {c['cuidado']}")
+            print()
+
+    print(f"[prazos] {abertos} aberto(s), {fechados} fechado(s)", end="")
+    if cobrando:
+        print(": " + "; ".join(f"{c['id']} {estado}" for c, estado in cobrando))
+        print("[prazos] ha compromisso pedindo acao — veja ACAO acima e atualize docs/COMPROMISSOS.md")
+        return 1
+    print(": nada vencido.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

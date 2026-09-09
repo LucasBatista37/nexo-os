@@ -1,0 +1,91 @@
+# Compromissos de longa duração
+
+Este arquivo é a fonte de verdade dos compromissos que **não fecham por trabalho, e sim por tempo
+de relógio**: uma execução de dias, um agendamento semanal do CI, um incidente à espera de
+reincidência. Nenhum deles aparece nas checklists do Plano Mestre (que rastreiam *itens*, não
+*prazos*) nem em qualquer bateria de validação — por isso, quando são esquecidos, o esquecimento
+é silencioso e só se descobre tarde.
+
+Ele nasceu de um esquecimento real: o veredito do stress de 7 dias estava anotado como
+`2026-09-14` no plano e no `ROADMAP_STATUS`, dois dias antes do prazo verdadeiro, porque a data
+veio de um relançamento planejado (07/09) que na prática só aconteceu em 09/09 e ninguém
+recalculou. A data certa vivia apenas num relatório de progresso.
+
+`make prazos` (isto é, `tools/nexo-prazos`) lê este arquivo, calcula quanto falta para cada
+prazo, confere se o processo que sustenta o compromisso continua vivo, lê o contador de saúde no
+log e **sai com código 1** quando algo venceu, morreu ou acusou erro. Rode-o no início de cada
+bloco, junto de `make lint` — assim o prazo é lembrado por construção, e não pela memória de
+quem estiver trabalhando.
+
+## Formato
+
+Um `## <id>` em minúsculas por compromisso, seguido de campos `- chave: valor` (um por linha).
+Campos desconhecidos são ignorados; campos ausentes desligam a verificação correspondente.
+
+| campo | obrigatório | significado |
+| --- | --- | --- |
+| `estado` | sim | `aberto` ou `fechado` (fechado é histórico: não é verificado) |
+| `o-que` | sim | uma linha dizendo o que é o compromisso |
+| `inicio` | não | `AAAA-MM-DD` ou `AAAA-MM-DD HH:MM:SS` (hora local) |
+| `vence` | não | idem; ausente significa "sem prazo, apenas vigiar" |
+| `maquina` | não | `hostname` onde o compromisso roda; noutra máquina ele só é exibido |
+| `processo` | não | padrão para `pgrep -f`; se não houver processo vivo, é falha |
+| `log` | não | arquivo consultado para saúde e veredito |
+| `saude` | não | regex com **um** grupo que precisa valer `0` na última linha que casar |
+| `progresso` | não | regex com um grupo exibido como progresso (ex.: o `t=` do stress) |
+| `veredito` | não | texto que, achado no log, significa que o compromisso **cumpriu** e cobra a ação |
+| `acao` | sim | o que fazer quando vencer ou cumprir |
+| `cuidado` | não | armadilha conhecida (exibida sempre) |
+| `ref` | não | onde o compromisso está registrado no plano/documentação |
+| `verificar` | não | comando de shell; código de saída diferente de zero vira alerta |
+
+## stress-7d
+
+- estado: aberto
+- o-que: stress de 7 dias (604800 s, SMP=4) com o kernel dos blocos 105-119
+- inicio: 2026-09-09 10:17:20
+- vence: 2026-09-16 10:17:20
+- maquina: MacBook-Air-de-Lucas.local
+- processo: nexo-stress-long.img
+- log: build/logs/stress-7d-run2.out
+- progresso: \[STRESS\] t=(\d+)s
+- saude: erros=(\d+)
+- veredito: [STRESS] PASS duracao=604800s
+- acao: escrever docs/progress/2026-09-16-stress-7d.md com o veredito e os contadores finais, marcar o item de stress do Plano §6.1 como [x], rodar make roadmap e registrar no CHANGELOG
+- cuidado: NUNCA matar este processo — a rodada anterior morreu de fora aos 5,84 dias e zerou uma semana de execução; ele foi lançado desacoplado (nohup) justamente por isso
+- ref: PLANO_MESTRE_SISTEMA_OPERACIONAL.md §6.1 "stress de 24h e posteriormente 7 dias"; docs/progress/2026-09-07-stress-7d-parcial.md
+
+## fuzz-semanal
+
+- estado: aberto
+- o-que: fuzzing semanal de syscalls e parsers no CI (workflow fuzz.yml, agendado)
+- acao: ao encontrar uma execução vermelha, abrir incidente com a semente registrada no log (as sementes vêm do TSC e ficam no log justamente para reproduzir)
+- cuidado: falha silenciosa — um workflow agendado não avisa ninguém; só se descobre olhando
+- ref: .github/workflows/fuzz.yml; PLANO_MESTRE_SISTEMA_OPERACIONAL.md §6.4 "fuzzing contínuo"
+- verificar: gh run list --workflow=fuzz.yml --limit 1 --json conclusion --jq '.[0].conclusion' | grep -qx success
+
+## incidente-fs-ponteiro-nulo
+
+- estado: aberto
+- o-que: duas quedas inexplicadas do serviço fs (um #UD e uma escrita em null+0x20 dentro de write_entry) sem causa raiz
+- acao: na próxima reincidência, converter rip-base com llvm-objdump, anotar o registrador do ponteiro e tentar relocation-model=static só no fs para isolar o PIE
+- cuidado: nexofs é forbid(unsafe_code), então a origem é externa ao serviço — não procurar o bug dentro dele
+- ref: docs/incidents/2026-09-09-fs-ponteiro-nulo.md
+
+## revisao-trimestral
+
+- estado: aberto
+- o-que: revisão do Plano Mestre e do ROADMAP_STATUS (cadência trimestral definida pelo próprio plano)
+- inicio: 2026-08-29
+- vence: 2026-11-29
+- acao: reler o plano inteiro, corrigir estimativas por fase, confirmar as decisões provisórias (nome, licença, horas) e agendar a revisão seguinte
+- ref: docs/ROADMAP_STATUS.md §8
+
+## stress-24h
+
+- estado: fechado
+- o-que: stress de 24 h exigido pelo gate F1
+- inicio: 2026-08-31
+- vence: 2026-09-01
+- acao: cumprido em 2026-09-01 com zero erros
+- ref: docs/progress/2026-09-01-stress-24h.md

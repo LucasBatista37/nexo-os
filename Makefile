@@ -3,8 +3,9 @@
 #   make run        -> inicia a imagem no QEMU com display e serial no terminal
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
+#   make prazos     -> compromissos de longa duração (docs/COMPROMISSOS.md)
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap idl idl-check toolchain
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap prazos idl idl-check toolchain
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 # Margem +900s +1% da duracao: o relogio do guest (TCG) atrasa em relacao a parede sob
@@ -46,6 +47,7 @@ lint:
 	cd boot/loader && cargo clippy --release -- -D warnings
 	cd services && cargo clippy --workspace --release -- -D warnings
 	tools/nexo-unsafe-audit
+	tools/nexo-prazos --auto-teste
 
 fmt:
 	cargo fmt --all
@@ -91,6 +93,13 @@ idl-check: idl
 
 roadmap:
 	tools/roadmap-status
+
+# Compromissos que fecham por tempo de relogio (uma execucao de dias, um agendamento
+# semanal, um incidente a espera de reincidencia): nao aparecem em checklist nenhuma e
+# por isso sao esquecidos em silencio. Sai 1 quando algo venceu, morreu ou acusou erro.
+# Fica FORA de `make ci` de proposito: depende da maquina que sustenta os processos.
+prazos:
+	tools/nexo-prazos
 
 clean:
 	rm -rf build target kernel/target boot/loader/target services/target
