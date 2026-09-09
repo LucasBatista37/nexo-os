@@ -27,7 +27,9 @@ const BLK: Handle = 1;
 /// Tentativas repostas ao confirmar/aplicar (o valor inicial do `build-image`).
 const TRIES_RESET: u8 = 3;
 /// Maior artefato copiável de um slot (kernel + folga; initrd atual ~1,6 MiB).
-const FILE_MAX: usize = 4 * 1024 * 1024;
+/// Palco da **cópia** de um artefato entre slots (o maior hoje, o initrd, passa de 2 MiB).
+/// A comparação não usa o palco: é feita em fluxo (`slots_equal`).
+const FILE_MAX: usize = 8 * 1024 * 1024;
 
 /// Palco da cópia entre slots (um arquivo por vez; processo de uma só thread).
 static mut COPYBUF: [u8; FILE_MAX] = [0; FILE_MAX];
@@ -178,23 +180,38 @@ fn copy_slot(fs: &mut Fat<ChanDisk>, from: usize, to: usize) -> Option<u32> {
     Some(copied)
 }
 
-/// Compara os artefatos dos dois slots byte a byte.
+/// Tamanho dos pedaços na comparação em fluxo dos slots.
+const CMP_CHUNK: usize = 32 * 1024;
+
+/// Compara os artefatos dos dois slots byte a byte, **em fluxo**: carregar os arquivos
+/// inteiros num palco impunha um teto ao tamanho do kernel e do initrd (e foi exatamente o
+/// que aconteceu quando o initrd passou de 2 MiB — a verificação passou a responder "erro
+/// leitura" em vez de comparar).
 fn slots_equal(fs: &mut Fat<ChanDisk>) -> Option<bool> {
-    // SAFETY: unico acesso; processo de uma so thread.
-    let buf = unsafe { &mut *core::ptr::addr_of_mut!(COPYBUF) };
-    let (a, b) = buf.split_at_mut(FILE_MAX / 2);
+    let mut a = [0u8; CMP_CHUNK];
+    let mut b = [0u8; CMP_CHUNK];
     for (pa, pb) in slot_paths(0).into_iter().zip(slot_paths(1)) {
-        let na = read_all_half(fs, pa, a)?;
-        let nb = read_all_half(fs, pb, b)?;
-        if na != nb || a[..na] != b[..nb] {
+        let ea = fs.lookup(pa).ok()?;
+        let eb = fs.lookup(pb).ok()?;
+        if ea.size != eb.size {
             return Some(false);
+        }
+        let mut off = 0usize;
+        let total = ea.size as usize;
+        while off < total {
+            let n = CMP_CHUNK.min(total - off);
+            if fs.read(&ea, off as u64, &mut a[..n]).ok()? != n
+                || fs.read(&eb, off as u64, &mut b[..n]).ok()? != n
+            {
+                return None;
+            }
+            if a[..n] != b[..n] {
+                return Some(false);
+            }
+            off += n;
         }
     }
     Some(true)
-}
-
-fn read_all_half(fs: &mut Fat<ChanDisk>, path: &[u8], half: &mut [u8]) -> Option<usize> {
-    read_all(fs, path, half)
 }
 
 /// Resposta de "estado", com posições fixas: `sel X A p_ t_ s_ B p_ t_ s_` (28 bytes;
