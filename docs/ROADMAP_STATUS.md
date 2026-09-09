@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `25c0446`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `8646f1a`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 191 · 🟡 59 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -370,7 +370,7 @@ Gate: ⬜ não iniciado.
 | ✅ | panic, dump e symbolication | panic com backtrace simbolizado e **dump em disco** (setores reservados do disco de dados, caminho de emergência sem alocação; `tools/nexo-disk crashdump`; cenário `panic` no CI) — o consentimento de envio é o item da Fase 8 |
 | ⬜ | mitigação de classes de exploração |  |
 | ⬜ | benchmarks de contexto, syscall e IPC |  |
-| 🟡 | stress de 24h e posteriormente 7 dias | 24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias pendem |
+| 🟡 | stress de 24h e posteriormente 7 dias | 24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias: rodada de 2026-09-01 chegou a **5,84 dias com zero erros** (723 M trocas de contexto) e foi interrompida de fora em 2026-09-07 — `docs/progress/2026-09-07-stress-7d-parcial.md`; a rodada completa foi relançada com o kernel atual (veredito 2026-09-14) |
 | ⬜ | documentação de todas as invariantes `unsafe` |  |
 
 ### 6.2 Drivers

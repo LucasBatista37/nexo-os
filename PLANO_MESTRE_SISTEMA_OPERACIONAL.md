@@ -685,7 +685,7 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 - [x] panic, dump e symbolication — *panic com backtrace simbolizado e **dump em disco** (setores reservados do disco de dados, caminho de emergência sem alocação; `tools/nexo-disk crashdump`; cenário `panic` no CI) — o consentimento de envio é o item da Fase 8*;
 - [ ] mitigação de classes de exploração;
 - [ ] benchmarks de contexto, syscall e IPC;
-- [-] stress de 24h e posteriormente 7 dias — *24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias pendem*;
+- [-] stress de 24h e posteriormente 7 dias — *24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias: rodada de 2026-09-01 chegou a **5,84 dias com zero erros** (723 M trocas de contexto) e foi interrompida de fora em 2026-09-07 — `docs/progress/2026-09-07-stress-7d-parcial.md`; a rodada completa foi relançada com o kernel atual (veredito 2026-09-14)*;
 - [ ] documentação de todas as invariantes `unsafe`.
 
 ### 6.2 Drivers
