@@ -998,6 +998,45 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_JOB_CREATE => sys_job_create(&p),
         SYS_JOB_ATTACH => sys_job_attach(&p, f),
         SYS_JOB_KILL => sys_job_kill(&p, f),
+        SYS_PROCESS_LIST => {
+            // a lista mostra o comportamento dos outros processos: mesma capability do trace
+            if !holds_debug(&p, f.rdx as u32) {
+                return (Status::Denied, 0);
+            }
+            let cap = f.rsi as usize;
+            if cap == 0 || cap > 256 {
+                return (Status::InvalidArgs, 0);
+            }
+            let mut lista: Vec<ProcInfo> = Vec::with_capacity(cap);
+            process::for_each_live(|q| {
+                if lista.len() >= cap {
+                    return;
+                }
+                let mut info = ProcInfo {
+                    pid: q.pid,
+                    cpu_ns: q.cpu_ns.load(Ordering::Relaxed),
+                    syscalls: q.syscalls.load(Ordering::Relaxed),
+                    handles: q.handles.lock().len() as u32,
+                    threads: q.threads.lock().len() as u32,
+                    name: [0; 32],
+                };
+                let nome = q.name.as_bytes();
+                let n = nome.len().min(32);
+                info.name[..n].copy_from_slice(&nome[..n]);
+                lista.push(info);
+            });
+            // SAFETY: `lista` é um `Vec<ProcInfo>` (repr(C), sem padding indefinido) vivo aqui.
+            let bytes = unsafe {
+                core::slice::from_raw_parts(
+                    lista.as_ptr() as *const u8,
+                    lista.len() * core::mem::size_of::<ProcInfo>(),
+                )
+            };
+            match copy_to_user(f.rdi, bytes) {
+                Ok(()) => (Status::Ok, lista.len() as u64),
+                Err(e) => (e, 0),
+            }
+        }
         SYS_JOB_SET_CPU_LIMIT => {
             let job = match p.handles.lock().get(f.rdi as u32) {
                 Ok(Handle {

@@ -119,6 +119,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_threads", test_user_threads),
     ("user_cpu_time", test_user_cpu_time),
     ("user_cpu_quota", test_user_cpu_quota),
+    ("user_process_list", test_user_process_list),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1196,6 +1197,15 @@ fn test_user_cpu_time() -> TestResult {
 fn test_user_cpu_quota() -> TestResult {
     let code = run_utest(80)?;
     check!(code == 0, "quota de CPU saiu com {code}");
+    Ok(())
+}
+
+/// Listagem de processos com a capability de depuração (modo 82).
+fn test_user_process_list() -> TestResult {
+    let p = crate::process::spawn_named("utest", 82, alloc::vec![debug_handle()])
+        .map_err(String::from)?;
+    let code = crate::process::wait_and_reap(&p);
+    check!(code == 0, "process_list saiu com {code}");
     Ok(())
 }
 

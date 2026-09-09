@@ -125,6 +125,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         79 => cpu_time_test(),
         80 => quota_driver(),
         81 => quota_girador(),
+        82 => process_list_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5058,6 +5059,46 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         }
         nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
     }
+    nexo_sys::exit(0)
+}
+
+/// Modo 82: listagem de processos — handle 0 = capability de depuracao.
+fn process_list_test() -> ! {
+    let debug: nexo_sys::Handle = 0;
+    let mut lista = [nexo_sys::abi::ProcInfo::default(); 64];
+    let n = nexo_sys::process_list(&mut lista, debug).unwrap_or_else(|_| nexo_sys::exit(500));
+    if n == 0 {
+        nexo_sys::exit(501);
+    }
+    let meu = nexo_sys::get_pid();
+    let mut achei = false;
+    for info in &lista[..n] {
+        if info.pid == meu {
+            achei = true;
+            let nome = core::str::from_utf8(&info.name[..5]).unwrap_or("?");
+            if nome != "utest" {
+                nexo_rt::log!("utest: nome na listagem: {:?}", nome);
+                nexo_sys::exit(502);
+            }
+            if info.syscalls == 0 || info.threads == 0 {
+                nexo_sys::exit(503);
+            }
+        }
+    }
+    if !achei {
+        nexo_sys::exit(504);
+    }
+    // sem a capability: negado (handle 1 e o canal do orquestrador, nao a de depuracao)
+    if nexo_sys::process_list(&mut lista, 1) != Err(Status::Denied) {
+        nexo_sys::exit(505);
+    }
+    if nexo_sys::process_list(&mut lista[..0], debug) != Err(Status::InvalidArgs) {
+        nexo_sys::exit(506);
+    }
+    nexo_rt::log!(
+        "utest: process_list ok — {} processos vivos, o meu entre eles",
+        n
+    );
     nexo_sys::exit(0)
 }
 

@@ -477,6 +477,21 @@ pub fn cpu_time_ns() -> u64 {
     unsafe { raw(abi::SYS_DEBUG_INFO, 8, 0, 0) }.1
 }
 
+/// Lista os processos vivos em `out` (precisa da capability de depuração em `debug`);
+/// devolve quantos couberam.
+pub fn process_list(out: &mut [abi::ProcInfo], debug: Handle) -> Result<usize, Status> {
+    // SAFETY: ponteiro e capacidade vêm de uma slice válida.
+    let (st, v) = unsafe {
+        raw(
+            abi::SYS_PROCESS_LIST,
+            out.as_mut_ptr() as u64,
+            out.len() as u64,
+            debug as u64,
+        )
+    };
+    if st.is_ok() { Ok(v as usize) } else { Err(st) }
+}
+
 /// Limita o tempo de CPU do job a `ns` por janela de 1 s (0 = sem limite). Passando do
 /// orçamento, as threads dos membros deixam de ser escalonadas até a janela seguinte.
 pub fn job_set_cpu_limit(job: Handle, ns: u64) -> Status {

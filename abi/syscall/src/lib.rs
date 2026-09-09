@@ -158,8 +158,14 @@ pub const SYS_JOB_SET_CPU_LIMIT: u64 = 42;
 /// Janela da quota de CPU de um job ([`SYS_JOB_SET_CPU_LIMIT`]).
 pub const JOB_CPU_WINDOW_NS: u64 = 1_000_000_000;
 
+/// Lista os processos vivos: `rdi`/`rsi` = ponteiro e capacidade em [`ProcInfo`], `rdx` =
+/// handle da capability de **depuração** ([`KIND_DEBUG`]) — sem ela, `Denied`: a lista expõe
+/// o comportamento dos outros processos (threat model §9, mesma regra do trace). Devolve
+/// quantos couberam. Aditivo (2026-09-09).
+pub const SYS_PROCESS_LIST: u64 = 43;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 42;
+pub const SYS_MAX: u64 = 43;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -230,6 +236,24 @@ pub struct FbInfo {
     pub bytes_per_pixel: u32,
     /// Reservado; zero.
     pub reserved: u32,
+}
+
+/// Um processo vivo, como devolvido por [`SYS_PROCESS_LIST`] (64 bytes).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ProcInfo {
+    /// PID.
+    pub pid: u64,
+    /// Tempo de CPU consumido por todas as threads do processo (ns).
+    pub cpu_ns: u64,
+    /// Syscalls executadas.
+    pub syscalls: u64,
+    /// Handles abertos.
+    pub handles: u32,
+    /// Threads vivas.
+    pub threads: u32,
+    /// Nome (do initrd), terminado em NUL se couber.
+    pub name: [u8; 32],
 }
 
 /// Uma função PCI (64 + 6×24 bytes).
@@ -473,6 +497,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_THREAD_EXIT => "thread_exit",
         SYS_THREAD_JOIN => "thread_join",
         SYS_JOB_SET_CPU_LIMIT => "job_set_cpu_limit",
+        SYS_PROCESS_LIST => "process_list",
         _ => "?",
     }
 }
@@ -503,6 +528,7 @@ mod tests {
         assert!(Status::Ok.is_ok());
         assert_eq!(syscall_name(SYS_LOG), "log");
         assert_eq!(syscall_name(SYS_MAX + 1), "?");
+        assert_eq!(core::mem::size_of::<ProcInfo>(), 64);
         assert_eq!(core::mem::size_of::<PciInfo>(), 24 + 24 * PCI_BARS);
         assert_eq!(core::mem::size_of::<DmaBuffer>(), 24);
         assert_eq!(core::mem::size_of::<IrqInfo>(), 24);
