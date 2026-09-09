@@ -435,6 +435,9 @@ pub struct Process {
     pub device_next: AtomicU64,
     /// Topo da pilha de usuário deste processo (aleatório — ASLR da pilha).
     pub stack_top: u64,
+    /// Base onde o código foi carregado (0 para `ET_EXEC`; aleatória num PIE) — o que
+    /// converte um `rip` num deslocamento dentro do ELF.
+    pub code_base: u64,
     /// Job a que pertence (herdado por quem ele criar), se algum.
     pub job: IrqLock<Option<Arc<Job>>>,
     /// Morto pelo job (ou o processo já terminou por outra thread): sai com `EXIT_KILLED` na
@@ -606,6 +609,7 @@ pub fn spawn_elf_with_handles(
                 + crate::aslr::page_offset(USER_MAP_WINDOW / PAGE_SIZE),
         ),
         stack_top,
+        code_base: base,
         // herda o job de quem cria (um app em segundo plano puxa os filhos para o job dele)
         job: IrqLock::new(current().and_then(|c| c.job.lock().clone())),
         killed: AtomicBool::new(false),

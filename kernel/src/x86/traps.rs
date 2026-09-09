@@ -182,9 +182,24 @@ fn user_fault(frame: &mut TrapFrame) -> ! {
         frame.error_code,
         cpu::read_cr2()
     );
-    // Diagnóstico do código que falhou: com PIE + ASLR (blocos 100/102) o `rip` sozinho não
-    // diz nada, e um #UD costuma ser execução de dados/lixo — os bytes em torno dele
-    // distinguem "instrução real que a CPU recusou" de "não é código nenhum".
+    // Com PIE + ASLR (blocos 100/102) o `rip` sozinho não localiza nada: o **deslocamento
+    // dentro do ELF** é o que se procura no binário. Registrado junto com os registradores
+    // que costumam carregar o ponteiro culpado.
+    if let Some(proc) = crate::process::current() {
+        kwarn!(
+            "trap: pid {} base do codigo {:#x} (rip-base = {:#x}); rax={:#x} rcx={:#x} rdx={:#x} rsi={:#x} rdi={:#x}",
+            pid,
+            proc.code_base,
+            frame.rip.wrapping_sub(proc.code_base),
+            frame.rax,
+            frame.rcx,
+            frame.rdx,
+            frame.rsi,
+            frame.rdi
+        );
+    }
+    // Um #UD costuma ser execução de dados/lixo — os bytes em torno do `rip` distinguem
+    // "instrução real que a CPU recusou" de "não é código nenhum".
     if vector == 6 || vector == 13 {
         let inicio = frame.rip.saturating_sub(4);
         match super::syscall::copy_from_user(inicio, 16) {

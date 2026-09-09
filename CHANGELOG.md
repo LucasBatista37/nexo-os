@@ -336,6 +336,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Documentação e diagnóstico (bloco 117 — incidente do ponteiro nulo no `fs`)
+- `docs/incidents/2026-09-09-fs-ponteiro-nulo.md`: o serviço `fs` morre raramente (≈1 em 10 varreduras) no segundo boot do cenário `storage`, com `#UD` numa ocorrência e, na seguinte, escrita em `null + 0x20` dentro de `write_entry`. O `nexofs` proíbe `unsafe`, então a origem está fora dele: carregamento PIE ou corrida no kernel são os suspeitos, e o documento diz exatamente o que coletar quando reaparecer.
+- Toda exceção de modo usuário passa a registrar a **base do código** e `rip - base` (o deslocamento a procurar no ELF, que é o que falta com PIE e ASLR) mais `rax`, `rcx`, `rdx`, `rsi` e `rdi` — foi assim que a segunda ocorrência virou uma pista concreta em vez de um endereço sem sentido.
+
 ### Corrigido (Fase 8, bloco 116 — verificação A/B sem teto de tamanho)
 - O atualizador comparava os artefatos dos dois slots carregando **cada arquivo inteiro** num palco de 2 MiB. O initrd cruzou esse limite (o `utest` cresce a cada bloco) e a verificação passou a responder `erro leitura` em vez de comparar — o teste `user_update` reprovou de um bloco para o outro sem que nada do A/B tivesse mudado. A comparação agora é **em fluxo** (pedaços de 32 KiB, sem palco) e o palco da cópia subiu para 8 MiB.
 - Lição: um limite silencioso vira falha súbita quando o sistema cresce. O que quebrou foi a verificação, não a atualização — e o teste que a defendia estava certo.
