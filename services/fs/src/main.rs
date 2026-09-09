@@ -146,9 +146,17 @@ pub extern "C" fn _start(arg: u64) -> ! {
                 let disk = ChanDisk::open().unwrap_or_else(|e| fail(30, e));
                 Fs::format(disk, nexofs::DEFAULT_INODES).unwrap_or_else(|_| fail(31, "format"))
             }
+            // Falha de E/S NUNCA autoriza formatar: o disco pode estar apenas lento ou com
+            // um erro transitório (visto em campo: sob carga alta o pedido estoura o tempo do
+            // driver e volta `Io`) — formatar aí seria destruir um volume íntegro. Só
+            // estrutura inválida em disco justifica reformatar o volume de teste.
+            Err(FsError::Io) => {
+                log!("fs: montagem falhou por E/S; NAO formatando (o volume pode estar intacto)");
+                nexo_sys::exit(33)
+            }
             Err(e) if arg == 0 => {
                 log!(
-                    "fs: AVISO: volume inutilizavel ({:?}); formatando NexoFS v0 (volume de teste)",
+                    "fs: AVISO: volume com estrutura invalida ({:?}); formatando NexoFS v0 (volume de teste)",
                     e
                 );
                 let disk = ChanDisk::open().unwrap_or_else(|e| fail(30, e));

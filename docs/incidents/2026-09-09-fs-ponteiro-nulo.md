@@ -1,7 +1,7 @@
 # Incidente aberto: o `fs` morre com ponteiro nulo, raramente, no cenário `storage`
 
-**Estado**: aberto. Reproduz ~1 vez a cada 10 varreduras completas; nunca reproduziu em
-repetições isoladas do cenário.
+**Estado**: parcialmente explicado (2026-09-09). Uma terceira ocorrência mostrou uma causa
+diferente das duas primeiras — e uma falha de projeto pior, já corrigida (bloco 119).
 
 ## Sintomas
 
@@ -49,3 +49,26 @@ veio de memória corrompida por fora, ou o processo foi carregado/retomado com e
    função deveria ter recebido; se for o ponteiro de retorno, o problema está a montante, no
    chamador — e aí vale desligar o PIE só do `fs` (`relocation-model=static`) para ver se o
    fantasma some, isolando a hipótese 1.
+
+## Terceira ocorrência (2026-09-09): erro de E/S, não corrupção
+
+Com o diagnóstico do bloco 117 no lugar, a falha voltou a aparecer no mesmo teste
+(`user_install`, código 131) — mas o `fs` **não** tinha morrido de exceção:
+
+```
+fs: AVISO: volume inutilizavel (Io); formatando NexoFS v0 (volume de teste)
+fs: falha: send
+process: pid 294 'fs' saiu com 30
+```
+
+A leitura do volume voltou `Io`. A carga do host estava em **6,4** (o stress de 7 dias ocupa
+quatro vCPUs e havia uma varredura em curso): sob saturação, um pedido ao virtio-blk estoura
+o tempo do driver e volta erro. A execução seguinte, com a mesma imagem, passou 128/128.
+
+**A falha de projeto**: o `fs` tratava *qualquer* erro de montagem como "volume inutilizável"
+e **formatava** o volume de teste. Um erro de E/S transitório destruía dados íntegros. Desde
+o bloco 119, `Io` na montagem faz o serviço sair com código 33 sem tocar no disco; só
+estrutura inválida em disco autoriza reformatar.
+
+As duas primeiras ocorrências (`#UD` e escrita em `null + 0x20`) continuam **sem explicação**
+e podem ter outra raiz; o plano de coleta acima segue valendo para elas.

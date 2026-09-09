@@ -336,6 +336,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Corrigido (Fase 6, bloco 119 — erro de E/S não autoriza formatar o volume)
+- O `fs` tratava **qualquer** erro de montagem como "volume inutilizável" e formatava o volume de teste. Um erro de E/S transitório — visto em campo, com o host saturado, quando o pedido ao virtio-blk estoura o tempo do driver — **destruía um volume íntegro**. Agora `Io` na montagem faz o serviço sair com código 33 sem tocar no disco; só estrutura inválida em disco autoriza reformatar. O incidente `docs/incidents/2026-09-09-fs-ponteiro-nulo.md` foi atualizado com a evidência.
+
 ### Documentação e diagnóstico (bloco 117 — incidente do ponteiro nulo no `fs`)
 - `docs/incidents/2026-09-09-fs-ponteiro-nulo.md`: o serviço `fs` morre raramente (≈1 em 10 varreduras) no segundo boot do cenário `storage`, com `#UD` numa ocorrência e, na seguinte, escrita em `null + 0x20` dentro de `write_entry`. O `nexofs` proíbe `unsafe`, então a origem está fora dele: carregamento PIE ou corrida no kernel são os suspeitos, e o documento diz exatamente o que coletar quando reaparecer.
 - Toda exceção de modo usuário passa a registrar a **base do código** e `rip - base` (o deslocamento a procurar no ELF, que é o que falta com PIE e ASLR) mais `rax`, `rcx`, `rdx`, `rsi` e `rdi` — foi assim que a segunda ocorrência virou uma pista concreta em vez de um endereço sem sentido.
