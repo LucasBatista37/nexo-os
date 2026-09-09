@@ -25,9 +25,13 @@ jobs:
 
       - name: Dependências do sistema (QEMU, OVMF, mtools)
         run: |
-          # repositorios de terceiros do runner (Chrome, Edge...) ja derrubaram o CI com
-          # "Hash Sum mismatch"; o job so precisa do arquivo do Ubuntu
-          sudo rm -f /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources
+          # repositorios de TERCEIROS do runner (Chrome, Edge...) ja derrubaram o CI com
+          # "Hash Sum mismatch"; removidos por nao apontarem para *.ubuntu.com (os do
+          # proprio Ubuntu ficam no mesmo diretorio e sao preservados)
+          for f in /etc/apt/sources.list.d/*; do
+            [ -e "$f" ] || continue
+            grep -qiE 'ubuntu\.com' "$f" || sudo rm -f "$f"
+          done
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf mtools
 
