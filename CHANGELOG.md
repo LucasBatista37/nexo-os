@@ -336,6 +336,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Documentação (bloco 112 — relatório 104–111)
+- `docs/progress/2026-09-09-jobs-threads-e-o-ci-vermelho.md`: jobs, threads de usuário, binding por propriedades e os três dias de CI vermelho — com a regra que fica ("um bloco está pronto quando o CI daquele commit fica verde", porque ambientes diferentes violam invariantes diferentes) e o incidente aberto do `#UD` no `fs`.
+
 ### Corrigido (bloco 111 — sonda do timer sem corrida e diagnóstico de instrução inválida)
 - A verificação do tique dinâmico lia a contagem do LAPIC **depois** de reabilitar interrupções: entre armar 100 µs e ler, o próprio disparo (ou um prazo mais cedo) re-armava para 1 ms e o teste via 59 099 em vez de ≤ 6 247. Agora arma e lê com interrupções desabilitadas.
 - Exceções de modo usuário `#UD` e `#GP` passam a registrar os **16 bytes em torno do `rip`** (ou "código ilegível"): com PIE e ASLR o endereço sozinho não diz nada, e isso distingue "instrução real recusada pela CPU" de "não é código nenhum". Motivo: uma varredura viu o `fs` morrer uma única vez com instrução inválida e o log não tinha como apontar a causa; o incidente está registrado e ainda não reproduziu.
