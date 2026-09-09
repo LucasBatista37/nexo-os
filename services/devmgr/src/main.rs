@@ -1,8 +1,13 @@
 //! `devmgr` — gerenciador de dispositivos. Handle 0 = concessão raiz (`ADMIN`),
-//! handle 1 = canal do cliente. Enumera PCI, faz *binding* por IDs (tabela abaixo), deriva
-//! uma concessão restrita a cada função (`device_open`) e inicia o driver correspondente com
-//! ela; depois sobe o `fs` sobre o driver de bloco e entrega ao cliente os canais de serviço:
-//! mensagens `fs`+handle, `rng`+handle e `done`.
+//! handle 1 = canal do cliente. Enumera PCI, faz *binding* por **IDs** (VirtIO: vendor +
+//! tipo) e por **propriedades** (classe/subclasse/prog_if: NVMe e AHCI), deriva uma concessão
+//! restrita a cada função (`device_open`) e inicia o driver correspondente com ela.
+//!
+//! Todos os discos falam o mesmo `nexo.block`, então o papel de cada um é decidido **depois**
+//! de perguntar a identidade (serial e somente-leitura), não pelo barramento: o disco de
+//! dados é o `nexodata` (senão o primeiro gravável) e o de boot é o `nexoboot` (senão o
+//! primeiro somente-leitura). Depois sobe o `fs` sobre o disco de dados e o `espfs` sobre o
+//! de boot, e entrega ao cliente os canais de serviço: `fs`+handle, `rng`+handle e `done`.
 #![no_std]
 #![no_main]
 
@@ -14,14 +19,39 @@ use nexo_sys::abi::{PciInfo, Status};
 const ROOT: Handle = 0;
 const CLIENT: Handle = 1;
 
-/// Tabela de binding: (vendor, tipo virtio) → programa do initrd.
-fn driver_for(d: &PciInfo) -> Option<&'static str> {
-    if !d.is_virtio() {
-        return None;
+/// Um disco encontrado: quem o serve, o canal `nexo.block` e a identidade que ele deu.
+#[derive(Clone, Copy)]
+struct Disco {
+    driver: &'static str,
+    canal: Handle,
+    serial: [u8; 20],
+    somente_leitura: bool,
+}
+
+/// Papel do driver na composição do sistema.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Papel {
+    /// Serve `nexo.block` (o papel concreto — dados, boot, A/B — sai da identidade do disco).
+    Bloco,
+    /// Serve `nexo.rng`.
+    Rng,
+}
+
+/// Binding: por **IDs** (VirtIO: vendor + tipo do dispositivo) e por **propriedades**
+/// (classe/subclasse/prog_if do PCI, que identificam a interface programável independentemente
+/// do fabricante). Devolve o programa do initrd e o papel dele.
+fn driver_for(d: &PciInfo) -> Option<(&'static str, Papel)> {
+    if d.is_virtio() {
+        return match nexo_virtio::device_type(d.device) {
+            Some(nexo_virtio::TYPE_BLOCK) => Some(("blockdev", Papel::Bloco)),
+            Some(nexo_virtio::TYPE_RNG) => Some(("rngdev", Papel::Rng)),
+            _ => None,
+        };
     }
-    match nexo_virtio::device_type(d.device) {
-        Some(nexo_virtio::TYPE_BLOCK) => Some("blockdev"),
-        Some(nexo_virtio::TYPE_RNG) => Some("rngdev"),
+    match (d.class, d.subclass, d.prog_if) {
+        // armazenamento de massa: NVM Express e SATA em modo AHCI 1.0
+        (0x01, 0x08, 0x02) => Some(("nvmedev", Papel::Bloco)),
+        (0x01, 0x06, 0x01) => Some(("ahcidev", Papel::Bloco)),
         _ => None,
     }
 }
@@ -54,9 +84,13 @@ fn block_identity(ch: Handle) -> (bool, [u8; 20]) {
     }
 }
 
+/// Serial legível: o campo tem 20 bytes e NVMe/SATA o preenchem com **espaços** à direita
+/// (o VirtIO usa NUL), então corta no primeiro NUL e apara os espaços.
 fn serial_str(serial: &[u8; 20]) -> &str {
     let len = serial.iter().position(|&b| b == 0).unwrap_or(20);
-    core::str::from_utf8(&serial[..len]).unwrap_or("?")
+    core::str::from_utf8(&serial[..len])
+        .unwrap_or("?")
+        .trim_end()
 }
 
 /// Inicia `driver` para a função `d` com concessão restrita; devolve o canal de serviço.
@@ -85,32 +119,42 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let n = nexo_sys::pci_enum(ROOT, &mut devs)
         .unwrap_or_else(|_| fail(10, "pci_enum"))
         .min(32);
-    let mut blk: Option<Handle> = None;
-    let mut boot: Option<Handle> = None;
+    // Discos encontrados: (driver, canal, serial, somente-leitura). O papel de cada um é
+    // decidido depois de conhecer todos — assim a ordem do barramento não muda o sistema.
+    let mut discos: [Option<Disco>; 8] = [None; 8];
+    let mut ndiscos = 0;
     let mut rng: Option<Handle> = None;
     let mut bound = 0;
     for d in &devs[..n] {
-        let Some(driver) = driver_for(d) else {
+        let Some((driver, papel)) = driver_for(d) else {
             continue;
         };
         match start_driver(driver, d) {
             Ok(ch) => {
                 bound += 1;
-                match driver {
-                    "blockdev" => {
+                match papel {
+                    Papel::Bloco => {
                         let (ro, serial) = block_identity(ch);
-                        if serial_str(&serial) == "nexoboot" || (ro && boot.is_none()) {
-                            log!("devmgr: disco de boot (somente leitura) -> espfs");
-                            boot = Some(ch);
-                        } else if blk.is_none() {
-                            log!("devmgr: disco de dados '{}' -> fs", serial_str(&serial));
-                            blk = Some(ch);
+                        if ndiscos < discos.len() {
+                            log!(
+                                "devmgr: disco '{}' por {} ({})",
+                                serial_str(&serial),
+                                driver,
+                                if ro { "somente leitura" } else { "gravavel" }
+                            );
+                            discos[ndiscos] = Some(Disco {
+                                driver,
+                                canal: ch,
+                                serial,
+                                somente_leitura: ro,
+                            });
+                            ndiscos += 1;
                         } else {
                             let _ = nexo_sys::handle_close(ch);
                         }
                     }
-                    "rngdev" if rng.is_none() => rng = Some(ch),
-                    _ => {
+                    Papel::Rng if rng.is_none() => rng = Some(ch),
+                    Papel::Rng => {
                         let _ = nexo_sys::handle_close(ch);
                     }
                 }
@@ -123,6 +167,35 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             ),
         }
     }
+    // Papéis por identidade: o disco de dados é o `nexodata` (senão o primeiro gravável) e o
+    // de boot é o `nexoboot` (senão o primeiro somente-leitura).
+    let escolhe = |discos: &mut [Option<Disco>], nome: &str, ro_desejado: bool| -> Option<Disco> {
+        let mut alvo = discos
+            .iter()
+            .position(|s| s.is_some_and(|d| serial_str(&d.serial) == nome));
+        if alvo.is_none() {
+            alvo = discos
+                .iter()
+                .position(|s| s.is_some_and(|d| d.somente_leitura == ro_desejado));
+        }
+        alvo.and_then(|i| discos[i].take())
+    };
+    let blk = escolhe(&mut discos, "nexodata", false).map(|d| {
+        log!(
+            "devmgr: disco de dados '{}' ({}) -> fs",
+            serial_str(&d.serial),
+            d.driver
+        );
+        d.canal
+    });
+    let boot = escolhe(&mut discos, "nexoboot", true).map(|d| {
+        log!(
+            "devmgr: disco de boot '{}' ({}, somente leitura) -> espfs",
+            serial_str(&d.serial),
+            d.driver
+        );
+        d.canal
+    });
     log!(
         "devmgr: {} funcao(oes) PCI, {} driver(s) iniciado(s)",
         n,
@@ -162,12 +235,21 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     // gravável), entrega o canal ao `upd` e manda confirmar o slot arrancado; sem esta
     // confirmação as tentativas do loader esgotam e o boot seguinte volta ao outro slot
     // (rollback automático). Tudo best-effort: sem o SATA ou sem layout A/B, só avisa.
-    if let Some(sata) = devs[..n]
-        .iter()
-        .find(|d| d.bdf == 0x00fa && d.class == 0x01 && d.subclass == 0x06 && d.prog_if == 0x01)
-    {
-        match start_driver("ahcidev", sata) {
-            Ok(blkch) => {
+    for slot in discos.iter_mut() {
+        let Some(Disco {
+            driver,
+            canal: blkch,
+            ..
+        }) = slot.take()
+        else {
+            continue;
+        };
+        if driver != "ahcidev" {
+            let _ = nexo_sys::handle_close(blkch);
+            continue;
+        }
+        {
+            {
                 let mut confirmed = false;
                 if let Ok((ca, cb)) = nexo_sys::channel_create() {
                     match nexo_sys::process_spawn("upd", 0, &[cb, blkch]) {
@@ -201,7 +283,11 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     log!("devmgr: A/B: sem confirmacao (imagem sem layout A/B?)");
                 }
             }
-            Err(e) => log!("devmgr: A/B: ahcidev do disco de boot falhou: {:?}", e),
+        }
+    }
+    for slot in discos.iter_mut() {
+        if let Some(d) = slot.take() {
+            let _ = nexo_sys::handle_close(d.canal);
         }
     }
     let _ = nexo_sys::channel_send(CLIENT, b"done", &[]);

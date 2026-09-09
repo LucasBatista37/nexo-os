@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `4754c3f`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `da4c14b`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 191 · 🟡 59 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -122,7 +122,7 @@ Gate: 🟡 critérios atendidos; release pendente. arquivos criados/alterados/re
 | ✅ | implementar enumeração ACPI mínima | RSDP/XSDT/RSDT/MADT/HPET (`nexo-acpi`, Fase 1); tabelas de PCIe (MCFG) e AML ainda não |
 | ✅ | implementar enumeração PCI/PCIe | PCI convencional (config `0xCF8/0xCFC`, barramento 0, BARs por sondagem); PCIe/ECAM pendente |
 | ✅ | definir protocolo driver–device manager | `devmgr` inicia cada driver com `[concessão restrita, canal]` (ADR-0015); protocolo tipado vem com a IDL |
-| 🟡 | implementar binding por IDs e propriedades | binding por IDs (vendor/tipo VirtIO → driver) no `devmgr`; por propriedades (classe, ACPI) pendente |
+| 🟡 | implementar binding por IDs e propriedades | no `devmgr`: por **IDs** (vendor + tipo VirtIO → `blockdev`/`rngdev`) e por **propriedades** (classe/subclasse/prog_if do PCI: `01:08:02` → `nvmedev`, `01:06:01` → `ahcidev`) — nenhum BDF fixo, e o papel de cada disco (dados, boot, A/B) sai da identidade `nexo.block`, não do barramento (bloco 110). Binding por propriedades **ACPI** pendente |
 | ✅ | implementar VirtIO transport | `libraries/virtio` (`nexo-virtio`): capabilities, negociação, MSI-X, fila dividida; usado por `blockdev` e `rngdev` |
 | ✅ | implementar VirtIO block | `services/blockdev` em modo usuário; teste `user_block` + cenário `storage` |
 | ✅ | implementar VirtIO input | `services/inputdev` (eventos evdev, MSI-X); cenário `input` injeta teclas por QMP e confere os códigos |

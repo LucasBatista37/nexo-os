@@ -336,6 +336,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 3, bloco 110 — binding por propriedades no gerenciador de dispositivos)
+- O `devmgr` passou a reconhecer drivers também pela **classe PCI** (interface programável, independente do fabricante): `01:08:02` → `nvmedev`, `01:06:01` → `ahcidev`, ao lado do binding por IDs do VirtIO. O NVMe do ambiente de teste, que antes ficava sem driver, agora sobe como qualquer outro disco.
+- O papel de cada disco deixou de vir do barramento: todos falam `nexo.block`, então o `devmgr` pergunta a identidade e escolhe **por serial** — dados = `nexodata` (senão o primeiro gravável), boot = `nexoboot` (senão o primeiro somente-leitura). A ordem de enumeração deixou de poder trocar o disco montado em `/disk`.
+- A fase A/B do health check pós-boot não procura mais o SATA pelo **BDF fixo** `00:1f.2`: reutiliza um canal AHCI já aberto pelo laço de binding (um driver por dispositivo, sem abrir um segundo no mesmo hardware) e fecha os discos que sobram.
+
 ### Corrigido (bloco 109 — CI: repositórios de terceiros do runner)
 - O job de CI do bloco 106 falhou com `Hash Sum mismatch` ao atualizar índices do repositório do Chrome, que vem pré-configurado no runner e não tem nada com o projeto. Os dois workflows (`ci.yml`, `fuzz.yml`) passaram a **remover as fontes de terceiros** antes do `apt-get update` — o job só precisa dos pacotes do Ubuntu (QEMU, OVMF, mtools). Na primeira tentativa o `rm` levou junto o `ubuntu.sources` (o runner guarda os repositórios do próprio Ubuntu no mesmo diretório, em formato deb822) e o passo passou a não achar pacote nenhum; agora só some o que **não** aponta para `*.ubuntu.com`.
 
