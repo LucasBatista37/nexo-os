@@ -118,6 +118,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_jobs", test_user_jobs),
     ("user_threads", test_user_threads),
     ("user_cpu_time", test_user_cpu_time),
+    ("user_cpu_quota", test_user_cpu_quota),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1191,6 +1192,13 @@ fn test_user_cpu_time() -> TestResult {
     Ok(())
 }
 
+/// Quota de CPU por job: dois giradores iguais, um limitado a 200 ms/s (modo 80).
+fn test_user_cpu_quota() -> TestResult {
+    let code = run_utest(80)?;
+    check!(code == 0, "quota de CPU saiu com {code}");
+    Ok(())
+}
+
 fn run_utest(mode: u64) -> Result<i64, String> {
     let p = crate::process::spawn_named("utest", mode, Vec::new()).map_err(String::from)?;
     Ok(crate::process::wait_and_reap(&p))
@@ -1401,6 +1409,7 @@ fn periodic_cb(_: usize) {
 }
 
 fn test_timers() -> TestResult {
+    let pendentes0 = crate::timer::pending_count();
     TIMER_LOG.lock().clear();
     PERIODIC_HITS.store(0, Ordering::Relaxed);
     let t0 = crate::time::monotonic_ns();
@@ -1438,8 +1447,10 @@ fn test_timers() -> TestResult {
             "timer {arg} disparou em {dt} ms (esperado >= {want})"
         );
     }
+    // o kernel mantém timers permanentes (a janela das quotas de CPU); o que este teste
+    // exige é que os SEUS não fiquem para trás
     check!(
-        crate::timer::pending_count() == 0,
+        crate::timer::pending_count() <= pendentes0,
         "timers pendentes sobrando"
     );
     check!(

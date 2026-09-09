@@ -123,6 +123,8 @@ pub extern "C" fn _start(mode: u64) -> ! {
         77 => threads_test(),
         78 => threads_exit_race(),
         79 => cpu_time_test(),
+        80 => quota_driver(),
+        81 => quota_girador(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -327,6 +329,7 @@ fn syscall_fuzz(seed: u64) -> ! {
             || n == SYS_CHANNEL_WAIT_ANY_TIMEOUT
             || n == SYS_SET_PRIORITY
             || n == SYS_JOB_KILL
+            || n == SYS_JOB_SET_CPU_LIMIT
             || n == SYS_THREAD_EXIT
             || n == SYS_THREAD_JOIN
             // entrada aleatoria = a thread nova salta para lixo DENTRO do proprio processo e
@@ -5055,6 +5058,65 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         }
         nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
     }
+    nexo_sys::exit(0)
+}
+
+/// Modo 81: gira ate o pai o matar, reportando o proprio tempo de CPU no codigo de saida
+/// (em ms) quando o cordao de vida cai.
+fn quota_girador() -> ! {
+    let pipe: nexo_sys::Handle = 0;
+    let mut buf = [0u8; 8];
+    let mut hs = [0u32; 1];
+    loop {
+        if nexo_sys::channel_try_recv(pipe, &mut buf, &mut hs) == Err(Status::PeerClosed) {
+            nexo_sys::exit((nexo_sys::cpu_time_ns() / 1_000_000) as i64);
+        }
+        core::hint::spin_loop();
+    }
+}
+
+/// Modo 80: quota de CPU — dois giradores identicos, um num job com 200 ms/s de orcamento.
+/// Depois de ~2,5 s o limitado tem de ter consumido bem menos CPU que o livre.
+fn quota_driver() -> ! {
+    let job = nexo_sys::job_create().unwrap_or_else(|_| nexo_sys::exit(480));
+    let (livre_a, livre_b) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(481));
+    let (limit_a, limit_b) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(482));
+    let livre =
+        nexo_sys::process_spawn("utest", 81, &[livre_b]).unwrap_or_else(|_| nexo_sys::exit(483));
+    let limitado =
+        nexo_sys::process_spawn("utest", 81, &[limit_b]).unwrap_or_else(|_| nexo_sys::exit(484));
+    if nexo_sys::job_attach(job, limitado) != Status::Ok {
+        nexo_sys::exit(485);
+    }
+    if nexo_sys::job_set_cpu_limit(job, 200_000_000) != Status::Ok {
+        nexo_sys::exit(486);
+    }
+    if nexo_sys::job_set_cpu_limit(livre, 1) != Status::InvalidArgs {
+        nexo_sys::exit(487); // um processo nao e um job
+    }
+    nexo_sys::sleep_ns(2_500_000_000);
+    let _ = nexo_sys::handle_close(livre_a);
+    let _ = nexo_sys::handle_close(limit_a);
+    let ms_livre = nexo_sys::process_wait(livre).unwrap_or(-1);
+    let ms_limitado = nexo_sys::process_wait(limitado).unwrap_or(-1);
+    nexo_rt::log!(
+        "utest: quota — livre consumiu {} ms de CPU, limitado {} ms (orcamento 200 ms/s)",
+        ms_livre,
+        ms_limitado
+    );
+    if ms_livre < 500 {
+        nexo_sys::exit(488); // o girador livre mal rodou: ambiente sem CPU, teste inconclusivo
+    }
+    if ms_limitado < 100 {
+        nexo_sys::exit(489); // o limitado nao rodou nada: throttle permanente?
+    }
+    if ms_limitado * 2 > ms_livre {
+        nexo_sys::exit(490); // a quota nao segurou o limitado
+    }
+    if nexo_sys::job_set_cpu_limit(job, 0) != Status::Ok {
+        nexo_sys::exit(491);
+    }
+    nexo_sys::log("utest: quota de CPU ok — o job limitado consumiu menos da metade do livre");
     nexo_sys::exit(0)
 }
 

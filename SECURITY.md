@@ -37,7 +37,7 @@ Secure Boot ou usuários múltiplos** (decisões adiadas; ver o plano). Tudo rod
 
 | Vetor | Estado | Mitigação existente | Próximos passos |
 |---|---|---|---|
-| **App malicioso ou comprometido** (ELF de terceiros) | parcial | espaço de endereçamento próprio; syscalls validam ponteiros/faixas (`copy_from_user`); só os handles recebidos no spawn ou por canal; o lançador **só concede depois do clique** (Permitir/Negar/por tempo) e **revoga** fechando o proxy da sessão; quota de memória compartilhável por processo; fila de canal limitada; prioridades (segundo plano não atrasa o normal) | quotas de CPU/handles; domínios |
+| **App malicioso ou comprometido** (ELF de terceiros) | parcial | espaço de endereçamento próprio; syscalls validam ponteiros/faixas (`copy_from_user`); só os handles recebidos no spawn ou por canal; o lançador **só concede depois do clique** (Permitir/Negar/por tempo) e **revoga** fechando o proxy da sessão; quota de memória compartilhável por processo; fila de canal limitada; prioridades (segundo plano não atrasa o normal) | quotas de handles; domínios |
 | Mensagens IPC malformadas (entre serviços e do app) | coberto | decodificadores gerados do IDL (tamanhos, versões, campos aditivos); erro devolvido, nunca pânico; fuzz-lite dos decodificadores nos testes de host; **fuzz de syscalls** semanal no CI | fuzz guiado por cobertura |
 | Pacotes de rede malformados | parcial | parsers de Ethernet/ARP/IPv4/ICMP/UDP/DHCP/DNS/TCP/IPv6 com fuzz-lite e fuzz de estados de protocolo; TCP com janela/retransmissão testados; firewall por aplicativo | fuzz de rede real; TLS (adiado) |
 | Imagem de disco malformada / corte de energia | coberto | NexoFS com verificação e **reparo** na montagem (referências duplas, órfãos), teste de corte de energia durante `rename`/escrita; cenário `powercut` no CI | — |
@@ -48,7 +48,7 @@ Secure Boot ou usuários múltiplos** (decisões adiadas; ver o plano). Tudo rod
 | Execução de dados, escrita em código, estouro de pilha, endereço inválido | coberto | NX, W^X + CR0.WP, guard pages (kernel e usuário), `#DF` em IST, `#PF` fatal simbolizado; cenários `fault`/`overflow`/`panic` | PIE para os programas C (`nexo-cc` ainda linka `ET_EXEC`) |
 | Atualização adulterada ou rollback | parcial | layout A/B com fallback estrutural e **health check pós-boot com rollback automático**; manifesto compara versões; lista de revogação `/apps/.revoked` | **assinatura de pacotes e raiz de confiança (adiadas)** — até lá, só repositórios locais/confiáveis |
 | Vazamento entre janelas/Contextos (keylogging, leitura de tela) | coberto | posse da entrada no compositor; clipboard/arrasto mediados; leitor de tela só por assinatura de eventos semânticos; avisos e documentos por Contexto | — |
-| Negação de serviço por um processo | parcial | quota de páginas compartilháveis, `QueueFull` nas filas de canal, limite de superfícies/sessões no compositor, reinício com limite no gerenciador de serviços | quotas de CPU/heap |
+| Negação de serviço por um processo | parcial | quota de páginas compartilháveis, **quota de CPU por job** (`job_set_cpu_limit`: orçamento por janela de 1 s, com throttle no escalonador), `QueueFull` nas filas de canal, limite de superfícies/sessões no compositor, reinício com limite no gerenciador de serviços | quotas de heap |
 | Acesso físico, canais laterais (Spectre e afins), TLS/rede hostil | fora do escopo | — | cifra de disco e TLS ficam para depois da raiz de confiança |
 
 ### Suposições

@@ -815,6 +815,33 @@ pub fn on_tick(fronteira: bool) {
     let has_work = g.run_queue.iter().any(|t| allowed_on(t, ci));
     // uma NORMAL pronta preempta a de baixa prioridade em execução já neste tique
     let normal_waiting = cur.prio.load(Ordering::Relaxed) == 1 && normal_ready(&g.run_queue, ci);
+    // Quota de CPU: a thread em execução confere o próprio job a cada fronteira de tique,
+    // somando a fatia que ainda não foi creditada — sem isto, um processo que gira sozinho
+    // nunca sai da CPU, nunca credita nada e nunca estouraria o orçamento.
+    if fronteira && let Some(proc) = cur.process.as_ref() {
+        let job = proc.job.lock().clone();
+        if let Some(job) = job
+            && job.tem_quota()
+        {
+            // SAFETY: lock detido.
+            let entrou = unsafe { cur.inner().entrou_em_ns };
+            let extra = crate::time::monotonic_ns().saturating_sub(entrou);
+            if job.estourou(extra) {
+                job.marca_throttle();
+            }
+        }
+    }
+    // a thread atual perdeu o orçamento do job: sai agora, mesmo sem ninguém para substituí-la
+    let sem_orcamento = cur
+        .process
+        .as_ref()
+        .is_some_and(crate::process::em_throttle);
+    if sem_orcamento && !cur.is_idle {
+        g.preemptions += 1;
+        drop(cur);
+        schedule_locked(g, State::Ready);
+        return;
+    }
     if has_work && (cur.is_idle || expired || normal_waiting) {
         g.preemptions += 1;
         if normal_waiting && !expired {
@@ -863,7 +890,12 @@ pub fn on_resched_ipi() {
 }
 
 fn allowed_on(t: &Arc<Thread>, cpu_index: usize) -> bool {
-    t.affinity.load(Ordering::Relaxed) & (1u64 << cpu_index.min(63)) != 0
+    if t.affinity.load(Ordering::Relaxed) & (1u64 << cpu_index.min(63)) == 0 {
+        return false;
+    }
+    // Quota de CPU (bloco 114): as threads de um job sem orçamento na janela não são
+    // escolhidas — a CPU fica ociosa em vez de ser tomada por quem já gastou a sua parte.
+    !t.process.as_ref().is_some_and(crate::process::em_throttle)
 }
 
 /// Restringe a thread `id` às CPUs da máscara. Devolve `false` se não existe.

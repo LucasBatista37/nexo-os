@@ -149,8 +149,17 @@ pub const SYS_THREAD_EXIT: u64 = 40;
 /// processo ou é a própria. Bloqueia.
 pub const SYS_THREAD_JOIN: u64 = 41;
 
+/// Limita o tempo de CPU do job `rdi` (`ADMIN`) a `rsi` nanossegundos por **janela de 1 s**
+/// (0 = sem limite). Passando do orçamento, o job entra em *throttle*: o escalonador ignora
+/// as threads dos membros até a janela seguinte — a CPU fica ociosa em vez de ser tomada.
+/// Aditivo (2026-09-09).
+pub const SYS_JOB_SET_CPU_LIMIT: u64 = 42;
+
+/// Janela da quota de CPU de um job ([`SYS_JOB_SET_CPU_LIMIT`]).
+pub const JOB_CPU_WINDOW_NS: u64 = 1_000_000_000;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 41;
+pub const SYS_MAX: u64 = 42;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -463,6 +472,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_THREAD_CREATE => "thread_create",
         SYS_THREAD_EXIT => "thread_exit",
         SYS_THREAD_JOIN => "thread_join",
+        SYS_JOB_SET_CPU_LIMIT => "job_set_cpu_limit",
         _ => "?",
     }
 }

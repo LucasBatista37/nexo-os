@@ -477,6 +477,13 @@ pub fn cpu_time_ns() -> u64 {
     unsafe { raw(abi::SYS_DEBUG_INFO, 8, 0, 0) }.1
 }
 
+/// Limita o tempo de CPU do job a `ns` por janela de 1 s (0 = sem limite). Passando do
+/// orçamento, as threads dos membros deixam de ser escalonadas até a janela seguinte.
+pub fn job_set_cpu_limit(job: Handle, ns: u64) -> Status {
+    // SAFETY: syscall sem ponteiros.
+    unsafe { raw(abi::SYS_JOB_SET_CPU_LIMIT, job as u64, ns, 0) }.0
+}
+
 /// Cria uma thread neste processo: `entry(arg)` numa pilha própria de 256 KiB; a função deve
 /// terminar com [`thread_exit`]. Threads partilham handles e memória.
 pub fn thread_create(entry: extern "C" fn(u64) -> !, arg: u64) -> Result<Handle, Status> {

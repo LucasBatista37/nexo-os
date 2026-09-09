@@ -162,8 +162,15 @@ pub fn init() {
     while !WORKER_READY.load(Ordering::Acquire) {
         sched::yield_now();
     }
+    // janela das quotas de CPU dos jobs (bloco 114)
+    periodic_ns(
+        nexo_syscall_abi::JOB_CPU_WINDOW_NS,
+        crate::process::cpu_quota_tick,
+        0,
+    );
     kinfo!(
-        "timer: thread ktimer ativa; despacho no tique dinamico da BSP (ate {} ms de cobertura)",
-        1000 / crate::time::HZ
+        "timer: thread ktimer ativa; despacho no tique dinamico da BSP (ate {} ms de cobertura); janela de quota de CPU de {} s",
+        1000 / crate::time::HZ,
+        nexo_syscall_abi::JOB_CPU_WINDOW_NS / 1_000_000_000
     );
 }

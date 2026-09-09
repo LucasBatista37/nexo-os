@@ -998,6 +998,23 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
         SYS_JOB_CREATE => sys_job_create(&p),
         SYS_JOB_ATTACH => sys_job_attach(&p, f),
         SYS_JOB_KILL => sys_job_kill(&p, f),
+        SYS_JOB_SET_CPU_LIMIT => {
+            let job = match p.handles.lock().get(f.rdi as u32) {
+                Ok(Handle {
+                    object: Object::Job(j),
+                    rights,
+                }) => {
+                    if !rights.contains(RIGHT_ADMIN) {
+                        return (Status::Denied, 0);
+                    }
+                    j
+                }
+                Ok(_) => return (Status::InvalidArgs, 0),
+                Err(e) => return (e, 0),
+            };
+            job.set_cpu_limit(f.rsi);
+            (Status::Ok, 0)
+        }
         SYS_THREAD_CREATE => match process::create_user_thread(&p, f.rdi, f.rsi) {
             Ok(tid) => match p.handles.lock().insert(Handle {
                 object: Object::Thread(tid),

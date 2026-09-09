@@ -189,6 +189,31 @@ impl Drop for AddressSpace {
 /// acordar de uma espera. Não há hierarquia de jobs (um processo pertence a no máximo um).
 pub struct Job {
     members: IrqLock<Vec<alloc::sync::Weak<Process>>>,
+    /// Orçamento de CPU por janela de 1 s (ns); 0 = sem limite.
+    cpu_limite_ns: AtomicU64,
+    /// Tempo de CPU somado dos membros no início da janela atual.
+    cpu_base_ns: AtomicU64,
+    /// Orçamento esgotado: o escalonador ignora as threads dos membros até a próxima janela.
+    throttled: AtomicBool,
+}
+
+/// Jobs com quota, para a varredura periódica (fracos: um job sem handles morre).
+static JOBS_COM_QUOTA: IrqLock<Vec<alloc::sync::Weak<Job>>> = IrqLock::new(Vec::new());
+
+/// Varre os jobs com quota: fecha a janela, decide o *throttle* e reancora o orçamento.
+/// Chamada por um timer periódico de [`nexo_syscall_abi::JOB_CPU_WINDOW_NS`].
+pub fn cpu_quota_tick(_: usize) {
+    let jobs: Vec<Arc<Job>> = JOBS_COM_QUOTA
+        .lock()
+        .iter()
+        .filter_map(|w| w.upgrade())
+        .collect();
+    JOBS_COM_QUOTA
+        .lock()
+        .retain(|w| w.strong_count() > 0 && w.upgrade().is_some_and(|j| j.tem_quota()));
+    for job in jobs {
+        job.fecha_janela();
+    }
 }
 
 impl Job {
@@ -196,7 +221,87 @@ impl Job {
     pub fn new() -> Job {
         Job {
             members: IrqLock::new(Vec::new()),
+            cpu_limite_ns: AtomicU64::new(0),
+            cpu_base_ns: AtomicU64::new(0),
+            throttled: AtomicBool::new(false),
         }
+    }
+
+    /// `true` se o job tem orçamento de CPU definido.
+    pub fn tem_quota(&self) -> bool {
+        self.cpu_limite_ns.load(Ordering::Relaxed) != 0
+    }
+
+    /// `true` enquanto o orçamento da janela está esgotado.
+    pub fn throttled(&self) -> bool {
+        self.throttled.load(Ordering::Relaxed)
+    }
+
+    /// Tempo de CPU somado dos membros vivos (o creditado nas trocas de contexto).
+    fn cpu_total_ns(&self) -> u64 {
+        let membros: Vec<Arc<Process>> = self
+            .members
+            .lock()
+            .iter()
+            .filter_map(|w| w.upgrade())
+            .collect();
+        membros
+            .iter()
+            .map(|p| p.cpu_ns.load(Ordering::Relaxed))
+            .sum()
+    }
+
+    /// Gastou o orçamento da janela, contando `extra` ns ainda não creditados (a fatia em
+    /// curso de quem chama)? Chamado a cada fronteira de tique pela thread em execução, para
+    /// o throttle agir em ~1 ms em vez de só no fim da janela.
+    pub fn estourou(&self, extra: u64) -> bool {
+        let limite = self.cpu_limite_ns.load(Ordering::Relaxed);
+        if limite == 0 {
+            return false;
+        }
+        let gasto = self
+            .cpu_total_ns()
+            .saturating_add(extra)
+            .saturating_sub(self.cpu_base_ns.load(Ordering::Relaxed));
+        gasto >= limite
+    }
+
+    /// Liga o throttle (o orçamento acabou no meio da janela).
+    pub fn marca_throttle(&self) {
+        self.throttled.store(true, Ordering::Relaxed);
+    }
+
+    /// Define o orçamento por janela (0 remove o limite) e reancora a janela atual.
+    pub fn set_cpu_limit(self: &Arc<Job>, ns: u64) {
+        self.cpu_limite_ns.store(ns, Ordering::Relaxed);
+        self.cpu_base_ns
+            .store(self.cpu_total_ns(), Ordering::Relaxed);
+        if ns == 0 {
+            self.throttled.store(false, Ordering::Relaxed);
+            return;
+        }
+        let mut lista = JOBS_COM_QUOTA.lock();
+        if !lista.iter().any(|w| w.as_ptr() == Arc::as_ptr(self)) {
+            lista.push(Arc::downgrade(self));
+        }
+    }
+
+    /// Fim da janela: decide o *throttle* da próxima e reancora o orçamento.
+    fn fecha_janela(&self) {
+        let limite = self.cpu_limite_ns.load(Ordering::Relaxed);
+        if limite == 0 {
+            self.throttled.store(false, Ordering::Relaxed);
+            return;
+        }
+        let total = self.cpu_total_ns();
+        let gasto = total.saturating_sub(self.cpu_base_ns.load(Ordering::Relaxed));
+        // O excedente é cobrado da janela seguinte: um job que estourou muito fica em
+        // throttle até compensar, em vez de ganhar um crédito novo a cada segundo.
+        self.cpu_base_ns.store(
+            total.saturating_sub(gasto.saturating_sub(limite)),
+            Ordering::Relaxed,
+        );
+        self.throttled.store(gasto >= limite, Ordering::Relaxed);
     }
 
     /// Anexa `p` (e marca nele o job, para a herança).
@@ -287,6 +392,14 @@ pub fn thread_exit_current() -> ! {
         }
     }
     sched::exit_current()
+}
+
+/// `true` se a thread de `p` deve ser ignorada pelo escalonador agora (job em *throttle*).
+pub fn em_throttle(p: &Arc<Process>) -> bool {
+    p.job
+        .lock()
+        .as_ref()
+        .is_some_and(|j| j.throttled() && j.tem_quota())
 }
 
 /// `true` se o processo atual foi morto pelo job (deve sair na próxima oportunidade).
