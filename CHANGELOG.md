@@ -336,6 +336,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Corrigido (bloco 111 — sonda do timer sem corrida e diagnóstico de instrução inválida)
+- A verificação do tique dinâmico lia a contagem do LAPIC **depois** de reabilitar interrupções: entre armar 100 µs e ler, o próprio disparo (ou um prazo mais cedo) re-armava para 1 ms e o teste via 59 099 em vez de ≤ 6 247. Agora arma e lê com interrupções desabilitadas.
+- Exceções de modo usuário `#UD` e `#GP` passam a registrar os **16 bytes em torno do `rip`** (ou "código ilegível"): com PIE e ASLR o endereço sozinho não diz nada, e isso distingue "instrução real recusada pela CPU" de "não é código nenhum". Motivo: uma varredura viu o `fs` morrer uma única vez com instrução inválida e o log não tinha como apontar a causa; o incidente está registrado e ainda não reproduziu.
+
 ### Adicionado (Fase 3, bloco 110 — binding por propriedades no gerenciador de dispositivos)
 - O `devmgr` passou a reconhecer drivers também pela **classe PCI** (interface programável, independente do fabricante): `01:08:02` → `nvmedev`, `01:06:01` → `ahcidev`, ao lado do binding por IDs do VirtIO. O NVMe do ambiente de teste, que antes ficava sem driver, agora sobe como qualquer outro disco.
 - O papel de cada disco deixou de vir do barramento: todos falam `nexo.block`, então o `devmgr` pergunta a identidade e escolhe **por serial** — dados = `nexodata` (senão o primeiro gravável), boot = `nexoboot` (senão o primeiro somente-leitura). A ordem de enumeração deixou de poder trocar o disco montado em `/disk`.

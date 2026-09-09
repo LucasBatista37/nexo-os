@@ -179,9 +179,13 @@ pub fn notify_deadline(deadline_ns: u64) {
 /// Teste/diagnóstico: arma o one-shot da BSP para daqui a `ns` (só na BSP) e devolve
 /// (LVT do timer, contagem atual logo após o armamento).
 pub fn probe_arm(ns: u64) -> (u32, u32) {
-    let l = crate::x86::apic::lapic();
-    arm_bsp(monotonic_ns() + ns);
-    (l.timer_lvt(), l.timer_current())
+    // Sem interrupções: entre armar e ler, o próprio one-shot (ou um prazo mais cedo) podia
+    // disparar e re-armar para 1 ms — a leitura via a contagem nova, não a que pedimos.
+    cpu::without_interrupts(|| {
+        let l = crate::x86::apic::lapic();
+        arm_bsp(monotonic_ns() + ns);
+        (l.timer_lvt(), l.timer_current())
+    })
 }
 
 /// Contagem do timer do LAPIC correspondente a `ns` (com o divisor calibrado).

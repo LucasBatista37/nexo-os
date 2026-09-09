@@ -182,6 +182,20 @@ fn user_fault(frame: &mut TrapFrame) -> ! {
         frame.error_code,
         cpu::read_cr2()
     );
+    // Diagnóstico do código que falhou: com PIE + ASLR (blocos 100/102) o `rip` sozinho não
+    // diz nada, e um #UD costuma ser execução de dados/lixo — os bytes em torno dele
+    // distinguem "instrução real que a CPU recusou" de "não é código nenhum".
+    if vector == 6 || vector == 13 {
+        let inicio = frame.rip.saturating_sub(4);
+        match super::syscall::copy_from_user(inicio, 16) {
+            Ok(bytes) => kwarn!(
+                "trap: bytes em {:#x}..+16: {:02x?} (rip em +4)",
+                inicio,
+                &bytes[..]
+            ),
+            Err(_) => kwarn!("trap: codigo em {:#x} ilegivel (nao mapeado?)", inicio),
+        }
+    }
     let reason = match vector {
         13 => "protecao geral em modo usuario",
         14 => "falta de pagina em modo usuario",
