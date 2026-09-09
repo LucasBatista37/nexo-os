@@ -3,7 +3,11 @@
 //! memória física (quadros livres/utilizáveis). Cada estatística vira uma célula verde (sã) ou
 //! vermelha (anômala); a última célula é um *heartbeat* que alterna de cor a cada atualização —
 //! prova visível (e testável de fora) de que o monitor está vivo e relendo o kernel.
-//! Handle 0 = canal do orquestrador (recebe "sess"; cordão de vida; emite "pronto").
+//! Handle 0 = canal do orquestrador (recebe "sess"; cordão de vida; emite "pronto");
+//! handle 1 = capability de **depuração**, opcional: com ela o monitor lê `process_list` e
+//! mostra o processo que mais consumiu CPU desde a última atualização (nome e percentagem) —
+//! sem ela, funciona como antes. É a mesma capability do trace, e pela mesma razão: a lista
+//! expõe o comportamento dos outros processos.
 #![no_std]
 #![no_main]
 
@@ -14,8 +18,10 @@ use nexo_sys::Handle;
 use nexo_sys::abi::Status;
 
 const PIPE: Handle = 0;
+/// Capability de depuração (opcional): habilita a linha do processo mais pesado.
+const DEBUG: Handle = 1;
 const W: i32 = 44;
-const H: i32 = 10;
+const H: i32 = 18;
 /// Célula k (0..4): 6x6 em x=2+8k, y=2. As quatro primeiras são estatísticas; a 5ª é o heartbeat.
 fn cell(k: i32) -> Rect {
     Rect::new(2 + 8 * k, 2, 6, 6)
@@ -24,6 +30,53 @@ fn cell(k: i32) -> Rect {
 fn fail(code: i64, what: &str) -> ! {
     log!("monitor: falha: {}", what);
     nexo_sys::exit(code)
+}
+
+/// Amostra do processo mais pesado: nome e centésimos de CPU (0..10000) na janela.
+struct Pesado {
+    nome: [u8; 16],
+    nome_len: usize,
+    centesimos: u64,
+}
+
+/// Lê `process_list` e devolve quem mais gastou CPU desde `anterior` (pid → cpu_ns).
+/// `None` sem a capability de depuração.
+fn mais_pesado(anterior: &mut [(u64, u64); 32], janela_ns: u64) -> Option<Pesado> {
+    let mut lista = [nexo_sys::abi::ProcInfo::default(); 32];
+    let n = nexo_sys::process_list(&mut lista, DEBUG).ok()?;
+    let mut melhor: Option<(usize, u64)> = None;
+    for info in &lista[..n] {
+        let antes = anterior
+            .iter()
+            .find(|(pid, _)| *pid == info.pid)
+            .map_or(info.cpu_ns, |(_, ns)| *ns);
+        let delta = info.cpu_ns.saturating_sub(antes);
+        if melhor.is_none_or(|(_, d)| delta > d) {
+            melhor = Some((
+                lista[..n]
+                    .iter()
+                    .position(|q| q.pid == info.pid)
+                    .unwrap_or(0),
+                delta,
+            ));
+        }
+    }
+    for (slot, info) in anterior.iter_mut().zip(lista[..n].iter()) {
+        *slot = (info.pid, info.cpu_ns);
+    }
+    for slot in anterior.iter_mut().skip(n) {
+        *slot = (0, 0);
+    }
+    let (i, delta) = melhor?;
+    let info = &lista[i];
+    let mut nome = [0u8; 16];
+    let len = info.name.iter().position(|&b| b == 0).unwrap_or(16).min(16);
+    nome[..len].copy_from_slice(&info.name[..len]);
+    Some(Pesado {
+        nome,
+        nome_len: len,
+        centesimos: delta.saturating_mul(10_000) / janela_ns.max(1),
+    })
 }
 
 /// Lê o kernel e devolve a sanidade de cada estatística.
@@ -41,7 +94,7 @@ fn read_stats() -> [bool; 4] {
     ]
 }
 
-fn redraw(base: u64, oks: &[bool; 4], hb: bool) {
+fn redraw(base: u64, oks: &[bool; 4], hb: bool, pesado: Option<&Pesado>) {
     // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
     let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize) };
     let mut s = Surface::new(px, W as u32, H as u32, W as u32, PixelFormat::Rgbx8888)
@@ -61,6 +114,23 @@ fn redraw(base: u64, oks: &[bool; 4], hb: bool) {
         Color::rgb(255, 0, 255)
     };
     s.fill_rect(cell(4), c);
+    // linha do processo mais pesado (só com a capability de depuração)
+    if let Some(p) = pesado {
+        let nome = core::str::from_utf8(&p.nome[..p.nome_len]).unwrap_or("?");
+        nexo_gfx::text::draw_text(&mut s, nome, 2, 10, 1, Color::rgb(220, 220, 220), None);
+        let mut pct = [b' '; 5];
+        let inteiro = (p.centesimos / 100).min(99) as u8;
+        pct[0] = b'0' + inteiro / 10;
+        pct[1] = b'0' + inteiro % 10;
+        pct[2] = b'%';
+        let txt = core::str::from_utf8(&pct[..3]).unwrap_or("?");
+        draw_pct(&mut s, txt);
+    }
+}
+
+/// Escreve a percentagem alinhada à direita da janela.
+fn draw_pct(s: &mut Surface<'_>, txt: &str) {
+    nexo_gfx::text::draw_text(s, txt, W - 26, 10, 1, Color::rgb(220, 220, 220), None);
 }
 
 #[unsafe(no_mangle)]
@@ -118,7 +188,12 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         nexo_sys::debug_info(5),
         nexo_sys::debug_info(6)
     );
-    redraw(base, &oks, hb);
+    let mut anterior = [(0u64, 0u64); 32];
+    let mut pesado = mais_pesado(&mut anterior, 100_000_000);
+    if pesado.is_some() {
+        log!("monitor: capability de depuracao presente — mostrando o processo mais pesado");
+    }
+    redraw(base, &oks, hb, pesado.as_ref());
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| fail(29, "enc commit"));
@@ -143,7 +218,8 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         nexo_sys::sleep_ns(100_000_000);
         hb = !hb;
         let oks = read_stats();
-        redraw(base, &oks, hb);
+        pesado = mais_pesado(&mut anterior, 100_000_000);
+        redraw(base, &oks, hb, pesado.as_ref());
         let m = wm::CommitRequest { id }
             .encode_msg(&mut out)
             .unwrap_or_else(|_| fail(30, "enc commit2"));

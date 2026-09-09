@@ -336,6 +336,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 6, bloco 118 — o monitor mostra o processo mais pesado)
+- Com a capability de **depuração** (handle 1, opcional) o monitor lê `process_list` (bloco 115) e desenha o nome e a percentagem de CPU do processo que mais consumiu desde a última atualização; sem a capability, funciona como antes. A janela cresceu para 18 linhas. Teste `user_monitor`: o driver entrega a capability e espera a linha de texto aparecer.
+
 ### Corrigido (Fase 6, bloco 119 — erro de E/S não autoriza formatar o volume)
 - O `fs` tratava **qualquer** erro de montagem como "volume inutilizável" e formatava o volume de teste. Um erro de E/S transitório — visto em campo, com o host saturado, quando o pedido ao virtio-blk estoura o tempo do driver — **destruía um volume íntegro**. Agora `Io` na montagem faz o serviço sair com código 33 sem tocar no disco; só estrutura inválida em disco autoriza reformatar. O incidente `docs/incidents/2026-09-09-fs-ponteiro-nulo.md` foi atualizado com a evidência.
 

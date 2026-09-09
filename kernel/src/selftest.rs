@@ -4641,8 +4641,13 @@ fn test_user_monitor() -> TestResult {
         rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
     }];
     let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
-    let mon = crate::process::spawn_named("monitor", 0, alloc::vec![channel_handle(pa)])
-        .map_err(String::from)?;
+    // handle 1 = capability de depuração: habilita a linha do processo mais pesado (bloco 118)
+    let mon = crate::process::spawn_named(
+        "monitor",
+        0,
+        alloc::vec![channel_handle(pa), debug_handle()],
+    )
+    .map_err(String::from)?;
     let driver = crate::process::spawn_named(
         "utest",
         51,

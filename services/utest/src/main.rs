@@ -765,6 +765,29 @@ fn monitor_driver() -> ! {
     wm_wait_px(ob, stride, 42, 10, (255, 255, 255), 1375);
     wm_wait_px(ob, stride, 42, 10, (255, 0, 255), 1376);
     wm_wait_px(ob, stride, 42, 10, (255, 255, 255), 1377);
+    // linha do processo mais pesado (bloco 118): texto claro na faixa y=18..24 da janela
+    let start = nexo_sys::time_now();
+    loop {
+        let mut achou = false;
+        for y in 18..25 {
+            for x in 10..50 {
+                if wm_px(ob, stride, x, y) == (220, 220, 220) {
+                    achou = true;
+                    break;
+                }
+            }
+            if achou {
+                break;
+            }
+        }
+        if achou {
+            break;
+        }
+        if nexo_sys::time_now() - start > 10_000_000_000 {
+            nexo_sys::exit(1378); // o monitor com capability nao mostrou o processo mais pesado
+        }
+        nexo_sys::sleep_ns(20_000_000);
+    }
 
     nexo_sys::log("utest: monitor ok — estatisticas do kernel saas e heartbeat vivo");
     nexo_sys::exit(0)
