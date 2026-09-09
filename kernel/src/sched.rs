@@ -51,6 +51,9 @@ pub enum State {
 struct Inner {
     state: State,
     sp: u64,
+    /// Instante (ns monotônicos) em que esta thread recebeu a CPU — para creditar o tempo
+    /// ao processo dela quando sair (contabilidade de CPU, bloco 113).
+    entrou_em_ns: u64,
     wake_at_ns: u64,
     quantum_left: u32,
     waiters: Vec<Arc<Thread>>,
@@ -244,6 +247,7 @@ fn new_thread(
         inner: UnsafeCell::new(Inner {
             state: State::Ready,
             sp: 0,
+            entrou_em_ns: 0,
             wake_at_ns: 0,
             quantum_left: QUANTUM_TICKS,
             waiters: Vec::new(),
@@ -477,10 +481,20 @@ fn schedule_locked(g: nexo_sync::SpinLockGuard<'static, Sched>, new_state: State
         }
         return;
     }
+    // Contabilidade de CPU: credita ao processo da thread que sai o tempo desde que ela
+    // recebeu a CPU, e marca a entrada da que assume. Threads de kernel (sem processo) não
+    // entram na conta.
+    let agora = crate::time::monotonic_ns();
     // SAFETY: lock detido; `cur` e `next` são distintas.
     unsafe {
-        cur.inner().state = new_state;
+        let ci = cur.inner();
+        if let Some(proc) = cur.process.as_ref() {
+            let usado = agora.saturating_sub(ci.entrou_em_ns);
+            proc.cpu_ns.fetch_add(usado, Ordering::Relaxed);
+        }
+        ci.state = new_state;
         let n = next.inner();
+        n.entrou_em_ns = agora;
         n.state = State::Running;
         n.quantum_left = QUANTUM_TICKS;
     }
@@ -607,6 +621,20 @@ pub fn sleep_ns(ns: u64) {
     while crate::time::monotonic_ns() < wake_at {
         yield_now();
     }
+}
+
+/// Tempo (ns) que a thread atual já ocupa a CPU nesta fatia — o que ainda não foi creditado
+/// ao processo dela (o crédito acontece na troca de contexto).
+pub fn current_slice_ns() -> u64 {
+    cpu::without_interrupts(|| {
+        let g = SCHED.lock();
+        let Some(cur) = g.running[percpu::current().index].as_ref() else {
+            return 0;
+        };
+        // SAFETY: lock detido.
+        let entrou = unsafe { cur.inner().entrou_em_ns };
+        crate::time::monotonic_ns().saturating_sub(entrou)
+    })
 }
 
 /// Prazo da dormida mais próxima ainda no futuro (depois de `now`, ns monotônicos).

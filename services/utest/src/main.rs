@@ -122,6 +122,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         76 => job_parent(),
         77 => threads_test(),
         78 => threads_exit_race(),
+        79 => cpu_time_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5054,6 +5055,45 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         }
         nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
     }
+    nexo_sys::exit(0)
+}
+
+/// Modo 79: contabilidade de CPU — girar consome tempo de CPU, dormir não.
+fn cpu_time_test() -> ! {
+    let girar = |ns: u64| {
+        let ate = nexo_sys::time_now() + ns;
+        while nexo_sys::time_now() < ate {
+            core::hint::spin_loop();
+        }
+    };
+    let c0 = nexo_sys::cpu_time_ns();
+    girar(60_000_000);
+    let c1 = nexo_sys::cpu_time_ns();
+    nexo_sys::sleep_ns(60_000_000);
+    let c2 = nexo_sys::cpu_time_ns();
+    // girar 60 ms deve creditar a maior parte desse tempo; dormir 60 ms, quase nada
+    let girado = c1 - c0;
+    let dormido = c2 - c1;
+    if girado < 30_000_000 {
+        nexo_rt::log!("utest: cpu_time girando creditou so {} ns", girado);
+        nexo_sys::exit(470);
+    }
+    if dormido > girado / 2 {
+        nexo_rt::log!(
+            "utest: cpu_time dormindo creditou {} ns (girando {} ns)",
+            dormido,
+            girado
+        );
+        nexo_sys::exit(471);
+    }
+    if nexo_sys::cpu_time_ns() < c2 {
+        nexo_sys::exit(472); // o contador nao pode retroceder
+    }
+    nexo_rt::log!(
+        "utest: cpu_time ok — girar 60 ms creditou {} ms, dormir 60 ms creditou {} us",
+        girado / 1_000_000,
+        dormido / 1000
+    );
     nexo_sys::exit(0)
 }
 

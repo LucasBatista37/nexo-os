@@ -471,6 +471,12 @@ pub fn job_kill(job: Handle) -> Status {
     unsafe { raw(abi::SYS_JOB_KILL, job as u64, 0, 0) }.0
 }
 
+/// Tempo de CPU já consumido por este processo (ns, somando todas as threads).
+pub fn cpu_time_ns() -> u64 {
+    // SAFETY: syscall sem ponteiros.
+    unsafe { raw(abi::SYS_DEBUG_INFO, 8, 0, 0) }.1
+}
+
 /// Cria uma thread neste processo: `entry(arg)` numa pilha própria de 256 KiB; a função deve
 /// terminar com [`thread_exit`]. Threads partilham handles e memória.
 pub fn thread_create(entry: extern "C" fn(u64) -> !, arg: u64) -> Result<Handle, Status> {

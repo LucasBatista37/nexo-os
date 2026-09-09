@@ -32,6 +32,10 @@ pub const SYS_GET_PID: u64 = 5;
 /// Versão da ABI → `RDX`.
 pub const SYS_ABI_VERSION: u64 = 6;
 /// Informação de depuração do kernel: `a0` seleciona (0 = CPUs online, 1 = uptime ms, 2 = syscalls do processo) → `RDX`.
+/// Informação de diagnóstico, selecionada por `rdi`: 0 = CPUs online, 1 = uptime (ms),
+/// 2 = syscalls do processo, 3 = handles do processo, 4 = processos vivos, 5 = quadros
+/// livres, 6 = quadros utilizáveis, 7 = relógio de parede (epoch), **8 = tempo de CPU do
+/// processo em ns** (todas as threads; creditado nas trocas de contexto).
 pub const SYS_DEBUG_INFO: u64 = 7;
 /// Fecha o handle `a0`.
 pub const SYS_HANDLE_CLOSE: u64 = 8;

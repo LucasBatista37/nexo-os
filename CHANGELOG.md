@@ -336,6 +336,10 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 2, bloco 113 — contabilidade de CPU por processo)
+- Cada troca de contexto credita ao processo da thread que sai o tempo que ela ocupou a CPU (`Process::cpu_ns`, somando todas as threads; threads de kernel não entram na conta). `debug_info 8` devolve esse total em ns ao processo chamador — somando a **fatia em curso**, porque um processo que gira sozinho pode nunca ser preemptado e ver zero — `nexo-sys::cpu_time_ns`.
+- É a base das **quotas de CPU** que o threat model lista como próximo passo do vetor "negação de serviço por um processo": sem medir não há como limitar. Teste `user_cpu_time` (modo 79): girar 60 ms credita a maior parte desse tempo, dormir 60 ms credita quase nada, e o contador nunca retrocede.
+
 ### Documentação (bloco 112 — relatório 104–111)
 - `docs/progress/2026-09-09-jobs-threads-e-o-ci-vermelho.md`: jobs, threads de usuário, binding por propriedades e os três dias de CI vermelho — com a regra que fica ("um bloco está pronto quando o CI daquele commit fica verde", porque ambientes diferentes violam invariantes diferentes) e o incidente aberto do `#UD` no `fs`.
 

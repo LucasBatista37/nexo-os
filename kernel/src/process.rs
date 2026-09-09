@@ -329,6 +329,9 @@ pub struct Process {
     pub killed: AtomicBool,
     /// Threads vivas do processo (a principal e as de `thread_create`).
     pub threads: IrqLock<Vec<crate::sched::ThreadId>>,
+    /// Tempo de CPU consumido por todas as threads do processo (ns), creditado nas trocas
+    /// de contexto. Base das quotas de CPU.
+    pub cpu_ns: AtomicU64,
 }
 
 static TABLE: IrqLock<Vec<Arc<Process>>> = IrqLock::new(Vec::new());
@@ -494,6 +497,7 @@ pub fn spawn_elf_with_handles(
         job: IrqLock::new(current().and_then(|c| c.job.lock().clone())),
         killed: AtomicBool::new(false),
         threads: IrqLock::new(Vec::new()),
+        cpu_ns: AtomicU64::new(0),
     });
     // (o guard do `lock()` não pode viver dentro do `if let`: `attach` volta a travar `job`)
     let herdado = process.job.lock().clone();

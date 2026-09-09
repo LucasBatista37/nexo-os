@@ -894,6 +894,12 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             5 => (Status::Ok, crate::mm::phys::stats().free),
             6 => (Status::Ok, crate::mm::phys::stats().total_usable),
             7 => (Status::Ok, crate::time::wall_epoch()),
+            // tempo de CPU do processo chamador (ns): o creditado nas trocas de contexto
+            // mais a fatia em curso (um processo que gira sozinho pode nunca ser preemptado)
+            8 => (
+                Status::Ok,
+                p.cpu_ns.load(Ordering::Relaxed) + sched::current_slice_ns(),
+            ),
             _ => (Status::InvalidArgs, 0),
         },
         SYS_TRACE => match f.rdi {

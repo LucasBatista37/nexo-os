@@ -117,6 +117,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_aslr", test_user_aslr),
     ("user_jobs", test_user_jobs),
     ("user_threads", test_user_threads),
+    ("user_cpu_time", test_user_cpu_time),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1180,6 +1181,13 @@ fn test_user_threads() -> TestResult {
         t1 <= t0,
         "threads vivas cresceram ({t0} -> {t1}): alguma thread de usuario sobreviveu"
     );
+    Ok(())
+}
+
+/// Contabilidade de CPU por processo: girar credita, dormir não (modo 79).
+fn test_user_cpu_time() -> TestResult {
+    let code = run_utest(79)?;
+    check!(code == 0, "cpu_time saiu com {code}");
     Ok(())
 }
 
