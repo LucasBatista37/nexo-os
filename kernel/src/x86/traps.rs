@@ -110,14 +110,19 @@ fn handle_trap(frame: &mut TrapFrame) {
                 }
                 None => true,
             };
-            if bsp {
-                crate::time::tick();
+            // nas APs (tique periódico de 1 ms) toda interrupção é uma fronteira; na BSP
+            // (one-shot) só as que cruzam 1 ms desde a anterior
+            let fronteira = if bsp {
+                let f = crate::time::tick();
                 // one-shot: re-arma ANTES de escalonar (on_tick pode trocar de thread e esta
                 // sequência só continuaria muito depois — a BSP ficaria sem tique)
                 crate::time::rearm_bsp();
-            }
+                f
+            } else {
+                true
+            };
             super::apic::eoi();
-            crate::sched::on_tick();
+            crate::sched::on_tick(fronteira);
         }
         vectors::IOAPIC_TEST => {
             IOAPIC_TEST_IRQS.fetch_add(1, Ordering::Relaxed);

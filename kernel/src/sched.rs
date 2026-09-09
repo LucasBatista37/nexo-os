@@ -745,7 +745,7 @@ pub fn reap() -> usize {
 }
 
 /// Chamado pelo handler do timer em cada CPU (após o EOI, interrupções desabilitadas).
-pub fn on_tick() {
+pub fn on_tick(fronteira: bool) {
     if !is_active() {
         return;
     }
@@ -774,10 +774,14 @@ pub fn on_tick() {
     let Some(cur) = g.running[ci].clone() else {
         return;
     };
+    // O quantum é medido em fronteiras de 1 ms: com o tique dinâmico a BSP recebe muitas
+    // interrupções por milissegundo e debitar por interrupção encurtaria o quantum.
     // SAFETY: lock detido.
     let expired = unsafe {
         let inner = cur.inner();
-        inner.quantum_left = inner.quantum_left.saturating_sub(1);
+        if fronteira {
+            inner.quantum_left = inner.quantum_left.saturating_sub(1);
+        }
         inner.quantum_left == 0
     };
     let has_work = g.run_queue.iter().any(|t| allowed_on(t, ci));

@@ -598,9 +598,14 @@ fn test_apic_timer() -> TestResult {
         "interrupcoes demais em 30 ms: {}",
         irqs1 - irqs0
     );
+    // Com o tique dinâmico (bloco 103) a BSP é interrompida sempre que há um prazo mais
+    // cedo: cada fronteira de 1 ms consome ao menos uma interrupção, nunca o contrário.
+    let ticks = crate::time::ticks() - t0;
+    check!(ticks > 0, "nenhuma fronteira de tique em 30 ms");
     check!(
-        crate::time::ticks() - t0 == irqs1 - irqs0,
-        "ticks != interrupcoes do timer"
+        ticks <= irqs1 - irqs0,
+        "ticks ({ticks}) sem interrupcao correspondente ({})",
+        irqs1 - irqs0
     );
     let c1 = crate::x86::apic::lapic().timer_current();
     check!(

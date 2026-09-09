@@ -194,10 +194,31 @@ pub fn early_rearms() -> u64 {
     EARLY_REARMS.load(Ordering::Relaxed)
 }
 
-/// Chamado pelo handler do vetor do timer na CPU de boot.
-pub fn tick() {
+/// Chamado pelo handler do vetor do timer na CPU de boot. Com o tique dinâmico a BSP é
+/// interrompida sempre que há um prazo mais cedo, então **um tique não é uma interrupção**:
+/// o contador conta fronteiras de 1 ms (continua a ser uma medida de tempo, como no tique
+/// periódico). Devolve `true` quando cruzou uma fronteira — só aí o quantum é debitado.
+pub fn tick() -> bool {
+    let now = monotonic_ns();
+    let next = NEXT_TICK_AT.load(Ordering::Relaxed);
+    if now < next {
+        return false;
+    }
     TICKS.fetch_add(1, Ordering::Relaxed);
+    // reancora se ficou muito para trás (o guest pode ter parado: `hlt` longo, host ocupado)
+    NEXT_TICK_AT.store(
+        if now >= next + TICK_NS {
+            now + TICK_NS
+        } else {
+            next + TICK_NS
+        },
+        Ordering::Relaxed,
+    );
+    true
 }
+
+/// Instante da próxima fronteira de tique (ns monotônicos).
+static NEXT_TICK_AT: AtomicU64 = AtomicU64::new(0);
 
 /// Ticks desde a habilitação do timer.
 pub fn ticks() -> u64 {
