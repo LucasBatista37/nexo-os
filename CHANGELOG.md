@@ -336,6 +336,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 3, bloco 140 — conteúdo de arquivo como objeto de memória)
+
+- Ler um arquivo custava uma mensagem por fatia de 4000 bytes — para uma imagem ou um binário, dezenas de idas e voltas. O `nexo.fs` **v1.2** ganhou `map{ino}`: o serviço copia o conteúdo para um **objeto de memória** e transfere o handle; o cliente mapeia e lê direto.
+- **Não é um `mmap`, e o protocolo diz isso**: não há paginação por demanda nem escrita de volta — é uma cópia no instante do pedido. Chamar-lhe "arquivo mapeado em memória" sem essa ressalva seria vender mais do que existe; o item do Plano ficou **parcial**, com o que falta escrito.
+- Limites honestos: teto de 1 MiB por arquivo (`MEMORY_MAX_PAGES`), e acima disso o erro manda usar `read`. O objeto conta na cota de memória partilhável do **serviço** até o cliente o largar — com o teto por objeto, no máximo dezasseis arquivos mapeados ao mesmo tempo.
+- Auto-teste `user_fs_map` (144º): 5000 bytes (mais que cabe numa mensagem) conferidos **byte a byte** pelo objeto de memória contra o padrão escrito; e um inode inválido devolve erro **sem handle nenhum** — vazar um objeto de memória por pedido inválido esgotaria a cota do serviço em silêncio, que é o tipo de falha que só aparece depois de horas de uso.
+- O `vfs` recusa o método explicitamente em vez de o encaminhar: repassar um handle exigiria receber o objeto de uma montagem e decidir de quem é a cota. Recusa explícita é melhor que um encaminhamento que perde o handle sem dizer nada.
+
 ### Adicionado (Fase 6, bloco 139 — o idioma passou a ser escolhível)
 
 - O bloco anterior deu ao sistema um catálogo de mensagens, mas o idioma era uma constante no serviço — um mecanismo que ninguém consegue exercitar é meia funcionalidade. Agora a preferência mora onde moram as outras: `nexo.wm` **v1.22** ganhou `idioma` no `prefs` e o método `set_idioma`.

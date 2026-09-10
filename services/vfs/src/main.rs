@@ -649,6 +649,12 @@ pub extern "C" fn _start(mounts: u64) -> ! {
             }
         };
         let (method, r) = match &request {
+            // O `map` devolve um HANDLE, e este roteador só encaminha bytes: repassá-lo
+            // exigiria receber o objeto de memória de uma montagem e transferi-lo adiante,
+            // decidindo de quem é a cota. Recusa explícita é melhor que um encaminhamento
+            // que perde o handle em silêncio — o cliente usa `read` ou fala com o `fs`.
+            // 13 = nao suportado por este servidor (o `fs` direto suporta).
+            pfs::Request::Map(_) => (pfs::MapRequest::METHOD_ID, Err(13u8)),
             pfs::Request::Stat(rq) => {
                 let (p, pl) = (rq.path, rq.path_len);
                 let path = &p[..(pl as usize).min(256)];

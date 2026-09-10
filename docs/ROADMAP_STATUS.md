@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-10 (commit `d2f1953`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-10 (commit `6c690c2`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 221 · 🟡 111 · ⬜ 203 · ⛔ 0 → **52% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 221 · 🟡 112 · ⬜ 202 · ⛔ 0 → **52% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -345,7 +345,7 @@ Gate: ⬜ não iniciado.
 |---|---|---|---|---|
 | 6.1 Kernel e baixo nível | 10 | 4 | 0 | 86% |
 | 6.2 Drivers | 2 | 8 | 6 | 38% |
-| 6.3 Armazenamento | 4 | 5 | 5 | 46% |
+| 6.3 Armazenamento | 4 | 6 | 4 | 50% |
 | 6.4 Rede | 2 | 7 | 5 | 39% |
 | 6.5 Desktop e experiência | 5 | 8 | 3 | 56% |
 | 6.6 Aplicativos e SDK | 10 | 7 | 1 | 75% |
@@ -401,7 +401,7 @@ Gate: ⬜ não iniciado.
 | ✅ | VFS e namespaces | `services/vfs` dá a **cada cliente uma instância** com o seu namespace (`/disk` → `fs`, `/boot` → `espfs` somente leitura, `/tmp` → ramfs volátil por instância), roteando pelo prefixo sobre o mesmo protocolo tipado `nexo.fs`; namespaces isolados verificados em `user_vfs` |
 | 🟡 | cache e writeback | cache de blocos no `fs` com contadores expostos no fim da sessão (acertos vs leituras do driver) e `sync` explícito no protocolo, chamado ao desconectar o cliente. As escritas são **através** (write-through) por desenho: a segurança contra corte de energia vem daí. Writeback com janela e ordenação pende, e só faz sentido depois de um teste de queda que o cubra |
 | 🟡 | permissões e ACLs/capabilities | o acesso é **por capability**: quem não tem o handle do `nexo.fs` não fala com o sistema de arquivos, e o portal de arquivos entrega só o conteúdo escolhido pelo usuário, nunca o fs. Não há permissões **por arquivo** (dono, modo, ACL) — dependem do modelo de usuários da Fase 6 |
-| ⬜ | arquivos mapeados em memória | não existe: há memória compartilhável (`memory_create`/`map`) e leitura/escrita por mensagem, mas nada liga um arquivo a um mapeamento |
+| 🟡 | arquivos mapeados em memória | o `nexo.fs` v1.2 ganhou `map{ino}` (bloco 140): o serviço entrega o conteúdo do arquivo num **objeto de memória** que o cliente mapeia e lê direto, em vez do vaivém de uma mensagem por fatia de 4000 bytes. **Não é um `mmap`**, e o protocolo diz isso: não há paginação por demanda nem escrita de volta — é uma cópia no instante do pedido. Teto de 1 MiB por arquivo (`MEMORY_MAX_PAGES`); acima disso o erro manda usar `read`. O objeto conta na cota do serviço até o cliente o largar. Auto-teste `user_fs_map`: 5000 bytes (mais que uma mensagem) conferidos byte a byte, e um inode inválido devolve erro **sem handle** — vazar um objeto por pedido inválido esgotaria a cota do serviço em silêncio. O `vfs` recusa o método explicitamente: repassar um handle exigiria decidir de quem é a cota. Pendem paginação por demanda e escrita de volta |
 | 🟡 | mounts e mídia removível | montagens existem no `vfs` (por instância, escolhidas por máscara no spawn) e o `devmgr` decide qual disco vira `/disk` pela identidade do dispositivo. Mídia removível — detecção de inserção/remoção, montagem automática, desmontagem segura — pende de hotplug |
 | ✅ | filesystem persistente | NexoFS v0 (`libraries/nexofs`, `#![forbid(unsafe_code)]`): superbloco, bitmaps, inodes com bloco indireto, diretórios, `rename` crash-safe, e escrita que sobrevive a corte de energia por desenho (versões alternadas). Montado no boot pelo `fs`, exercitado em `user_fs`, no cenário `powercut` e por testes de host que cortam a energia em **cada** escrita |
 | 🟡 | ferramenta de verificação e reparo | `tools/nexo-disk check` verifica um volume do host (sai 1 em inconsistência; roda no cenário `storage`) e a **montagem repara sozinha** blocos e inodes órfãos, contando os reparos (`repairs`, registrado no log do boot). Falta um `fsck` de dentro do sistema, com reparo interativo e relatório |

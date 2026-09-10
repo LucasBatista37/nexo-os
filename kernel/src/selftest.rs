@@ -135,6 +135,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_bench", test_user_bench),
     ("user_affinity", test_user_affinity),
     ("user_idioma", test_user_idioma),
+    ("user_fs_map", test_user_fs_map),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1544,6 +1545,40 @@ fn test_user_idioma() -> TestResult {
     drop((wm, client));
     check!(cc == 0, "cliente saiu com {cc}");
     check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    Ok(())
+}
+
+/// Conteúdo de arquivo entregue como objeto de memória (`nexo.fs` v1.2, bloco 140).
+fn test_user_fs_map() -> TestResult {
+    use crate::ipc::ChannelEnd;
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let (a, b) = ChannelEnd::create_pair();
+    let (c, d) = ChannelEnd::create_pair();
+    let driver = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(a)],
+    )
+    .map_err(String::from)?;
+    let fs =
+        crate::process::spawn_named("fs", 0, alloc::vec![channel_handle(b), channel_handle(c)])
+            .map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 92, alloc::vec![channel_handle(d)])
+        .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let fc = crate::process::wait_and_reap(&fs);
+    let dc = crate::process::wait_and_reap(&driver);
+    drop((driver, fs, client));
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(fc == 0, "fs saiu com {fc}");
+    check!(dc == 0, "blockdev saiu com {dc}");
     let ends = crate::ipc::live_channel_ends();
     check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
     Ok(())

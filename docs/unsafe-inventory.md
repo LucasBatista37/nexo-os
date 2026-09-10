@@ -15,7 +15,7 @@ Como ler: uma justificativa que não diga *por que a invariante vale* é uma dí
 justificativa. Revisar este arquivo a cada release é a forma barata de as encontrar.
 
 
-**477 usos de `unsafe`, 477 com justificativa registrada.**
+**479 usos de `unsafe`, 479 com justificativa registrada.**
 
 | Crate | Usos |
 | --- | ---: |
@@ -23,7 +23,7 @@ justificativa. Revisar este arquivo a cada release é a forma barata de as encon
 | `nexo-arch-x86_64` | 126 |
 | `nexo-sys` | 57 |
 | `nexo-heap` | 30 |
-| `nexo-utest` | 26 |
+| `nexo-utest` | 27 |
 | `nexo-loader` | 15 |
 | `nexo-nvmedev` | 12 |
 | `nexo-virtio` | 10 |
@@ -45,6 +45,7 @@ justificativa. Revisar este arquivo a cada release é a forma barata de as encon
 | `nexo-calc` | 1 |
 | `nexo-config` | 1 |
 | `nexo-echo` | 1 |
+| `nexo-fs` | 1 |
 | `nexo-greeter` | 1 |
 | `nexo-inputdev` | 1 |
 | `nexo-monitor` | 1 |
@@ -145,19 +146,19 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/sched.rs:824` | bloco | lock detido. |
 | `kernel/src/sched.rs:837` | bloco | lock detido. |
 | `kernel/src/sched.rs:856` | bloco | lock detido. |
-| `kernel/src/selftest.rs:300` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
-| `kernel/src/selftest.rs:323` | bloco | quadro alocado, dentro do physmap. |
-| `kernel/src/selftest.rs:373` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
-| `kernel/src/selftest.rs:676` | bloco | o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC). |
-| `kernel/src/selftest.rs:680` | bloco | encerra o canal 0. |
-| `kernel/src/selftest.rs:1224` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
-| `kernel/src/selftest.rs:1340` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
-| `kernel/src/selftest.rs:3067` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
-| `kernel/src/selftest.rs:4715` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4763` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4826` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4895` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5415` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
+| `kernel/src/selftest.rs:301` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
+| `kernel/src/selftest.rs:324` | bloco | quadro alocado, dentro do physmap. |
+| `kernel/src/selftest.rs:374` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
+| `kernel/src/selftest.rs:677` | bloco | o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC). |
+| `kernel/src/selftest.rs:681` | bloco | encerra o canal 0. |
+| `kernel/src/selftest.rs:1225` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
+| `kernel/src/selftest.rs:1341` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
+| `kernel/src/selftest.rs:3102` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
+| `kernel/src/selftest.rs:4750` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4798` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4861` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4930` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5450` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
 | `kernel/src/stress.rs:142` | bloco | página recém-mapeada RW e exclusiva desta thread. |
 | `kernel/src/symbols.rs:20` | bloco | páginas do tipo KernelFile, reservadas e imutáveis. |
 | `kernel/src/sync.rs:53` | bloco | estavam habilitadas antes. |
@@ -435,7 +436,7 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/lib/heap/src/lib.rs:424` | bloco | bloco vivo. |
 | `kernel/lib/heap/src/lib.rs:429` | bloco | bloco vivo. |
 
-## `nexo-utest` — 26 usos
+## `nexo-utest` — 27 usos
 
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
@@ -443,28 +444,29 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/utest/src/main.rs:36` | bloco | número inválido; o kernel responde com NotSupported. |
 | `services/utest/src/main.rs:42` | bloco | `cli` em ring 3 gera #GP; o kernel deve encerrar este processo. |
 | `services/utest/src/main.rs:48` | bloco | deliberadamente inválido: página somente leitura. |
-| `services/utest/src/main.rs:255` | bloco | o kernel valida o intervalo antes de ler. |
-| `services/utest/src/main.rs:383` | bloco | o kernel deve validar tudo; e o objetivo do teste. |
-| `services/utest/src/main.rs:1799` | bloco | unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha). |
-| `services/utest/src/main.rs:2072` | bloco | leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:2660` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:2663` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:2810` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:2820` | bloco | utest tem uma unica thread; buffers estaticos evitam estourar a pilha. |
-| `services/utest/src/main.rs:3002` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:3013` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
-| `services/utest/src/main.rs:3061` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
-| `services/utest/src/main.rs:4533` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:4535` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
-| `services/utest/src/main.rs:5875` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
-| `services/utest/src/main.rs:6134` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:6146` | bloco | leitura da mesma pagina mapeada. |
-| `services/utest/src/main.rs:8853` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9228` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9243` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
-| `services/utest/src/main.rs:9260` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:9287` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
-| `services/utest/src/main.rs:9295` | bloco | mesma pagina compartilhada. |
+| `services/utest/src/main.rs:256` | bloco | o kernel valida o intervalo antes de ler. |
+| `services/utest/src/main.rs:384` | bloco | o kernel deve validar tudo; e o objetivo do teste. |
+| `services/utest/src/main.rs:1800` | bloco | unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha). |
+| `services/utest/src/main.rs:2073` | bloco | leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:2661` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:2664` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:2811` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:2821` | bloco | utest tem uma unica thread; buffers estaticos evitam estourar a pilha. |
+| `services/utest/src/main.rs:3003` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:3014` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
+| `services/utest/src/main.rs:3062` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
+| `services/utest/src/main.rs:3448` | bloco | regiao recem-mapeada por memory_map (USER\|RW) com pelo menos TAM bytes. |
+| `services/utest/src/main.rs:4682` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:4684` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
+| `services/utest/src/main.rs:6024` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
+| `services/utest/src/main.rs:6283` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:6295` | bloco | leitura da mesma pagina mapeada. |
+| `services/utest/src/main.rs:9002` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9377` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9392` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
+| `services/utest/src/main.rs:9409` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:9436` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
+| `services/utest/src/main.rs:9444` | bloco | mesma pagina compartilhada. |
 
 ## `nexo-loader` — 15 usos
 
@@ -654,6 +656,12 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
 | `services/echo/src/main.rs:63` | bloco | deliberadamente inválido — o kernel encerra este processo. |
+
+## `nexo-fs` — 1 usos
+
+| Local | Forma | Invariante afirmada |
+| --- | --- | --- |
+| `services/fs/src/main.rs:180` | bloco | a região acabou de ser mapeada por `memory_map` (USER\|RW) neste processo, com `paginas * 4096` bytes; só se escreve dentro dela. |
 
 ## `nexo-greeter` — 1 usos
 

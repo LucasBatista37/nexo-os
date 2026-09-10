@@ -135,6 +135,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         89 => bench(),
         90 => affinity_test(),
         91 => idioma_test(),
+        92 => fs_map_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -3341,6 +3342,154 @@ fn install_client() -> ! {
 }
 
 /// Modo 9: cria, le, altera, lista e remove arquivos; contador de boots persistente.
+/// Modo 92: conteudo de arquivo entregue como OBJETO DE MEMORIA (`nexo.fs` v1.2, bloco 140).
+///
+/// Escreve um arquivo maior que uma mensagem, pede o `map` e confere byte a byte o que veio
+/// pelo objeto de memoria contra o padrao escrito. Depois confere que um inode inexistente
+/// devolve erro E NENHUM handle — vazar um objeto de memoria por pedido invalido seria uma
+/// forma silenciosa de esgotar a cota do servico.
+fn fs_map_test() -> ! {
+    use nexo_proto::fs as pfs;
+    let ch: nexo_sys::Handle = 0;
+    let mut req = [0u8; 4096];
+    let mut rep = [0u8; 4096];
+    let mut hs = [0u32; 2];
+
+    // Padrao reconhecivel e maior que os 4000 bytes de uma resposta de `read`.
+    const TAM: usize = 5000;
+    let byte = |i: usize| -> u8 { (i as u32).wrapping_mul(2654435761) as u8 };
+
+    let mut caminho = [0u8; 256];
+    caminho[..9].copy_from_slice(b"/mapa.bin");
+    let path_len = 9u32;
+    let _ = {
+        let m = pfs::UnlinkRequest {
+            path: caminho,
+            path_len,
+        }
+        .encode_msg(&mut req)
+        .unwrap_or(0);
+        let _ = nexo_sys::channel_send(ch, &req[..m], &[]);
+        nexo_sys::channel_recv(ch, &mut rep, &mut hs)
+    };
+    let m = pfs::CreateRequest {
+        path: caminho,
+        path_len,
+    }
+    .encode_msg(&mut req)
+    .unwrap_or_else(|_| nexo_sys::exit(650));
+    if nexo_sys::channel_send(ch, &req[..m], &[]) != Status::Ok {
+        nexo_sys::exit(651);
+    }
+    let ino = match nexo_sys::channel_recv(ch, &mut rep, &mut hs) {
+        Ok((n, _)) => {
+            pfs::decode_create_response(&rep[..n])
+                .unwrap_or_else(|_| nexo_sys::exit(652))
+                .ino
+        }
+        _ => nexo_sys::exit(653),
+    };
+
+    // Escreve o padrao em fatias que cabem numa mensagem.
+    let mut escritos = 0usize;
+    while escritos < TAM {
+        let n = (TAM - escritos).min(3000);
+        let mut payload = [0u8; 3900];
+        for (i, b) in payload.iter_mut().enumerate().take(n) {
+            *b = byte(escritos + i);
+        }
+        let m = pfs::WriteRequest {
+            ino,
+            offset: escritos as u64,
+            data: payload,
+            data_len: n as u32,
+        }
+        .encode_msg(&mut req)
+        .unwrap_or_else(|_| nexo_sys::exit(654));
+        if nexo_sys::channel_send(ch, &req[..m], &[]) != Status::Ok {
+            nexo_sys::exit(655);
+        }
+        match nexo_sys::channel_recv(ch, &mut rep, &mut hs) {
+            Ok((r, _)) => {
+                let w = pfs::decode_write_response(&rep[..r])
+                    .unwrap_or_else(|_| nexo_sys::exit(656))
+                    .written as usize;
+                if w == 0 {
+                    nexo_sys::exit(657);
+                }
+                escritos += w;
+            }
+            _ => nexo_sys::exit(658),
+        }
+    }
+
+    // O pedido novo: o conteudo inteiro num objeto de memoria.
+    let m = pfs::MapRequest { ino }
+        .encode_msg(&mut req)
+        .unwrap_or_else(|_| nexo_sys::exit(659));
+    if nexo_sys::channel_send(ch, &req[..m], &[]) != Status::Ok {
+        nexo_sys::exit(660);
+    }
+    let (n, nh) = match nexo_sys::channel_recv(ch, &mut rep, &mut hs) {
+        Ok(v) => v,
+        _ => nexo_sys::exit(661),
+    };
+    if nh != 1 {
+        nexo_sys::exit(662); // o objeto de memoria tinha de vir junto
+    }
+    let resp = pfs::decode_map_response(&rep[..n]).unwrap_or_else(|_| nexo_sys::exit(663));
+    if resp.len != TAM as u64 {
+        nexo_rt::log!("utest: map devolveu {} bytes, esperado {}", resp.len, TAM);
+        nexo_sys::exit(664);
+    }
+    let mem = hs[0] as nexo_sys::Handle;
+    let base = nexo_sys::memory_map(mem).unwrap_or_else(|_| nexo_sys::exit(665));
+    // SAFETY: regiao recem-mapeada por memory_map (USER|RW) com pelo menos TAM bytes.
+    let vista = unsafe { core::slice::from_raw_parts(base as *const u8, TAM) };
+    for (i, v) in vista.iter().enumerate() {
+        if *v != byte(i) {
+            nexo_rt::log!("utest: map divergiu no byte {}: {} != {}", i, v, byte(i));
+            nexo_sys::exit(666);
+        }
+    }
+    let _ = nexo_sys::memory_unmap(base, resp.len.div_ceil(4096) * 4096);
+    let _ = nexo_sys::handle_close(mem);
+
+    // Inode inexistente: erro, e NENHUM handle a vazar.
+    let m = pfs::MapRequest { ino: 9999 }
+        .encode_msg(&mut req)
+        .unwrap_or_else(|_| nexo_sys::exit(667));
+    if nexo_sys::channel_send(ch, &req[..m], &[]) != Status::Ok {
+        nexo_sys::exit(668);
+    }
+    match nexo_sys::channel_recv(ch, &mut rep, &mut hs) {
+        Ok((n, nh)) => {
+            if nh != 0 {
+                nexo_sys::exit(669); // vazou um objeto de memoria num pedido invalido
+            }
+            if pfs::decode_map_response(&rep[..n]).is_ok() {
+                nexo_sys::exit(670); // devia ser erro
+            }
+        }
+        _ => nexo_sys::exit(671),
+    }
+
+    let m = pfs::UnlinkRequest {
+        path: caminho,
+        path_len,
+    }
+    .encode_msg(&mut req)
+    .unwrap_or(0);
+    let _ = nexo_sys::channel_send(ch, &req[..m], &[]);
+    let _ = nexo_sys::channel_recv(ch, &mut rep, &mut hs);
+
+    nexo_rt::log!(
+        "utest: fs map ok — {} bytes conferidos byte a byte pelo objeto de memoria, inode invalido sem handle",
+        TAM
+    );
+    nexo_sys::exit(0)
+}
+
 fn fs_client() -> ! {
     fs_exercise(0, true);
     nexo_sys::log("utest: fs ok");

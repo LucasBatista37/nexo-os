@@ -133,6 +133,74 @@ fn fail(code: i64, what: &str) -> ! {
     nexo_sys::exit(code)
 }
 
+/// Erros remotos do `map` (o protocolo os documenta em `idl/fs.idl`).
+const E_MAP_INVALIDO: u32 = 1;
+const E_MAP_GRANDE: u32 = 7;
+const E_MAP_SEM_MEMORIA: u32 = 12;
+
+/// Copia o conteúdo de `ino` para um objeto de memória novo e devolve o handle.
+///
+/// Não é um `mmap`: não há paginação por demanda nem escrita de volta. É uma cópia no instante
+/// do pedido — o que serve a quem quer o arquivo inteiro (uma imagem, um binário) sem o vaivém
+/// de uma mensagem por fatia, e é honesto sobre o que não faz.
+///
+/// O objeto conta na cota de memória partilhável **deste** serviço até o cliente o largar; com
+/// o teto de 1 MiB por objeto, são no máximo dezasseis arquivos mapeados ao mesmo tempo.
+fn entrega_como_memoria(
+    fs: &mut nexofs::Fs<ChanDisk>,
+    ino: u32,
+    out: &mut [u8; 4096],
+) -> Result<(usize, Handle), usize> {
+    fn erro(c: u32, out: &mut [u8; 4096]) -> usize {
+        pfs::encode_error(pfs::MapRequest::METHOD_ID, c, out).unwrap_or(0)
+    }
+    let inode = match fs.read_inode(ino) {
+        Ok(i) => i,
+        Err(_) => return Err(erro(E_MAP_INVALIDO, out)),
+    };
+    let len = inode.size;
+    let paginas = len.div_ceil(4096).max(1);
+    if paginas > nexo_sys::abi::MEMORY_MAX_PAGES {
+        return Err(erro(E_MAP_GRANDE, out));
+    }
+    let mem = match nexo_sys::memory_create(paginas) {
+        Ok(h) => h,
+        Err(_) => return Err(erro(E_MAP_SEM_MEMORIA, out)),
+    };
+    let base = match nexo_sys::memory_map(mem) {
+        Ok(b) => b,
+        Err(_) => {
+            let _ = nexo_sys::handle_close(mem);
+            return Err(erro(E_MAP_SEM_MEMORIA, out));
+        }
+    };
+    // SAFETY: a região acabou de ser mapeada por `memory_map` (USER|RW) neste processo, com
+    // `paginas * 4096` bytes; só se escreve dentro dela.
+    let alvo =
+        unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (paginas * 4096) as usize) };
+    let mut lidos = 0usize;
+    while (lidos as u64) < len {
+        match fs.read(ino, lidos as u64, &mut alvo[lidos..len as usize]) {
+            Ok(0) => break,
+            Ok(n) => lidos += n,
+            Err(_) => {
+                let _ = nexo_sys::memory_unmap(base, paginas * 4096);
+                let _ = nexo_sys::handle_close(mem);
+                return Err(erro(E_MAP_INVALIDO, out));
+            }
+        }
+    }
+    // O serviço larga o mapeamento; o conteúdo vive no objeto, que segue para o cliente.
+    let _ = nexo_sys::memory_unmap(base, paginas * 4096);
+    let m = pfs::MapResponse {
+        mem,
+        len: lidos as u64,
+    }
+    .encode_msg(out)
+    .unwrap_or(0);
+    Ok((m, mem))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(arg: u64) -> ! {
     let disk = ChanDisk::open().unwrap_or_else(|e| fail(30, e));
@@ -304,6 +372,25 @@ pub extern "C" fn _start(arg: u64) -> ! {
                 Ok(()) => pfs::TruncateResponse {}.encode_msg(&mut out).unwrap_or(0),
                 Err(e) => err(pfs::TruncateRequest::METHOD_ID, e, &mut out),
             },
+            pfs::Request::Map(rq) => {
+                // Único pedido que devolve um HANDLE: responde aqui e segue, porque o envio
+                // comum no fim da volta manda sem handles.
+                match entrega_como_memoria(&mut fs, rq.ino, &mut out) {
+                    Ok((m, mem)) => {
+                        if nexo_sys::channel_send(CLIENT, &out[..m], &[mem]) != Status::Ok {
+                            fail(35, "send map");
+                        }
+                        // O handle foi TRANSFERIDO: a tabela deste processo já não o tem, e
+                        // fechá-lo aqui seria `BadHandle`.
+                    }
+                    Err(m) => {
+                        if nexo_sys::channel_send(CLIENT, &out[..m], &[]) != Status::Ok {
+                            fail(36, "send map err");
+                        }
+                    }
+                }
+                continue;
+            }
             pfs::Request::Rename(rq) => match fs.rename(rq.from(), rq.to()) {
                 Ok(()) => pfs::RenameResponse {}.encode_msg(&mut out).unwrap_or(0),
                 Err(e) => err(pfs::RenameRequest::METHOD_ID, e, &mut out),

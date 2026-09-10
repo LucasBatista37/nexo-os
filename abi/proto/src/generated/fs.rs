@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.fs` v1.1 — **gerado por `tools/idlgen` de `idl/fs.idl`; nao editar**.
+//! Protocolo tipado `nexo.fs` v1.2 — **gerado por `tools/idlgen` de `idl/fs.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x2d3847ce;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 1;
+pub const VERSION_MINOR: u16 = 2;
 
 /// `nexo.fs.stat` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1473,6 +1473,119 @@ impl TruncateResponse {
     }
 }
 
+/// `nexo.fs.map` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapRequest {
+    /// Campo `ino`.
+    pub ino: u32,
+}
+
+impl MapRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 12;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.ino.to_le_bytes());
+        o += 4;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let ino = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let _ = o;
+        Ok(MapRequest { ino })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.fs.map` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapResponse {
+    /// Handle `mem` (viaja no vetor de handles, nunca no payload).
+    pub mem: u32,
+    /// Campo `len`.
+    pub len: u64,
+}
+
+impl MapResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 12;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 1;
+    /// Handles na ordem de declaracao (para passar ao `channel_send`).
+    pub fn handles(&self) -> [u32; 1] {
+        [self.mem]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 8 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 8].copy_from_slice(&self.len.to_le_bytes());
+        o += 8;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        let mem: u32 = 0; // injetado por decode_*_with_handles
+        if o + 8 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let len = u64::from_le_bytes(b[o..o + 8].try_into().unwrap());
+        o += 8;
+        let _ = o;
+        Ok(MapResponse { mem, len })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// Pedido decodificado.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // Sem alocador no espaço de usuário: variantes grandes (buffers embutidos) são inerentes.
@@ -1500,6 +1613,8 @@ pub enum Request {
     Rename(RenameRequest),
     /// `truncate`.
     Truncate(TruncateRequest),
+    /// `map`.
+    Map(MapRequest),
 }
 
 /// Decodifica um pedido completo (cabecalho + payload).
@@ -1527,6 +1642,7 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
         9 => Ok(Request::Info(InfoRequest::decode_payload(p)?)),
         11 => Ok(Request::Rename(RenameRequest::decode_payload(p)?)),
         10 => Ok(Request::Truncate(TruncateRequest::decode_payload(p)?)),
+        12 => Ok(Request::Map(MapRequest::decode_payload(p)?)),
         _ => Err(ProtoError::Method),
     }
 }
@@ -1826,6 +1942,33 @@ pub fn decode_truncate_response(msg: &[u8]) -> Result<TruncateResponse, ProtoErr
         return Err(ProtoError::Flags);
     }
     TruncateResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `map` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_map_response(msg: &[u8]) -> Result<MapResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 12 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    MapResponse::decode_payload(p)
 }
 
 /// Codifica uma resposta de erro para o metodo `method_id`.

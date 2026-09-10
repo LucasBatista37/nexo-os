@@ -1,6 +1,6 @@
 # nexo.fs — sistema de arquivos (services/fs e services/vfs)
 # Erros remotos: 1..=11 = nexofs::FsError::code(); 13 = montagem somente leitura (vfs /boot).
-protocol fs 1.1
+protocol fs 1.2
 
 # Metadados de um caminho.
 method 1 stat {
@@ -116,5 +116,23 @@ method 10 truncate {
         size: u64,
     }
     response {
+    }
+}
+
+# Entrega o conteudo de `ino` como um OBJETO DE MEMORIA, em vez de fatias de 4000 bytes.
+#
+# Nao e um mmap: nao ha paginacao por demanda nem escrita de volta — e uma copia do conteudo
+# no instante do pedido, que o cliente mapeia e le direto. Serve a quem precisa do arquivo
+# inteiro (uma imagem, um binario) sem o vaivem de uma mensagem por fatia.
+#
+# Limite: MEMORY_MAX_PAGES (1 MiB). Arquivo maior devolve erro 7 e o cliente usa `read`.
+# Erros remotos: 1 pedido invalido, 3 nao encontrado, 7 grande demais, 12 sem memoria.
+method 12 map {
+    request {
+        ino: u32,
+    }
+    response {
+        mem: handle,
+        len: u64,
     }
 }
