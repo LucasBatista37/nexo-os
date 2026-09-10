@@ -133,6 +133,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_thread_limit", test_user_thread_limit),
     ("user_handle_limit", test_user_handle_limit),
     ("user_bench", test_user_bench),
+    ("user_affinity", test_user_affinity),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1512,6 +1513,13 @@ fn test_user_handle_limit() -> TestResult {
 fn test_user_bench() -> TestResult {
     let code = run_utest(89)?;
     check!(code == 0, "bench saiu com {code}");
+    Ok(())
+}
+
+/// Afinidade pedida pela própria thread de usuário (bloco 135).
+fn test_user_affinity() -> TestResult {
+    let code = run_utest(90)?;
+    check!(code == 0, "affinity saiu com {code}");
     Ok(())
 }
 

@@ -133,6 +133,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         87 => thread_limit(),
         88 => handle_limit(),
         89 => bench(),
+        90 => affinity_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5232,6 +5233,47 @@ fn cpu_time_test() -> ! {
 
 static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
+// --- Afinidade de thread de usuario (bloco 135) ---
+// Prender-se a uma CPU e uma restricao que o processo impoe A SI MESMO. O teste confere as
+// duas metades: preso, a thread so corre onde mandou; solto, volta a poder correr em qualquer
+// uma. `debug_info 10` diz em que CPU se esta agora.
+fn affinity_test() -> ! {
+    let cpus = nexo_sys::debug_info(0);
+    if cpus < 2 {
+        nexo_sys::log("utest: afinidade — maquina com 1 CPU, nada a distinguir");
+        nexo_sys::exit(0)
+    }
+    for cpu in 0..cpus {
+        if nexo_sys::thread_set_affinity(1 << cpu) != Status::Ok {
+            nexo_sys::exit(600 + cpu as i64);
+        }
+        // Varias leituras: se a afinidade nao valesse, uma delas apanharia outra CPU.
+        for _ in 0..50 {
+            nexo_sys::yield_now();
+            if nexo_sys::debug_info(10) != cpu {
+                nexo_rt::log!(
+                    "utest: preso na cpu {} mas correndo na {}",
+                    cpu,
+                    nexo_sys::debug_info(10)
+                );
+                nexo_sys::exit(610);
+            }
+        }
+    }
+    // Mascara sem CPU online e recusada; mascara 0 solta.
+    if nexo_sys::thread_set_affinity(1 << 63) != Status::InvalidArgs {
+        nexo_sys::exit(611);
+    }
+    if nexo_sys::thread_set_affinity(0) != Status::Ok {
+        nexo_sys::exit(612);
+    }
+    nexo_rt::log!(
+        "utest: afinidade ok — thread presa a cada uma das {} CPUs e solta no fim",
+        cpus
+    );
+    nexo_sys::exit(0)
+}
+
 // --- Linha de base de desempenho (bloco 129) ---
 // Tres numeros que faltavam ao projeto: quanto custa uma syscall, quanto custa uma
 // ida-e-volta de IPC sem escalonamento, e quanto custa uma com ele. Sao REGISTRADOS, nao
@@ -5241,9 +5283,14 @@ static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU6
 const BENCH_N: u64 = 100_000;
 const BENCH_IPC: u64 = 20_000;
 static BENCH_CANAL: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+/// 1 quando a thread de eco deve prender-se à CPU 0 junto com quem a mede.
+static BENCH_MESMA_CPU: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
 extern "C" fn bench_eco(_arg: u64) -> ! {
     use core::sync::atomic::Ordering::Relaxed;
+    if BENCH_MESMA_CPU.load(Relaxed) != 0 {
+        let _ = nexo_sys::thread_set_affinity(1);
+    }
     let h = BENCH_CANAL.load(Relaxed) as nexo_sys::Handle;
     let mut buf = [0u8; 16];
     let mut hs = [0u32; 2];
@@ -5302,6 +5349,31 @@ fn bench() -> ! {
     }
     let rtt_ns = (nexo_sys::time_now() - t0).checked_div(voltas).unwrap_or(0);
     let _ = nexo_sys::thread_join(eco);
+
+    // 4. A mesma ida-e-volta com as duas threads presas a UMA CPU. A diferenca para o caso
+    //    anterior e o custo de acordar alguem NOUTRA CPU, que exige IPI — sob TCG, caro.
+    BENCH_MESMA_CPU.store(1, Relaxed);
+    let (meu2, dele2) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(587));
+    BENCH_CANAL.store(dele2 as u64, Relaxed);
+    let _ = nexo_sys::thread_set_affinity(1);
+    let eco2 = nexo_sys::thread_create(bench_eco, 0).unwrap_or_else(|_| nexo_sys::exit(588));
+    let t0 = nexo_sys::time_now();
+    let mut voltas2 = 0u64;
+    for _ in 0..BENCH_IPC {
+        if nexo_sys::channel_send(meu2, b"12345678", &[]) != Status::Ok {
+            break;
+        }
+        if nexo_sys::channel_recv(meu2, &mut buf, &mut hs).is_err() {
+            break;
+        }
+        voltas2 += 1;
+    }
+    let rtt1_ns = (nexo_sys::time_now() - t0)
+        .checked_div(voltas2)
+        .unwrap_or(0);
+    let _ = nexo_sys::thread_join(eco2);
+    let _ = nexo_sys::thread_set_affinity(0);
+    let _ = nexo_sys::handle_close(meu2);
     if voltas != BENCH_IPC {
         nexo_rt::log!(
             "utest: bench so completou {} de {} voltas",
@@ -5318,8 +5390,9 @@ fn bench() -> ! {
     // ela que permite comparar duas execucoes honestamente.
     let ipc_x10 = ipc_ns * 10 / syscall_ns;
     let rtt_x10 = rtt_ns * 10 / syscall_ns;
+    let rtt1_x10 = rtt1_ns * 10 / syscall_ns;
     nexo_rt::log!(
-        "[BENCH] syscall {} ns · ipc_sem_troca {} ns ({}.{}x) · ipc_ida_volta {} ns ({}.{}x) ({} amostras/{} voltas)",
+        "[BENCH] syscall {} ns · ipc_sem_troca {} ns ({}.{}x) · ipc_ida_volta {} ns ({}.{}x) · ipc_ida_volta_1cpu {} ns ({}.{}x) ({} amostras/{} voltas)",
         syscall_ns,
         ipc_ns,
         ipc_x10 / 10,
@@ -5327,6 +5400,9 @@ fn bench() -> ! {
         rtt_ns,
         rtt_x10 / 10,
         rtt_x10 % 10,
+        rtt1_ns,
+        rtt1_x10 / 10,
+        rtt1_x10 % 10,
         BENCH_N,
         BENCH_IPC
     );

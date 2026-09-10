@@ -15,13 +15,13 @@ Como ler: uma justificativa que não diga *por que a invariante vale* é uma dí
 justificativa. Revisar este arquivo a cada release é a forma barata de as encontrar.
 
 
-**476 usos de `unsafe`, 476 com justificativa registrada.**
+**477 usos de `unsafe`, 477 com justificativa registrada.**
 
 | Crate | Usos |
 | --- | ---: |
 | `nexo-kernel` | 146 |
 | `nexo-arch-x86_64` | 126 |
-| `nexo-sys` | 56 |
+| `nexo-sys` | 57 |
 | `nexo-heap` | 30 |
 | `nexo-utest` | 26 |
 | `nexo-loader` | 15 |
@@ -145,19 +145,19 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/sched.rs:824` | bloco | lock detido. |
 | `kernel/src/sched.rs:837` | bloco | lock detido. |
 | `kernel/src/sched.rs:856` | bloco | lock detido. |
-| `kernel/src/selftest.rs:298` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
-| `kernel/src/selftest.rs:321` | bloco | quadro alocado, dentro do physmap. |
-| `kernel/src/selftest.rs:371` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
-| `kernel/src/selftest.rs:674` | bloco | o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC). |
-| `kernel/src/selftest.rs:678` | bloco | encerra o canal 0. |
-| `kernel/src/selftest.rs:1222` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
-| `kernel/src/selftest.rs:1338` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
-| `kernel/src/selftest.rs:3033` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
-| `kernel/src/selftest.rs:4681` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4729` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4792` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4861` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5381` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
+| `kernel/src/selftest.rs:299` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
+| `kernel/src/selftest.rs:322` | bloco | quadro alocado, dentro do physmap. |
+| `kernel/src/selftest.rs:372` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
+| `kernel/src/selftest.rs:675` | bloco | o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC). |
+| `kernel/src/selftest.rs:679` | bloco | encerra o canal 0. |
+| `kernel/src/selftest.rs:1223` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
+| `kernel/src/selftest.rs:1339` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
+| `kernel/src/selftest.rs:3041` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
+| `kernel/src/selftest.rs:4689` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4737` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4800` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4869` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5389` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
 | `kernel/src/stress.rs:142` | bloco | página recém-mapeada RW e exclusiva desta thread. |
 | `kernel/src/symbols.rs:20` | bloco | páginas do tipo KernelFile, reservadas e imutáveis. |
 | `kernel/src/sync.rs:53` | bloco | estavam habilitadas antes. |
@@ -192,10 +192,10 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/x86/syscall.rs:771` | bloco | quadro recem-alocado, visivel pelo physmap, ainda nao entregue ao usuario. |
 | `kernel/src/x86/syscall.rs:784` | bloco | DmaBuffer é repr(C) de inteiros. |
 | `kernel/src/x86/syscall.rs:813` | bloco | IrqInfo é repr(C) de inteiros. |
-| `kernel/src/x86/syscall.rs:1036` | bloco | Event e repr(C) de 16 bytes sem padding invalido; got <= cap. |
-| `kernel/src/x86/syscall.rs:1133` | bloco | `lista` é um `Vec<ProcInfo>` (repr(C), sem padding indefinido) vivo aqui. |
-| `kernel/src/x86/syscall.rs:1290` | bloco | frame empilhado por `nexo_syscall_entry` na pilha de kernel desta thread. |
-| `kernel/src/x86/syscall.rs:1292` | bloco | estamos na pilha de kernel com gs configurado; a syscall pode bloquear. |
+| `kernel/src/x86/syscall.rs:1039` | bloco | Event e repr(C) de 16 bytes sem padding invalido; got <= cap. |
+| `kernel/src/x86/syscall.rs:1136` | bloco | `lista` é um `Vec<ProcInfo>` (repr(C), sem padding indefinido) vivo aqui. |
+| `kernel/src/x86/syscall.rs:1316` | bloco | frame empilhado por `nexo_syscall_entry` na pilha de kernel desta thread. |
+| `kernel/src/x86/syscall.rs:1318` | bloco | estamos na pilha de kernel com gs configurado; a syscall pode bloquear. |
 | `kernel/src/x86/traps.rs:35` | bloco | inicialização única em uma CPU; a tabela nunca mais é escrita. |
 | `kernel/src/x86/traps.rs:42` | bloco | todos os handlers apontam para stubs válidos gerados em assembly. |
 | `kernel/src/x86/traps.rs:56` | fn | # Safety `init` deve ter sido executado pela BSP. |
@@ -338,7 +338,7 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `arch/x86_64/src/trap.rs:152` | bloco | tabela definida no assembly acima, somente leitura. |
 | `arch/x86_64/src/trap.rs:173` | bloco | `h` foi armazenado a partir de um `fn(&mut TrapFrame)` válido; `frame` aponta para o frame empilhado pelo stub e vive até o `iretq`. |
 
-## `nexo-sys` — 56 usos
+## `nexo-sys` — 57 usos
 
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
@@ -361,43 +361,44 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `sdk/nexo-sys/src/lib.rs:178` | bloco | sem ponteiros. |
 | `sdk/nexo-sys/src/lib.rs:187` | bloco | sem ponteiros. |
 | `sdk/nexo-sys/src/lib.rs:193` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:204` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:203` | bloco | sem ponteiros. |
 | `sdk/nexo-sys/src/lib.rs:213` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:219` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:225` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:236` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:247` | bloco | ponteiros e tamanhos vêm de slices válidas. |
-| `sdk/nexo-sys/src/lib.rs:267` | bloco | ponteiros e capacidades vêm de slices válidas e mutáveis. |
-| `sdk/nexo-sys/src/lib.rs:288` | bloco | ponteiros e tamanhos vêm de slices válidas. |
-| `sdk/nexo-sys/src/lib.rs:305` | bloco | ponteiros e tamanhos vêm de slices válidas. |
-| `sdk/nexo-sys/src/lib.rs:321` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:328` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:347` | bloco | buffer válido e mutável; o kernel escreve no máximo `out.len()` entradas. |
-| `sdk/nexo-sys/src/lib.rs:361` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:368` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:384` | bloco | sem ponteiros de usuário. |
-| `sdk/nexo-sys/src/lib.rs:392` | bloco | `b` é uma estrutura válida e mutável. |
-| `sdk/nexo-sys/src/lib.rs:407` | bloco | `i` é uma estrutura válida e mutável. |
-| `sdk/nexo-sys/src/lib.rs:425` | bloco | ponteiros e capacidades vêm de slices válidas e mutáveis. |
-| `sdk/nexo-sys/src/lib.rs:445` | bloco | ponteiro e tamanho vêm de uma slice válida. |
-| `sdk/nexo-sys/src/lib.rs:461` | bloco | ponteiro e tamanho vêm de uma slice válida. |
-| `sdk/nexo-sys/src/lib.rs:477` | bloco | syscall sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:483` | bloco | syscall sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:490` | bloco | syscall sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:496` | bloco | syscall sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:502` | bloco | syscall sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:509` | bloco | ponteiro e capacidade vêm de uma slice válida. |
-| `sdk/nexo-sys/src/lib.rs:524` | bloco | syscall sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:531` | bloco | syscall sem ponteiros de dados; a entrada é um endereço de código válido. |
-| `sdk/nexo-sys/src/lib.rs:545` | bloco | syscall sem ponteiros; nunca retorna. |
-| `sdk/nexo-sys/src/lib.rs:556` | bloco | syscall sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:562` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:569` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:577` | bloco | sem ponteiros; o kernel valida a faixa. |
-| `sdk/nexo-sys/src/lib.rs:586` | bloco | ponteiro para uma struct local válida do tamanho que o kernel escreve. |
-| `sdk/nexo-sys/src/lib.rs:594` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:601` | bloco | sem ponteiros. |
-| `sdk/nexo-sys/src/lib.rs:608` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:222` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:228` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:234` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:245` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:256` | bloco | ponteiros e tamanhos vêm de slices válidas. |
+| `sdk/nexo-sys/src/lib.rs:276` | bloco | ponteiros e capacidades vêm de slices válidas e mutáveis. |
+| `sdk/nexo-sys/src/lib.rs:297` | bloco | ponteiros e tamanhos vêm de slices válidas. |
+| `sdk/nexo-sys/src/lib.rs:314` | bloco | ponteiros e tamanhos vêm de slices válidas. |
+| `sdk/nexo-sys/src/lib.rs:330` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:337` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:356` | bloco | buffer válido e mutável; o kernel escreve no máximo `out.len()` entradas. |
+| `sdk/nexo-sys/src/lib.rs:370` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:377` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:393` | bloco | sem ponteiros de usuário. |
+| `sdk/nexo-sys/src/lib.rs:401` | bloco | `b` é uma estrutura válida e mutável. |
+| `sdk/nexo-sys/src/lib.rs:416` | bloco | `i` é uma estrutura válida e mutável. |
+| `sdk/nexo-sys/src/lib.rs:434` | bloco | ponteiros e capacidades vêm de slices válidas e mutáveis. |
+| `sdk/nexo-sys/src/lib.rs:454` | bloco | ponteiro e tamanho vêm de uma slice válida. |
+| `sdk/nexo-sys/src/lib.rs:470` | bloco | ponteiro e tamanho vêm de uma slice válida. |
+| `sdk/nexo-sys/src/lib.rs:486` | bloco | syscall sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:492` | bloco | syscall sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:499` | bloco | syscall sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:505` | bloco | syscall sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:511` | bloco | syscall sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:518` | bloco | ponteiro e capacidade vêm de uma slice válida. |
+| `sdk/nexo-sys/src/lib.rs:533` | bloco | syscall sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:540` | bloco | syscall sem ponteiros de dados; a entrada é um endereço de código válido. |
+| `sdk/nexo-sys/src/lib.rs:554` | bloco | syscall sem ponteiros; nunca retorna. |
+| `sdk/nexo-sys/src/lib.rs:565` | bloco | syscall sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:571` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:578` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:586` | bloco | sem ponteiros; o kernel valida a faixa. |
+| `sdk/nexo-sys/src/lib.rs:595` | bloco | ponteiro para uma struct local válida do tamanho que o kernel escreve. |
+| `sdk/nexo-sys/src/lib.rs:603` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:610` | bloco | sem ponteiros. |
+| `sdk/nexo-sys/src/lib.rs:617` | bloco | sem ponteiros. |
 
 ## `nexo-heap` — 30 usos
 
@@ -442,28 +443,28 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/utest/src/main.rs:36` | bloco | número inválido; o kernel responde com NotSupported. |
 | `services/utest/src/main.rs:42` | bloco | `cli` em ring 3 gera #GP; o kernel deve encerrar este processo. |
 | `services/utest/src/main.rs:48` | bloco | deliberadamente inválido: página somente leitura. |
-| `services/utest/src/main.rs:253` | bloco | o kernel valida o intervalo antes de ler. |
-| `services/utest/src/main.rs:381` | bloco | o kernel deve validar tudo; e o objetivo do teste. |
-| `services/utest/src/main.rs:1797` | bloco | unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha). |
-| `services/utest/src/main.rs:2070` | bloco | leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:2658` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:2661` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:2808` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:2818` | bloco | utest tem uma unica thread; buffers estaticos evitam estourar a pilha. |
-| `services/utest/src/main.rs:3000` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:3011` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
-| `services/utest/src/main.rs:3059` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
-| `services/utest/src/main.rs:4531` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:4533` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
-| `services/utest/src/main.rs:5798` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
-| `services/utest/src/main.rs:6057` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:6069` | bloco | leitura da mesma pagina mapeada. |
-| `services/utest/src/main.rs:8667` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9042` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9057` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
-| `services/utest/src/main.rs:9074` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:9101` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
-| `services/utest/src/main.rs:9109` | bloco | mesma pagina compartilhada. |
+| `services/utest/src/main.rs:254` | bloco | o kernel valida o intervalo antes de ler. |
+| `services/utest/src/main.rs:382` | bloco | o kernel deve validar tudo; e o objetivo do teste. |
+| `services/utest/src/main.rs:1798` | bloco | unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha). |
+| `services/utest/src/main.rs:2071` | bloco | leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:2659` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:2662` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:2809` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:2819` | bloco | utest tem uma unica thread; buffers estaticos evitam estourar a pilha. |
+| `services/utest/src/main.rs:3001` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:3012` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
+| `services/utest/src/main.rs:3060` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
+| `services/utest/src/main.rs:4532` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:4534` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
+| `services/utest/src/main.rs:5874` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
+| `services/utest/src/main.rs:6133` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:6145` | bloco | leitura da mesma pagina mapeada. |
+| `services/utest/src/main.rs:8743` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9118` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9133` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
+| `services/utest/src/main.rs:9150` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:9177` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
+| `services/utest/src/main.rs:9185` | bloco | mesma pagina compartilhada. |
 
 ## `nexo-loader` — 15 usos
 

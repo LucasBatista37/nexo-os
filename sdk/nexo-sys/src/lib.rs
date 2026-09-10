@@ -194,6 +194,15 @@ pub fn handle_duplicate(h: Handle, rights: u32) -> Result<Handle, Status> {
     if st.is_ok() { Ok(v as Handle) } else { Err(st) }
 }
 
+/// Prende a thread chamadora às CPUs da máscara (bit *n* = CPU *n*); `0` solta.
+///
+/// Restringe só quem chama. Útil para localidade (ficar junto da CPU que recebe a interrupção
+/// do dispositivo) e para medições que precisem separar acordar na mesma CPU de acordar noutra.
+pub fn thread_set_affinity(mask: u64) -> Status {
+    // SAFETY: sem ponteiros.
+    unsafe { raw(abi::SYS_THREAD_SET_AFFINITY, mask, 0, 0).0 }
+}
+
 /// Cria um objeto de evento: `auto = true` faz a espera **consumir** o sinal (uma thread por
 /// sinalização); `false` mantém o sinal até [`event_reset`].
 ///

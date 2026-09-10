@@ -1004,6 +1004,9 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             // faltas de página recuperadas em cópias usuário↔kernel (corridas de
             // desmapeamento vencidas pelo fixup); zero é o esperado
             9 => (Status::Ok, super::usercopy::faltas()),
+            // índice da CPU onde a thread chamadora está a correr NESTE instante (pode mudar
+            // no próximo tique, a menos que a thread esteja presa por `thread_set_affinity`)
+            10 => (Status::Ok, crate::x86::percpu::current().index as u64),
             _ => (Status::InvalidArgs, 0),
         },
         SYS_TRACE => match f.rdi {
@@ -1234,6 +1237,29 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             Ok(_) => (Status::InvalidArgs, 0),
             Err(e) => (e, 0),
         },
+        SYS_THREAD_SET_AFFINITY => {
+            let mask = if f.rdi == 0 { u64::MAX } else { f.rdi };
+            let online = crate::x86::percpu::online_count();
+            let validos = if online >= 64 {
+                u64::MAX
+            } else {
+                (1u64 << online) - 1
+            };
+            if mask & validos == 0 {
+                // Máscara sem nenhuma CPU online prenderia a thread num lugar que não existe.
+                (Status::InvalidArgs, 0)
+            } else {
+                match sched::current() {
+                    Some(t) if sched::set_affinity(t.id, mask & validos) => {
+                        // A thread pode estar numa CPU que a máscara nova não permite; ceder a
+                        // vez faz o escalonador reposicioná-la antes de devolver o controlo.
+                        sched::yield_now();
+                        (Status::Ok, 0)
+                    }
+                    _ => (Status::InvalidArgs, 0),
+                }
+            }
+        }
         SYS_EVENT_CREATE => {
             let ev = crate::ipc::Event::new(f.rdi != 0);
             let h = Handle {

@@ -86,7 +86,9 @@ SCENARIOS = {
             # A linha de base tem de continuar a ser medida: um benchmark que deixa de
             # correr em silencio nao e linha de base nenhuma (docs/bench.md).
             r"\[BENCH\] troca_de_contexto \d+ ns",
-            r"\[BENCH\] syscall \d+ ns · ipc_sem_troca \d+ ns \(\d+\.\dx\) · ipc_ida_volta \d+ ns \(\d+\.\dx\)",
+            r"\[BENCH\] syscall \d+ ns · ipc_sem_troca \d+ ns \(\d+\.\dx\) · ipc_ida_volta \d+ ns \(\d+\.\dx\) · ipc_ida_volta_1cpu \d+ ns \(\d+\.\dx\)",
+            r"utest: afinidade ok — thread presa a cada uma das \d+ CPUs e solta no fim",
+            r"\[TEST\] user_affinity \.\.\. ok",
             r"pci: \d+ funcao\(oes\):",
             r"iommu: (ausente|tabela DMAR presente).*DMA de drivers IRRESTRITO \(caminho inseguro",
             r"pci:   00:\d\d\.\d 1af4:10(01|42) classe 01\.00\.00 .*virtio",
@@ -286,6 +288,28 @@ SHELL_SCRIPT = [
     ("wc /disk/sh76.txt", r"0 3 12 /disk/sh76\.txt"),
     ("remove /disk/sh76.txt", r"removido"),
 ]
+
+
+def preserva_falha(nome: str, origem: Path) -> Path:
+    """Guarda uma cópia do log de um cenário que falhou, com data e hora no nome.
+
+    Existe porque a próxima execução sobrescreve o log — e uma falha intermitente sem log é uma
+    falha que não se diagnostica. Aconteceu: um `boot` falhou uma vez, passou na reexecução, e a
+    causa perdeu-se com o arquivo.
+    """
+    import datetime
+
+    if not origem.exists():
+        return origem
+    carimbo = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    destino = origem.with_name(f"{nome}-FALHA-{carimbo}.log")
+    try:
+        shutil.copy2(origem, destino)
+        log(f"log da falha preservado em {destino}")
+        return destino
+    except OSError as e:
+        log(f"aviso: nao consegui preservar o log da falha ({e})")
+        return origem
 
 
 def run_shell_scenario_once(timeout: float):
@@ -977,6 +1001,8 @@ def run_scenario(name: str, timeout: float) -> bool:
             ok = False
         else:
             log(f"nexo-disk {' '.join(args)}: ok")
+    if not ok:
+        logfile = preserva_falha(name, logfile)
     log(f"=== cenario '{name}': {'PASS' if ok else 'FAIL'} (log: {logfile}) ===")
     return ok
 

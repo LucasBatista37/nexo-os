@@ -179,8 +179,17 @@ pub const SYS_EVENT_SIGNAL: u64 = 45;
 /// espera não pode desfazer o sinal dos outros. Aditivo (2026-09-09).
 pub const SYS_EVENT_RESET: u64 = 46;
 
+/// Prende a thread chamadora a um conjunto de CPUs: `rdi` = máscara de bits (bit *n* = CPU
+/// *n*), ou `0` para soltar (qualquer CPU).
+///
+/// Só afeta quem chama — um processo restringe a si mesmo, nunca a outro. Serve a quem precisa
+/// de localidade (um driver junto da CPU que recebe a sua interrupção) e a medições que
+/// queiram separar o custo de acordar **na mesma** CPU do custo de acordar noutra, que exige
+/// IPI. `InvalidArgs` se a máscara não incluir nenhuma CPU online. Aditivo (2026-09-09).
+pub const SYS_THREAD_SET_AFFINITY: u64 = 47;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 46;
+pub const SYS_MAX: u64 = 47;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -532,6 +541,7 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_EVENT_CREATE => "event_create",
         SYS_EVENT_SIGNAL => "event_signal",
         SYS_EVENT_RESET => "event_reset",
+        SYS_THREAD_SET_AFFINITY => "thread_set_affinity",
         _ => "?",
     }
 }

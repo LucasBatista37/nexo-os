@@ -6,8 +6,8 @@
 novos (o próximo é 33); structs de ABI só crescem por campos com padrão zero no fim; protocolos
 IPC seguem o ipc-compat §3. Qualquer quebra exige subir `ABI_VERSION` (consultável por
 `SYS_ABI_VERSION`; hoje = 1) e registro no CHANGELOG. A promoção a "estável" vem com o uso por
-terceiros (gate F6) e o marco `0.9-beta` (ADR-0006). A v1 congela o conjunto atual: 47 syscalls
-(0–46), handles com direitos que só diminuem, canais NXIP, memória compartilhada, os dois spawns,
+terceiros (gate F6) e o marco `0.9-beta` (ADR-0006). A v1 congela o conjunto atual: 48 syscalls
+(0–47), handles com direitos que só diminuem, canais NXIP, memória compartilhada, os dois spawns,
 jobs, threads de usuário e objetos de evento.
 
 ## 1. Convenção (x86_64)
@@ -35,7 +35,7 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 4 | `sleep` | ns | 0 | — |
 | 5 | `get_pid` | — | pid | — |
 | 6 | `abi_version` | — | 0 | — |
-| 7 | `debug_info` | 0 CPUs online / 1 uptime ms / 2 syscalls do processo / 3 handles do processo / 4 processos vivos / 5 quadros livres / 6 quadros utilizáveis / 7 segundos Unix UTC (0 = sem RTC), 8 = tempo de CPU do processo (ns, todas as threads) / 9 = faltas de página recuperadas em cópias usuário↔kernel (corridas de desmapeamento vencidas pelo fixup; 0 é o esperado) | valor | `InvalidArgs` |
+| 7 | `debug_info` | 0 CPUs online / 1 uptime ms / 2 syscalls do processo / 3 handles do processo / 4 processos vivos / 5 quadros livres / 6 quadros utilizáveis / 7 segundos Unix UTC (0 = sem RTC), 8 = tempo de CPU do processo (ns, todas as threads) / 9 = faltas de página recuperadas em cópias usuário↔kernel (corridas de desmapeamento vencidas pelo fixup; 0 é o esperado) / 10 = índice da CPU onde a thread está a correr **neste instante** (muda no próximo tique, a menos que presa por `thread_set_affinity`) | valor | `InvalidArgs` |
 
 | 8 | `handle_close` | h | 0 | `BadHandle` |
 | 9 | `handle_duplicate` | h, rights | novo handle | `BadHandle`, `Denied` (sem `DUPLICATE` ou tentando ampliar direitos) |
@@ -71,6 +71,7 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 42 | `job_set_cpu_limit` | job (`ADMIN`), ns por janela de 1 s (0 = sem limite) → define a quota de CPU do job; passando do orçamento as threads dos membros deixam de ser escalonadas até a janela seguinte (o excedente é cobrado dela) | `BadHandle`, `Denied`, `InvalidArgs` (não é job) |
 | 44 | `event_create` | auto (1 = a espera consome o sinal, uma thread por sinalização; 0 = manual, fica sinalizado até `event_reset`) → handle de evento (`KIND_EVENT` = 8; `READ\|SIGNAL\|TRANSFER\|DUPLICATE`) | `NoMemory` |
 | 45 | `event_signal` | handle de evento (`SIGNAL`) → acorda quem espera: todos no modo manual, um no automático | `BadHandle`, `Denied` (sem `SIGNAL`), `InvalidArgs` (não é evento) |
+| 47 | `thread_set_affinity` | máscara de CPUs (bit *n* = CPU *n*; `0` solta) → prende a **thread chamadora**; cede a vez para que o escalonador a reposicione antes de devolver | `InvalidArgs` (nenhuma CPU online na máscara) |
 | 46 | `event_reset` | handle de evento (`SIGNAL`) → apaga o sinal (modo manual; no automático o consumo já apaga) | `BadHandle`, `Denied` (sem `SIGNAL`), `InvalidArgs` |
 | 43 | `process_list` | ptr, capacidade (1..=256 em `ProcInfo` de 64 B), handle de depuração → quantos processos vivos couberam ({pid, cpu_ns, syscalls, handles, threads, nome}) | `Denied` (sem a capability), `InvalidArgs`, `BadAddress` |
 | 27 | `irq_channel` | dev (`SIGNAL`), vetor (de um `irq_alloc` da mesma concessão) → handle de canal (`READ`): 1 byte por disparo, coalescido se já houver aviso na fila; combina com `channel_wait_any` | `BadHandle`, `Denied` (sem `SIGNAL` ou vetor de outra concessão), `InvalidArgs`, `NoMemory` |

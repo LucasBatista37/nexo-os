@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `6376a98`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `f90602e`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 221 · 🟡 109 · ⬜ 205 · ⛔ 0 → **51% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -360,7 +360,7 @@ Gate: ⬜ não iniciado.
 |---|---|---|
 | ✅ | especificação da ABI de boot | docs/spec/boot-abi.md |
 | ✅ | memória física e virtual | bitmap de quadros + paginação de 4 níveis; um espaço de endereçamento por processo, objetos de memória compartilháveis (`memory_create`/`map`/`unmap`), guard pages, heap do kernel crescendo sob demanda; SMP/afinidade no item seguinte |
-| ✅ | SMP e afinidade | 4 CPUs no QEMU; afinidade por máscara (`spawn_on`, `set_affinity`) |
+| ✅ | SMP e afinidade | 4 CPUs no QEMU; afinidade por máscara no kernel (`spawn_on`, `set_affinity`) e, desde o bloco 135, também para threads de **usuário** (`thread_set_affinity`, syscall 47): um processo restringe-se a si mesmo, nunca a outro. Serve à localidade (ficar junto da CPU que recebe a interrupção do dispositivo) e à medição — foi com ela que se separou o custo de acordar na mesma CPU (~24,5 µs) do de acordar noutra, com IPI (~37 µs). `debug_info 10` diz em que CPU a thread está agora; o auto-teste `user_affinity` prende-se a cada uma das 4 e confirma 50 vezes em cada |
 | ✅ | preempção e prioridades | preempção por quantum (10 ms) e **duas classes de prioridade** por thread (normal/baixa, herdadas no spawn): a fila prefere as normais e uma normal pronta preempta uma de baixa no tique seguinte (≤ 1 ms); `set_priority` (syscall 35) — auto-testes `threads_priority` e `user_priority` (bloco 98) |
 | ✅ | temporizadores de alta resolução | TSC em ns; **tique dinâmico na BSP**: o timer do LAPIC é one-shot, re-armado a cada disparo para o próximo prazo (dormida ou timer de kernel; no máximo 1 ms à frente) — `sleep` em ns de verdade; um prazo mais cedo re-arma na hora (ou por IPI, de outra CPU); APs seguem com tique periódico de 1 ms. Dormidas e timers abaixo de 1 ms acordam perto do prazo **quando a entrega de interrupções permite** — sob QEMU no macOS o laço principal atrasa timers ~1 ms, por isso o auto-teste `timer_resolution` verifica o contrato no LAPIC (contagem re-armada) e só registra a latência medida (bloco 103) |
 | ✅ | isolamento usuário/kernel | ring 3 com espaços próprios; faltas de usuário não afetam o kernel |

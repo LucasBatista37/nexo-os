@@ -15,7 +15,7 @@ hostil e validam no parse.
 
 - **Ativos**: isolamento entre processos; integridade do próprio kernel.
 - **Adversário**: app malicioso com syscalls arbitrárias.
-- **Superfície**: 47 syscalls (0–46; `docs/spec/syscall-abi.md`), ponteiros e handles vindos
+- **Superfície**: 48 syscalls (0–47; `docs/spec/syscall-abi.md`), ponteiros e handles vindos
   do usuário.
 - **Mitigações**: ponteiros validados por faixa + bit USER antes de qualquer cópia
   (`copy_from_user`/`copy_to_user`) **e a cópia em si protegida por tabela de fixup**
