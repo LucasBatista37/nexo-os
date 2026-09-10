@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `4b5b9f7`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `ba5f9f8`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 193 · 🟡 57 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 193 · 🟡 58 · ⬜ 284 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -343,7 +343,7 @@ Gate: ⬜ não iniciado.
 
 | Frente | ✅ | 🟡 | ⬜ | % |
 |---|---|---|---|---|
-| 6.1 Kernel e baixo nível | 9 | 1 | 4 | 68% |
+| 6.1 Kernel e baixo nível | 9 | 2 | 3 | 71% |
 | 6.2 Drivers | 0 | 1 | 15 | 3% |
 | 6.3 Armazenamento | 0 | 0 | 14 | 0% |
 | 6.4 Rede | 0 | 0 | 14 | 0% |
@@ -368,7 +368,7 @@ Gate: ⬜ não iniciado.
 | ✅ | IPC com transferência de capabilities | handles transferidos por canal com direito TRANSFER |
 | ⬜ | contabilidade e limites de recursos |  |
 | ✅ | panic, dump e symbolication | panic com backtrace simbolizado e **dump em disco** (setores reservados do disco de dados, caminho de emergência sem alocação; `tools/nexo-disk crashdump`; cenário `panic` no CI) — o consentimento de envio é o item da Fase 8 |
-| ⬜ | mitigação de classes de exploração |  |
+| 🟡 | mitigação de classes de exploração | ligadas e **provadas**: W^X nas seções e nas páginas de usuário, `CR0.WP`, `EFER.NXE`, guard pages, ASLR de código (PIE), pilha e mapeamentos, e agora **SMEP e SMAP** em CR4 (bloco 126) — o kernel não executa página de usuário nem a toca fora da janela `EFLAGS.AC` da cópia protegida (`x86::usercopy`), que é o único caminho do sistema para memória de usuário. Auto-testes `smep`/`smap` exigem as duas metades e foram vistos reprovar com as mitigações desligadas; o QEMU passa a expor `+smep,+smap` para que sejam exercitadas de verdade. Pendem: KPTI/retpoline e afins (canais laterais), *stack canaries* e CFI |
 | ⬜ | benchmarks de contexto, syscall e IPC |  |
 | 🟡 | stress de 24h e posteriormente 7 dias | 24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias: rodada de 2026-09-01 chegou a **5,84 dias com zero erros** (723 M trocas de contexto) e foi interrompida de fora em 2026-09-07 — `docs/progress/2026-09-07-stress-7d-parcial.md`; a rodada completa foi relançada com o kernel atual em 2026-09-09 10:17 — **veredito 2026-09-16 10:17**, rastreado em `docs/COMPROMISSOS.md` e conferido por `make prazos` (a data anterior anotada aqui, 09-14, vinha de um relançamento planejado que não aconteceu nesse dia: prazo de relógio anotado à mão sai de dia) |
 | ⬜ | documentação de todas as invariantes `unsafe` |  |

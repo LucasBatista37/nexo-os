@@ -36,7 +36,11 @@ SCENARIOS = {
             r"Nexo OS kernel 0\.0\.1-boot \(x86_64\) iniciando",
             r"gdt: carregada",
             r"idt: 256 vetores instalados",
-            r"virt: CR0\.WP ativo, EFER\.NXE=true",
+            # SMEP/SMAP tem de estar LIGADOS, e nao so "o teste passou": um teste que se
+            # ausenta quando a CPU nao suporta passaria em silencio num modelo de CPU errado.
+            r"virt: CR0\.WP ativo, EFER\.NXE=true, CR4\.SMEP=true, CR4\.SMAP=true",
+            r"\[TEST\] smap \.\.\. ok",
+            r"\[TEST\] smep \.\.\. ok",
             r"heap: \d+ KiB em 0x",
             r"acpi: \d+ CPU\(s\), \d+ I/O APIC\(s\)",
             r"apic: LAPIC id=\d+ versao 0x",

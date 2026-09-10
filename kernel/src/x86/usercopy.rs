@@ -29,14 +29,28 @@ global_asm!(
     "    mov rcx, rdx",
     "    xor eax, eax",
     "    cld",
+    // EFLAGS.AC = 1: esta é a janela em que o kernel PODE tocar páginas de usuário com SMAP
+    // ligado. Mexer no bit por `pushfq/popfq` em vez de `stac` evita `#UD` em CPU sem SMAP —
+    // e, sem SMAP, ligar AC em ring 0 não tem efeito nenhum.
+    "    pushfq",
+    "    or dword ptr [rsp], 0x40000",
+    "    popfq",
     // Só esta instrução é protegida: uma falta aqui volta pela retomada, e não pelo caminho
     // fatal. `rep movsb` é reinicializável, mas não retomamos a cópia: o buffer do usuário
     // saiu de baixo dos nossos pés e a syscall inteira falha.
     "nexo_copy_user_inicio:",
     "    rep movsb",
     "nexo_copy_user_fim:",
+    "    pushfq",
+    "    and dword ptr [rsp], 0xfffbffff",
+    "    popfq",
     "    ret",
+    // A retomada da falta também fecha a janela: sair daqui com AC ligado deixaria o kernel
+    // inteiro autorizado a tocar memória de usuário até a próxima troca de contexto.
     "nexo_copy_user_retomada:",
+    "    pushfq",
+    "    and dword ptr [rsp], 0xfffbffff",
+    "    popfq",
     "    mov eax, 1",
     "    ret",
 );

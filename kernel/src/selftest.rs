@@ -64,6 +64,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("timer_resolution", test_timer_resolution),
     ("usercopy_fixup", test_usercopy_fixup),
     ("pml4_recycling", test_pml4_recycling),
+    ("smap", test_smap),
+    ("smep", test_smep),
     ("threads_affinity", test_threads_affinity),
     ("threads_priority", test_threads_priority),
     ("user_process", test_user_process),
@@ -1193,6 +1195,81 @@ fn test_user_threads() -> TestResult {
 }
 
 /// Contabilidade de CPU por processo: girar credita, dormir não (modo 79).
+/// Endereço da metade de usuário usado pelos testes de SMEP/SMAP (longe de tudo o mais).
+const PAGINA_DE_PROVA: u64 = 0x0000_5100_0000_0000;
+
+/// Mapeia uma página **de usuário** no espaço atual (que é o do kernel durante os auto-testes),
+/// executa `f` e desfaz o mapeamento. É assim que se pergunta ao hardware, de dentro do
+/// kernel, "posso tocar memória de usuário?".
+fn com_pagina_de_usuario<R>(exec: bool, f: impl FnOnce(u64) -> R) -> Result<R, String> {
+    use nexo_arch_x86_64::paging::PageFlags;
+    let quadro = crate::mm::phys::allocate_zeroed_frame().ok_or("sem quadro livre")?;
+    let flags = if exec {
+        PageFlags::PRESENT | PageFlags::WRITABLE | PageFlags::USER
+    } else {
+        PageFlags::KERNEL_RW | PageFlags::USER
+    };
+    crate::mm::virt::map_page(VirtAddr::new(PAGINA_DE_PROVA), quadro, flags)
+        .map_err(|e| alloc::format!("map: {e:?}"))?;
+    // Conteúdo: `ret` (0xc3), para que o teste de SMEP tenha o que executar caso a CPU
+    // permita — se permitir, o kernel volta são e o teste falha dizendo que não faltou.
+    let p = crate::mm::virt::phys_to_virt(quadro).as_mut_ptr::<u8>();
+    // SAFETY: quadro recém-mapeado, escrito pelo alias do physmap (página do kernel).
+    unsafe { p.write(0xc3) };
+    let r = f(PAGINA_DE_PROVA);
+    let _ = crate::mm::virt::unmap_and_free(VirtAddr::new(PAGINA_DE_PROVA));
+    Ok(r)
+}
+
+/// SMAP: o kernel não lê página de usuário fora da janela de cópia.
+///
+/// As duas metades importam. Se a leitura direta não faltar, a mitigação não está a valer; se
+/// a cópia protegida faltar, a mitigação partiu o único caminho legítimo — e o sistema
+/// inteiro, porque toda syscall com ponteiro passa por ele.
+fn test_smap() -> TestResult {
+    if !nexo_arch_x86_64::cpu::smap_supported() {
+        kprint!("[TEST] smap: CPU sem SMAP; nada a exercitar\n");
+        return Ok(());
+    }
+    let ok = com_pagina_de_usuario(false, |addr| {
+        let direta = crate::x86::traps::probe(crate::x86::traps::ProbeKind::Read, addr);
+        let mut destino = [0u8; 8];
+        let pela_janela =
+            crate::x86::usercopy::copiar(destino.as_mut_ptr(), addr as *const u8, destino.len());
+        (direta.faulted, pela_janela, destino[0])
+    })?;
+    let (faltou_direta, copiou, primeiro) = ok;
+    check!(
+        faltou_direta,
+        "leitura direta de pagina de usuario NAO faltou: SMAP nao esta a valer"
+    );
+    check!(
+        copiou,
+        "a copia protegida faltou: SMAP quebrou o caminho legitimo"
+    );
+    check!(
+        primeiro == 0xc3,
+        "a copia trouxe {primeiro:#x}, esperado 0xc3"
+    );
+    Ok(())
+}
+
+/// SMEP: o kernel não executa página de usuário.
+fn test_smep() -> TestResult {
+    if !nexo_arch_x86_64::cpu::smep_supported() {
+        kprint!("[TEST] smep: CPU sem SMEP; nada a exercitar\n");
+        return Ok(());
+    }
+    let faltou = com_pagina_de_usuario(true, |addr| {
+        crate::x86::traps::probe(crate::x86::traps::ProbeKind::Exec, addr).faulted
+    })?;
+    check!(
+        faltou,
+        "o kernel executou uma pagina de usuario: SMEP nao esta a valer"
+    );
+    Ok(())
+}
+
 /// O quadro da PML4 é reciclado, e por isso a identidade do espaço não pode ser o endereço.
 ///
 /// Este teste fixa o fato que justifica comparar identidades no escalonador: assim que um

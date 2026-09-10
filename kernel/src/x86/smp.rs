@@ -29,6 +29,8 @@ extern "sysv64" fn ap_entry(arg: usize) -> ! {
         super::traps::load_idt();
         cpu::enable_write_protect();
         cpu::enable_sse();
+        // Cada CPU tem o seu CR4: sem isto, SMEP/SMAP valeriam só na BSP.
+        cpu::enable_smep_smap();
     }
     let lapic = super::apic::lapic();
     lapic.enable(vectors::SPURIOUS, vectors::APIC_ERROR);

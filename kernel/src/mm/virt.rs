@@ -71,9 +71,15 @@ pub fn init() {
     // SAFETY: seções somente-leitura do kernel foram mapeadas sem WRITABLE.
     unsafe { cpu::enable_write_protect() };
     cpu::enable_sse();
+    // SAFETY: todo acesso do kernel a memória de usuário passa por `x86::usercopy`, que liga
+    // EFLAGS.AC durante a cópia; o resto do kernel escreve em páginas de usuário pelo alias do
+    // physmap (páginas do kernel), que SMAP não alcança.
+    let (smep, smap) = unsafe { cpu::enable_smep_smap() };
     kinfo!(
-        "virt: CR0.WP ativo, EFER.NXE={}, CR3={:#x}",
+        "virt: CR0.WP ativo, EFER.NXE={}, CR4.SMEP={}, CR4.SMAP={}, CR3={:#x}",
         cpu::nx_enabled(),
+        smep,
+        smap,
         cpu::read_cr3()
     );
 

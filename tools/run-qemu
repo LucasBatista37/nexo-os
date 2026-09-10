@@ -44,7 +44,9 @@ def qemu_cmd(image: Path, test: bool, gdb: bool, extra: list, smp: int = 4, disk
     qemu = require("qemu-system-x86_64", "Instale QEMU (macOS: brew install qemu; Debian: apt install qemu-system-x86)")
     ovmf = find_ovmf()
     cmd = [
-        qemu, "-machine", "q35", "-cpu", "qemu64", "-m", "512M", "-smp", str(smp),
+        # +smep,+smap: o modelo qemu64 nao os expoe, e sem eles as mitigacoes do kernel ficariam
+        # ligadas em hardware real e NUNCA exercitadas aqui (TCG do QEMU implementa as duas).
+        qemu, "-machine", "q35", "-cpu", "qemu64,+smep,+smap", "-m", "512M", "-smp", str(smp),
         "-drive", f"if=pflash,format=raw,readonly=on,file={ovmf}",
     ]
     # NVRAM gravável (cópia por execução): OVMF de distribuições Linux exige.

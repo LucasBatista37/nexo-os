@@ -147,6 +147,40 @@ pub unsafe fn write_cr3(v: u64) {
     unsafe { asm!("mov cr3, {}", in(reg) v, options(nostack, preserves_flags)) };
 }
 
+/// `true` se a CPU tem SMEP (kernel não executa páginas de usuário).
+pub fn smep_supported() -> bool {
+    cpuid(0, 0).eax >= 7 && cpuid(7, 0).ebx & (1 << 7) != 0
+}
+
+/// `true` se a CPU tem SMAP (kernel não lê nem escreve páginas de usuário sem EFLAGS.AC).
+pub fn smap_supported() -> bool {
+    cpuid(0, 0).eax >= 7 && cpuid(7, 0).ebx & (1 << 20) != 0
+}
+
+/// Liga SMEP e SMAP em CR4 conforme o suportado. Devolve `(smep, smap)` efetivamente ativos.
+///
+/// # Safety
+/// Depois disto, qualquer acesso do kernel a uma página de usuário **fora** de uma janela com
+/// `EFLAGS.AC` ligado vira falta de página, e executar página de usuário em ring 0 idem. Só é
+/// seguro chamar quando todos esses acessos passam por um caminho que liga AC (em Nexo, a
+/// cópia protegida de `x86::usercopy`).
+pub unsafe fn enable_smep_smap() -> (bool, bool) {
+    let smep = smep_supported();
+    let smap = smap_supported();
+    let mut cr4 = read_cr4();
+    if smep {
+        cr4 |= 1 << 20;
+    }
+    if smap {
+        cr4 |= 1 << 21;
+    }
+    if smep || smap {
+        // SAFETY: contrato da função.
+        unsafe { write_cr4(cr4) };
+    }
+    (smep, smap)
+}
+
 /// Lê CR4.
 #[inline]
 pub fn read_cr4() -> u64 {

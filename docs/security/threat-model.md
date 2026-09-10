@@ -21,16 +21,20 @@ hostil e validam no parse.
   (`copy_from_user`/`copy_to_user`) **e a cópia em si protegida por tabela de fixup**
   (`x86::usercopy`): a validação não é atômica com a cópia, e outra thread do mesmo processo
   pode desmapear o buffer nessa janela — a falta vira `BadAddress` em vez de `#PF` fatal
-  (`usercopy_fixup`, `user_usercopy_race`; contador em `debug_info 9`); handles verificados por tipo e **direitos**
+  (`usercopy_fixup`, `user_usercopy_race`; contador em `debug_info 9`); **SMEP e SMAP**
+  ligados em CR4 (bloco 126): o kernel não executa página de usuário e não a lê nem escreve
+  fora da janela `EFLAGS.AC` da cópia protegida — a única do sistema, porque o resto do
+  kernel escreve em memória de usuário pelo alias do physmap. Auto-testes `smep` e `smap`
+  exigem as duas metades (a leitura direta falta; a cópia protegida passa) e foram vistos a
+  reprovar com as mitigações desligadas; o cenário `boot` exige `CR4.SMEP=true, CR4.SMAP=true`
+  no log, para que um modelo de CPU sem elas não passe em silêncio; handles verificados por tipo e **direitos**
   (read/write/transfer/duplicate — `user_syscall_error`, `user_isolation`); limites
   explícitos em toda entrada (`MSG_MAX`, `MEMORY_MAX_PAGES`, `SPAWN_MEM_MAX`…); fuzz de
   syscalls (20 000/rodada no boot + `make fuzz` semanal) sem pânico nem vazamento; pânico
   com backtrace simbolizado para diagnóstico. Instruções privilegiadas em ring 3 →
   exceção → processo morto (`user_isolation`).
 - **Lacunas**: sem mitigação de canais laterais (o TSC é legível por qualquer app — inclusive
-  via trace, ver §9); auditoria externa nunca feita; **sem SMEP/SMAP** (o kernel ainda pode
-  ler e executar páginas de usuário por engano — item de mitigação de classes de exploração,
-  Plano §6.1); com várias threads por processo a análise TOCTOU foi refeita para as cópias
+  via trace, ver §9); auditoria externa nunca feita; com várias threads por processo a análise TOCTOU foi refeita para as cópias
   usuário↔kernel (acima), mas o resto da superfície de syscalls ainda não foi reauditado sob
   concorrência dentro do mesmo espaço de endereçamento.
 
