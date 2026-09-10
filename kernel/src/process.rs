@@ -36,10 +36,20 @@ pub const USER_CODE_BASE: u64 = 0x1000_0000;
 pub const USER_CODE_WINDOW: u64 = 1 << 40;
 
 /// Espaço de endereçamento de um processo.
+///
+/// O `id` é o que distingue um espaço de outro — e **não** o endereço da PML4. O quadro da
+/// PML4 volta ao alocador quando o espaço morre e é reciclado pelo próximo espaço criado, de
+/// modo que dois espaços diferentes podem ter a mesma raiz física em momentos diferentes.
+/// Confundir os dois custou caro: ver `docs/incidents/2026-09-09-fs-ponteiro-nulo.md`.
 pub struct AddressSpace {
     root: PhysAddr,
+    /// Identidade única e monotônica (nunca reutilizada enquanto o sistema estiver de pé).
+    id: u64,
     frames: IrqLock<Vec<PhysAddr>>,
 }
+
+/// Próxima identidade de espaço de endereçamento. Começa em 1: **0 é o espaço do kernel**.
+static PROXIMO_ESPACO: AtomicU64 = AtomicU64::new(1);
 
 struct Recording<'a>(&'a IrqLock<Vec<PhysAddr>>);
 
@@ -65,6 +75,7 @@ impl AddressSpace {
         unsafe { core::ptr::copy_nonoverlapping(src.add(256), dst.add(256), 256) };
         Some(AddressSpace {
             root,
+            id: PROXIMO_ESPACO.fetch_add(1, Ordering::Relaxed),
             frames: IrqLock::new(Vec::new()),
         })
     }
@@ -72,6 +83,11 @@ impl AddressSpace {
     /// Endereço físico da PML4.
     pub fn root(&self) -> PhysAddr {
         self.root
+    }
+
+    /// Identidade do espaço: única enquanto o sistema estiver de pé, ao contrário da raiz.
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     fn mapper(&self) -> Mapper<PhysMap> {
@@ -172,6 +188,10 @@ impl Drop for AddressSpace {
         if cpu::read_cr3() & 0x000f_ffff_ffff_f000 == self.root.as_u64() {
             // SAFETY: a PML4 do kernel mapeia tudo que o kernel usa.
             unsafe { cpu::write_cr3(sched::kernel_pml4().as_u64()) };
+            // A escrita em CR3 esvaziou a TLB; esta CPU passa a ter o espaço do kernel (0).
+            crate::x86::percpu::current()
+                .espaco_carregado
+                .store(0, Ordering::Relaxed);
         }
         let frames = core::mem::take(&mut *self.frames.lock());
         for f in frames {

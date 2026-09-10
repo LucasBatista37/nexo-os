@@ -40,6 +40,13 @@ pub struct PerCpu {
     pub current_thread: AtomicPtr<()>,
     /// Thread idle desta CPU.
     pub idle_thread: AtomicPtr<()>,
+    /// Identidade do espaço de endereçamento carregado em CR3 (0 = o do kernel).
+    ///
+    /// Comparar identidades, e não o endereço da PML4: o quadro da PML4 é reciclado quando um
+    /// espaço morre, e uma CPU que ficou com CR3 apontando para ele acharia que já está no
+    /// espaço certo — mantendo em cache as traduções do espaço morto
+    /// (`docs/incidents/2026-09-09-fs-ponteiro-nulo.md`).
+    pub espaco_carregado: AtomicU64,
     gdt: GlobalDescriptorTable,
     tss: UnsafeCell<TaskStateSegment>,
     df_stack: Box<Stack>,
@@ -86,6 +93,7 @@ impl PerCpu {
             stack_size,
             current_thread: AtomicPtr::new(core::ptr::null_mut()),
             idle_thread: AtomicPtr::new(core::ptr::null_mut()),
+            espaco_carregado: AtomicU64::new(0),
             gdt: GlobalDescriptorTable::new(),
             tss: UnsafeCell::new(TaskStateSegment::new()),
             df_stack: Box::new(Stack([0; DF_STACK_SIZE])),

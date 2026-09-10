@@ -63,6 +63,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("timers", test_timers),
     ("timer_resolution", test_timer_resolution),
     ("usercopy_fixup", test_usercopy_fixup),
+    ("pml4_recycling", test_pml4_recycling),
     ("threads_affinity", test_threads_affinity),
     ("threads_priority", test_threads_priority),
     ("user_process", test_user_process),
@@ -242,7 +243,7 @@ fn report_memory() {
     let s = sched::stats();
     let cur = sched::current();
     kprint!(
-        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} join_dedups={} join_skips={} prio_preempts={} atual={} estado={:?} pilha_propria={}\n",
+        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} join_dedups={} join_skips={} prio_preempts={} reciclagens_pml4={} atual={} estado={:?} pilha_propria={}\n",
         s.alive,
         s.ready,
         s.sleeping,
@@ -252,6 +253,7 @@ fn report_memory() {
         s.join_dedups,
         s.join_skips,
         s.prio_preempts,
+        sched::reciclagens_pml4(),
         cur.as_ref().map_or("?", |t| t.name),
         cur.as_ref().map(|t| t.state()),
         cur.as_ref().is_some_and(|t| t.stack_bounds().is_some())
@@ -1191,6 +1193,33 @@ fn test_user_threads() -> TestResult {
 }
 
 /// Contabilidade de CPU por processo: girar credita, dormir não (modo 79).
+/// O quadro da PML4 é reciclado, e por isso a identidade do espaço não pode ser o endereço.
+///
+/// Este teste fixa o fato que justifica comparar identidades no escalonador: assim que um
+/// espaço de endereçamento morre, o quadro da sua PML4 volta ao alocador e a próxima criação o
+/// recebe de volta — dois espaços diferentes, a mesma raiz física. Enquanto isto for verdade
+/// (e é, deterministicamente), decidir "já estou neste espaço" pelo endereço da PML4 é decidir
+/// pelo dado errado. Ver `docs/incidents/2026-09-09-fs-ponteiro-nulo.md`.
+fn test_pml4_recycling() -> TestResult {
+    use crate::process::AddressSpace;
+    let primeiro = AddressSpace::new().ok_or("sem memoria para o primeiro espaco")?;
+    let raiz = primeiro.root().as_u64();
+    let id = primeiro.id();
+    drop(primeiro);
+    let segundo = AddressSpace::new().ok_or("sem memoria para o segundo espaco")?;
+    check!(
+        segundo.root().as_u64() == raiz,
+        "o alocador nao reciclou a raiz ({:#x} != {:#x})",
+        segundo.root().as_u64(),
+        raiz
+    );
+    check!(
+        segundo.id() != id,
+        "dois espacos com a mesma identidade ({id})"
+    );
+    Ok(())
+}
+
 /// A cópia usuário↔kernel sobrevive a uma falta de página (tabela de fixup, bloco 121).
 ///
 /// Endereço não mapeado no espaço atual: sem o fixup isto é um `#PF` fatal — o teste não

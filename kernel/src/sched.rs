@@ -207,6 +207,16 @@ pub fn switches() -> u64 {
     stats().switches
 }
 
+/// Quantas vezes uma CPU precisou recarregar CR3 com o **mesmo** quadro de PML4 porque o
+/// espaço de endereçamento era outro (quadro reciclado). Cada uma destas seria, na versão
+/// antiga, uma CPU a executar com traduções de um espaço morto.
+static RECICLAGENS_PML4: AtomicU64 = AtomicU64::new(0);
+
+/// Leitura do contador de reciclagens de quadro de PML4 detectadas.
+pub fn reciclagens_pml4() -> u64 {
+    RECICLAGENS_PML4.load(Ordering::Relaxed)
+}
+
 static KERNEL_PML4: AtomicU64 = AtomicU64::new(0);
 
 /// PML4 do kernel (capturada em `init`).
@@ -507,14 +517,33 @@ fn schedule_locked(g: nexo_sync::SpinLockGuard<'static, Sched>, new_state: State
     g.prev_for_finish[ci] = Some(cur.clone());
     set_current(cpu_data, &next);
     g.switches += 1;
-    // Espaço de endereçamento: o do processo da próxima thread, ou o do kernel.
-    let target = next
+    // Espaço de endereçamento: o do processo da próxima thread, ou o do kernel (identidade 0).
+    //
+    // A decisão de recarregar CR3 sai da IDENTIDADE do espaço, nunca do endereço da PML4:
+    // quando um processo morre, o quadro da sua PML4 volta ao alocador e o próximo processo
+    // criado costuma receber o MESMO quadro. Comparando endereços, uma CPU que rodou o
+    // processo morto veria "já estou no espaço certo", não recarregaria CR3 e seguiria com a
+    // TLB e os caches de estrutura de paginação do espaço que morreu — executando ou lendo
+    // memória alheia. Foi essa a causa das quedas raras do `fs`
+    // (`docs/incidents/2026-09-09-fs-ponteiro-nulo.md`).
+    let (target, target_id) = next
         .process
         .as_ref()
-        .map_or(kernel_pml4().as_u64(), |p| p.space.root().as_u64());
-    if cpu::read_cr3() & 0x000f_ffff_ffff_f000 != target {
-        // SAFETY: a metade do kernel é idêntica em todas as PML4s; pilhas e código continuam mapeados.
+        .map_or((kernel_pml4().as_u64(), 0), |p| {
+            (p.space.root().as_u64(), p.space.id())
+        });
+    if cpu_data.espaco_carregado.load(Ordering::Relaxed) != target_id {
+        if cpu::read_cr3() & 0x000f_ffff_ffff_f000 == target {
+            // Mesmo quadro, espaço diferente: é exatamente o caso que a comparação por
+            // endereço deixava passar. Contado para que o auto-teste possa exigi-lo.
+            RECICLAGENS_PML4.fetch_add(1, Ordering::Relaxed);
+        }
+        // SAFETY: a metade do kernel é idêntica em todas as PML4s; pilhas e código continuam
+        // mapeados. Escrever em CR3 esvazia TLB e caches de estrutura de paginação.
         unsafe { cpu::write_cr3(target) };
+        cpu_data
+            .espaco_carregado
+            .store(target_id, Ordering::Relaxed);
     }
     // SAFETY: lock detido; `sp` só é tocado aqui e na troca.
     let prev_sp = unsafe { &raw mut cur.inner().sp };

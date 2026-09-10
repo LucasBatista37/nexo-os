@@ -95,7 +95,7 @@ Hipótese descartada no caminho: a contagem de quadros do `fs` variar (87/88/89)
 não indica página perdida — varia com a base aleatória do ASLR, que muda quantas tabelas
 intermediárias são necessárias.
 
-### Causa raiz: CR3 não recarregado quando o quadro da PML4 é reciclado
+### Hipótese levantada — e REFUTADA pela medição
 
 `kernel/src/sched.rs` evitava a troca de CR3 comparando o **quadro físico** da PML4:
 
@@ -118,5 +118,34 @@ tradução obsoleta *presente* faz a CPU executar memória alheia — o que expl
 anteriores (`#UD` = instrução inválida em memória que não é o código do `fs`; escrita em
 `null + 0x20` dentro de `write_entry` = código errado a correr).
 
-Gravidade além da queda: com traduções de um espaço morto ainda válidas na CPU, um processo
-pode **alcançar memória de outro** — é uma falha de isolamento, não só de estabilidade.
+Se fosse isso, a gravidade passaria da queda: traduções de um espaço morto ainda válidas na
+CPU deixariam um processo **alcançar memória de outro**.
+
+**Não é isso.** A hipótese foi medida antes de virar conclusão, e caiu:
+
+1. A **premissa** confirma-se: uma sonda que cria e destrói espaços de endereçamento viu o
+   quadro da PML4 recém-liberada ser devolvido pela alocação seguinte **7 vezes em 7** — o
+   alocador de bitmap recicla mesmo, e de imediato.
+2. O **caso perigoso**, porém, nunca ocorre: um contador no escalonador, incrementado
+   exatamente quando uma CPU vai carregar um espaço **diferente** cujo quadro de PML4 é
+   **igual** ao que já está em CR3, marcou **0 em 467 processos criados** num boot completo.
+
+O motivo é uma invariante que a versão antiga explorava sem dizer: uma CPU nunca fica com o
+CR3 de um espaço morto. Enquanto uma thread do processo corre, o `Arc` mantém o espaço vivo; e
+ao trocar para a thread ociosa (ou para qualquer thread sem processo) o escalonador já carrega
+a PML4 do kernel. Quando o espaço finalmente morre, nenhuma CPU o tem em CR3.
+
+A comparação passou a ser feita por **identidade** do espaço mesmo assim (bloco 125), como
+endurecimento: comparar endereços de PML4 só é correto por causa daquela invariante não
+declarada, e um dia alguém a quebra — adiando a destruição do espaço, adotando troca preguiçosa
+de CR3 — sem que nada acuse. O contador continua no `[SCHED]` para que a mudança seja
+observável: hoje ele é zero, e o dia em que não for é o dia em que a invariante caiu.
+
+### O que fica para a próxima ocorrência
+
+A causa continua **desconhecida**. O que se sabe: o processo não chega a executar a primeira
+instrução, e a página do seu ponto de entrada não está presente. Instrumentação acrescentada no
+bloco 125: quando um processo de usuário sofre falta de página, o kernel percorre as tabelas do
+próprio processo e imprime as entradas de cada nível (PML4/PDPT/PD/PT) para o endereço da
+falta. Na próxima vez saberemos se a tradução some num nível intermediário, se a entrada existe
+sem o bit de presença, ou se o endereço nunca foi mapeado.

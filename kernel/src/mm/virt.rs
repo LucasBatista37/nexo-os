@@ -128,6 +128,33 @@ pub fn translate(virt: VirtAddr) -> Option<Translation> {
     })
 }
 
+/// Percorre as tabelas a partir do CR3 **atual** e devolve a entrada crua de cada nível
+/// (PML4, PDPT, PD, PT) para `virt`, parando onde a cadeia terminar.
+///
+/// Diagnóstico puro: não toca em nada e não exige que a tradução exista — é justamente quando
+/// ela **não** existe que interessa saber em que nível a cadeia se perdeu. Devolve quantos
+/// níveis foram lidos.
+pub fn walk_raw(virt: VirtAddr, saida: &mut [u64; 4]) -> usize {
+    let indices = [
+        (virt.as_u64() >> 39) & 0x1ff,
+        (virt.as_u64() >> 30) & 0x1ff,
+        (virt.as_u64() >> 21) & 0x1ff,
+        (virt.as_u64() >> 12) & 0x1ff,
+    ];
+    let mut tabela = PhysAddr::new(cpu::read_cr3() & 0x000f_ffff_ffff_f000);
+    for (nivel, idx) in indices.iter().enumerate() {
+        let ptr = phys_to_virt(tabela).as_ptr::<PageTableEntry>();
+        // SAFETY: tabela de páginas dentro do physmap; leitura de uma entrada alinhada.
+        let entrada = unsafe { *ptr.add(*idx as usize) };
+        saida[nivel] = entrada.raw();
+        if !entrada.is_present() || entrada.is_huge() {
+            return nivel + 1;
+        }
+        tabela = PhysAddr::new(entrada.raw() & 0x000f_ffff_ffff_f000);
+    }
+    4
+}
+
 /// Aloca um quadro zerado e o mapeia em `virt`.
 pub fn alloc_and_map(virt: VirtAddr, flags: PageFlags) -> Result<PhysAddr, MapError> {
     let frame = super::phys::allocate_zeroed_frame().ok_or(MapError::OutOfFrames)?;

@@ -211,6 +211,23 @@ fn user_fault(frame: &mut TrapFrame) -> ! {
             Err(_) => kwarn!("trap: codigo em {:#x} ilegivel (nao mapeado?)", inicio),
         }
     }
+    // Falta de página: a tradução do endereço faltoso, nível a nível, no espaço do PRÓPRIO
+    // processo (o CR3 ainda é o dele aqui). Serve para distinguir os três casos que a mensagem
+    // de falta não separa: a cadeia morre num nível intermediário, a entrada final existe mas
+    // sem o bit de presença, ou o endereço nunca foi mapeado. Ver
+    // `docs/incidents/2026-09-09-fs-ponteiro-nulo.md`.
+    if vector == 14 {
+        let cr2 = cpu::read_cr2();
+        let mut niveis = [0u64; 4];
+        let lidos = crate::mm::virt::walk_raw(nexo_mm::VirtAddr::new(cr2), &mut niveis);
+        kwarn!(
+            "trap: tabelas de {:#x} (cr3={:#x}): {} nivel(is) em hex {:x?} (a cadeia para onde a entrada nao tem o bit 0)",
+            cr2,
+            cpu::read_cr3(),
+            lidos,
+            &niveis[..lidos]
+        );
+    }
     let reason = match vector {
         13 => "protecao geral em modo usuario",
         14 => "falta de pagina em modo usuario",
