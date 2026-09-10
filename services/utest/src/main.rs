@@ -130,6 +130,8 @@ pub extern "C" fn _start(mode: u64) -> ! {
         84 => events_test(),
         85 => rights_matrix(),
         86 => rights_fuzz(param),
+        87 => thread_limit(),
+        88 => handle_limit(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5228,6 +5230,116 @@ fn cpu_time_test() -> ! {
 }
 
 static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+// --- Limites de recursos por processo (bloco 128) ---
+// Cada thread reserva 256 KiB de quadros, que sao um recurso GLOBAL: sem teto, um processo sem
+// privilegio esgota a memoria da maquina inteira. O teste enche a cota, confere que a recusa
+// vem no numero certo, solta as threads e confirma que a vaga volta.
+static LIMITE_EV: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+extern "C" fn limite_thread(_arg: u64) -> ! {
+    use core::sync::atomic::Ordering::Relaxed;
+    let ev = LIMITE_EV.load(Relaxed) as nexo_sys::Handle;
+    // Evento manual: quando o principal sinalizar, todas passam de uma vez.
+    let _ = nexo_sys::channel_wait_any_timeout(&[ev], 10_000_000_000);
+    nexo_sys::thread_exit();
+}
+
+fn thread_limit() -> ! {
+    use core::sync::atomic::Ordering::Relaxed;
+    let max = nexo_sys::abi::THREADS_MAX_PER_PROCESS;
+    let ev = nexo_sys::event_create(false).unwrap_or_else(|_| nexo_sys::exit(560));
+    LIMITE_EV.store(ev as u64, Relaxed);
+    let mut hs = [0 as nexo_sys::Handle; 128];
+    let mut criadas = 0usize;
+    loop {
+        match nexo_sys::thread_create(limite_thread, 0) {
+            Ok(h) => {
+                if criadas >= hs.len() {
+                    nexo_sys::exit(561); // sem teto: o limite nao esta a valer
+                }
+                hs[criadas] = h;
+                criadas += 1;
+            }
+            Err(Status::NoMemory) => break,
+            Err(_) => nexo_sys::exit(562),
+        }
+    }
+    // A thread principal ocupa uma vaga: sobram max-1 para criar.
+    if criadas != max - 1 {
+        nexo_rt::log!("utest: criou {} threads, esperado {}", criadas, max - 1);
+        nexo_sys::exit(563);
+    }
+    // Solta todas e confirma que a vaga volta ao processo.
+    if nexo_sys::event_signal(ev) != Status::Ok {
+        nexo_sys::exit(564);
+    }
+    for h in hs.iter().take(criadas) {
+        if nexo_sys::thread_join(*h) != Status::Ok {
+            nexo_sys::exit(565);
+        }
+    }
+    let nova = nexo_sys::thread_create(limite_thread, 0).unwrap_or_else(|_| nexo_sys::exit(566));
+    if nexo_sys::thread_join(nova) != Status::Ok {
+        nexo_sys::exit(567);
+    }
+    let _ = nexo_sys::handle_close(ev);
+    nexo_rt::log!(
+        "utest: limite de threads ok — {} criadas, a seguinte recusada, vaga devolvida no fim",
+        criadas
+    );
+    nexo_sys::exit(0)
+}
+
+// O teto de handles ja existia (HANDLES_MAX); o que faltava era alguem exigi-lo. Encher a
+// tabela nao pode derrubar nada, e fechar um handle tem de devolver a vaga.
+fn handle_limit() -> ! {
+    use nexo_sys::abi::{HANDLES_MAX, RIGHT_READ};
+    let (a, b) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(570));
+    let mut copias = [0 as nexo_sys::Handle; 512];
+    let mut n = 0usize;
+    loop {
+        match nexo_sys::handle_duplicate(a, RIGHT_READ) {
+            Ok(h) => {
+                if n >= copias.len() {
+                    nexo_sys::exit(571); // sem teto
+                }
+                copias[n] = h;
+                n += 1;
+            }
+            Err(Status::NoMemory) => break,
+            Err(_) => nexo_sys::exit(572),
+        }
+    }
+    let total = nexo_sys::debug_info(3) as usize;
+    if total != HANDLES_MAX {
+        nexo_rt::log!(
+            "utest: tabela com {} handles, esperado {}",
+            total,
+            HANDLES_MAX
+        );
+        nexo_sys::exit(573);
+    }
+    // Fechar um devolve exatamente uma vaga.
+    if nexo_sys::handle_close(copias[0]) != Status::Ok {
+        nexo_sys::exit(574);
+    }
+    let reposto = nexo_sys::handle_duplicate(a, RIGHT_READ).unwrap_or_else(|_| nexo_sys::exit(575));
+    if nexo_sys::handle_duplicate(a, RIGHT_READ) != Err(Status::NoMemory) {
+        nexo_sys::exit(576); // a tabela devia estar cheia outra vez
+    }
+    let _ = nexo_sys::handle_close(reposto);
+    for h in copias.iter().take(n).skip(1) {
+        let _ = nexo_sys::handle_close(*h);
+    }
+    let _ = nexo_sys::handle_close(a);
+    let _ = nexo_sys::handle_close(b);
+    nexo_rt::log!(
+        "utest: limite de handles ok — tabela cheia em {}, recusa limpa, vaga devolvida ao fechar",
+        HANDLES_MAX
+    );
+    nexo_sys::exit(0)
+}
 
 // --- Fuzz dirigido a capabilities (bloco 127) ---
 // A matriz do bloco 124 percorre os casos que alguem pensou em escrever. Este sorteia: para

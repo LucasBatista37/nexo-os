@@ -353,6 +353,15 @@ pub const MSG_HANDLES_MAX: usize = 8;
 pub const CHANNEL_QUEUE_MAX: usize = 64;
 /// Handles por processo.
 pub const HANDLES_MAX: usize = 256;
+
+/// Máximo de threads **vivas** por processo ([`SYS_THREAD_CREATE`] devolve `NoMemory` acima
+/// disto).
+///
+/// Cada thread reserva uma pilha de 256 KiB em quadros físicos, que são um recurso **global**:
+/// sem teto, um processo sem privilégio esgota a memória da máquina inteira criando threads —
+/// não a sua própria cota, a de todos. O limite é generoso para uso legítimo (nenhum serviço
+/// do sistema passa de meia dúzia) e barato de conferir.
+pub const THREADS_MAX_PER_PROCESS: usize = 64;
 /// Valor de handle inválido.
 pub const HANDLE_INVALID: u32 = u32::MAX;
 

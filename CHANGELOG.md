@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 1, bloco 128 — limites de recursos por processo)
+
+- **Um processo sem privilégio podia esgotar a memória da máquina inteira criando threads.** Não havia teto algum: cada `thread_create` reserva 256 KiB de pilha em quadros físicos, e quadros são um recurso **global** — o processo não gastava a sua cota, gastava a de todos. Agora há `THREADS_MAX_PER_PROCESS` (64 threads **vivas**, a principal incluída); acima disso, `NoMemory`. Uma thread que termina devolve a vaga e a pilha.
+- O teto de **handles** (256) existia desde cedo e nunca fora exigido por teste — um limite que ninguém verifica é uma intenção, não uma garantia. Passou a ser: encher a tabela devolve `NoMemory` limpo, fechar um handle devolve exatamente uma vaga.
+- Auto-testes `user_thread_limit` e `user_handle_limit` (137º e 138º). O primeiro foi **visto a reprovar** com o limite desligado de propósito. As threads são seguradas por um objeto de evento manual (bloco 122) e soltas todas de uma vez — o caso de uso para que o modo manual existe.
+- **`docs/spec/syscall-abi.md` §3.3**: todos os limites do sistema numa tabela só — valor, escopo, o que acontece ao exceder e qual teste o exige. Inclui o que **não** tem teto (número de processos e de canais), porque uma lista de limites que esconde os que faltam é pior que nenhuma.
+
 ### Adicionado (Fase 2, bloco 127 — fuzzing dirigido a capabilities)
 
 - A matriz do bloco 124 percorre os casos que alguém pensou em escrever; este **sorteia**. A cada rodada: um objeto (canal, memória, evento), um **subconjunto aleatório** dos seus direitos e uma operação cujo direito exigido está **ausente**. 4 000 rodadas por boot, semente vinda do TSC e registrada no log — uma reprovação é reproduzível.

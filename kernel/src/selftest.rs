@@ -128,6 +128,8 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_events", test_user_events),
     ("user_rights", test_user_rights),
     ("user_rights_fuzz", test_user_rights_fuzz),
+    ("user_thread_limit", test_user_thread_limit),
+    ("user_handle_limit", test_user_handle_limit),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1372,6 +1374,20 @@ fn test_user_rights_fuzz() -> TestResult {
         .map_err(alloc::string::String::from)?;
     let code = crate::process::wait_and_reap(&p);
     check!(code == 0, "rights_fuzz saiu com {code}");
+    Ok(())
+}
+
+/// Teto de threads por processo: a cota enche, a recusa é limpa e a vaga volta (bloco 128).
+fn test_user_thread_limit() -> TestResult {
+    let code = run_utest(87)?;
+    check!(code == 0, "thread_limit saiu com {code}");
+    Ok(())
+}
+
+/// Teto de handles por processo: o limite existia desde cedo, faltava alguém exigi-lo.
+fn test_user_handle_limit() -> TestResult {
+    let code = run_utest(88)?;
+    check!(code == 0, "handle_limit saiu com {code}");
     Ok(())
 }
 

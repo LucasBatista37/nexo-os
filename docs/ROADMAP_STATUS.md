@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `1939d07`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `de670fe`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 193 · 🟡 58 · ⬜ 284 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 193 · 🟡 59 · ⬜ 283 · ⛔ 0 → **42% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -343,7 +343,7 @@ Gate: ⬜ não iniciado.
 
 | Frente | ✅ | 🟡 | ⬜ | % |
 |---|---|---|---|---|
-| 6.1 Kernel e baixo nível | 9 | 2 | 3 | 71% |
+| 6.1 Kernel e baixo nível | 9 | 3 | 2 | 75% |
 | 6.2 Drivers | 0 | 1 | 15 | 3% |
 | 6.3 Armazenamento | 0 | 0 | 14 | 0% |
 | 6.4 Rede | 0 | 0 | 14 | 0% |
@@ -366,7 +366,7 @@ Gate: ⬜ não iniciado.
 | ✅ | isolamento usuário/kernel | ring 3 com espaços próprios; faltas de usuário não afetam o kernel |
 | ✅ | syscalls versionadas | `ABI_VERSION = 1` consultável (`abi_version`), tabela em `docs/spec/syscall-abi.md` com política aditiva (números e campos novos apenas; quebras sobem a versão); a promoção a **estável** é o item da Fase 6 (gate F6) |
 | ✅ | IPC com transferência de capabilities | handles transferidos por canal com direito TRANSFER |
-| ⬜ | contabilidade e limites de recursos |  |
+| 🟡 | contabilidade e limites de recursos | contabilidade: tempo de CPU por processo (`debug_info 8`, creditado nas trocas de contexto mais a fatia em curso) e por job, com **quota** e throttle no escalonador (`job_set_cpu_limit`); handles, threads e processos listáveis (`process_list`). Limites: todos tabelados em `docs/spec/syscall-abi.md` §3.3 e **exigidos por auto-teste**, incluindo o teto novo de **threads vivas por processo** (bloco 128) — sem ele, um processo sem privilégio esgotava a memória da máquina inteira criando threads de 256 KiB cada, porque quadros são recurso global; o teto de handles existia desde cedo e passou a ser exigido. Pendem tetos para número de processos e de canais, e cotas de memória por job |
 | ✅ | panic, dump e symbolication | panic com backtrace simbolizado e **dump em disco** (setores reservados do disco de dados, caminho de emergência sem alocação; `tools/nexo-disk crashdump`; cenário `panic` no CI) — o consentimento de envio é o item da Fase 8 |
 | 🟡 | mitigação de classes de exploração | ligadas e **provadas**: W^X nas seções e nas páginas de usuário, `CR0.WP`, `EFER.NXE`, guard pages, ASLR de código (PIE), pilha e mapeamentos, e agora **SMEP e SMAP** em CR4 (bloco 126) — o kernel não executa página de usuário nem a toca fora da janela `EFLAGS.AC` da cópia protegida (`x86::usercopy`), que é o único caminho do sistema para memória de usuário. Auto-testes `smep`/`smap` exigem as duas metades e foram vistos reprovar com as mitigações desligadas; o QEMU passa a expor `+smep,+smap` para que sejam exercitadas de verdade. Pendem: KPTI/retpoline e afins (canais laterais), *stack canaries* e CFI |
 | ⬜ | benchmarks de contexto, syscall e IPC |  |

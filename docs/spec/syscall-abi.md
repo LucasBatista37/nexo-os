@@ -100,6 +100,33 @@ Um handle de dispositivo autoriza syscalls 17–24. Há dois escopos: a concess�
 
 Mensagem = até 4096 bytes + até 8 handles; fila de 64 por extremidade. Sem cabeçalho/protocolo tipado ainda (IDL e versionamento de protocolo vêm no próximo bloco). O kernel copia os bytes para memória própria no `send` e para o usuário no `recv`.
 
+## 3.3 Limites de recursos (todos por processo, salvo indicação)
+
+Cada limite existe porque o recurso por trás dele é **global**: quadros físicos, memória de
+kernel, vetores de interrupção. Sem teto, um processo sem privilégio não gasta a sua cota — gasta
+a da máquina. Exceder um limite é sempre uma **recusa limpa** (um `Status`), nunca uma falha do
+sistema.
+
+| Constante | Valor | Escopo | Ao exceder | Exigido por |
+| --- | --- | --- | --- | --- |
+| `HANDLES_MAX` | 256 | tabela do processo | `NoMemory` | `user_handle_limit` |
+| `THREADS_MAX_PER_PROCESS` | 64 | threads **vivas** do processo (a principal conta) | `NoMemory` | `user_thread_limit` |
+| `SHM_PAGES_MAX_PER_PROCESS` | 4096 (16 MiB) | páginas de memória partilhável **criadas** pelo processo | `NoMemory` | `user_shmem` |
+| `MEMORY_MAX_PAGES` | 256 (1 MiB) | páginas por objeto de memória | `InvalidArgs` | `user_shmem` |
+| `SPAWN_MEM_MAX` | 2 MiB | ELF passado a `process_spawn_mem` | `TooBig` | `user_spawn_mem` |
+| `MSG_MAX` | 4096 | bytes por mensagem | `TooBig` | `user_ipc` |
+| `MSG_HANDLES_MAX` | 8 | handles por mensagem | `TooBig` | `user_ipc` |
+| `CHANNEL_QUEUE_MAX` | 64 | mensagens em fila por ponta | `NoMemory` | `user_ipc` |
+| `WAIT_ANY_MAX` | 16 | handles numa espera múltipla | `InvalidArgs` | `user_events` |
+| `LOG_MAX` | 1024 | bytes por `log` | `TooBig` | `user_syscall_error` |
+| quota de CPU do job | definida por `job_set_cpu_limit` | job | throttle no escalonador | `user_cpu_quota` |
+
+A vaga volta quando o recurso é devolvido: fechar um handle abre uma vaga na tabela, uma thread
+que termina devolve a sua (e os 256 KiB de pilha), e o objeto de memória devolve a cota ao morrer.
+
+**Sem teto ainda**: número de processos vivos e número de canais — ambos limitados hoje só pela
+memória disponível.
+
 ## 4. Validação de ponteiros
 
 Todo ponteiro de usuário é validado antes do acesso: faixa `[ptr, ptr+len)` abaixo de `0x0000_8000_0000_0000` e cada página mapeada com o bit `USER` no espaço do processo; caso contrário `BadAddress`. O kernel copia os bytes para memória própria antes de usá-los.

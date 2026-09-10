@@ -374,6 +374,18 @@ pub fn create_user_thread(
     if entry == 0 || entry >= USER_ADDRESS_LIMIT {
         return Err("entrada fora da faixa de usuario");
     }
+    // Teto de threads vivas: cada uma custa 256 KiB de quadros, que são um recurso global.
+    // A contagem é das VIVAS — uma thread que terminou devolve a vaga (e a pilha).
+    {
+        let threads = p.threads.lock();
+        let vivas = threads
+            .iter()
+            .filter(|t| !crate::sched::is_finished(**t))
+            .count();
+        if vivas >= nexo_syscall_abi::THREADS_MAX_PER_PROCESS {
+            return Err("limite de threads do processo atingido");
+        }
+    }
     let base = p.reserve_device_region(USER_STACK_SIZE + PAGE_SIZE) + PAGE_SIZE; // guard abaixo
     let top = base + USER_STACK_SIZE;
     let mut v = base;

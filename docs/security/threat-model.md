@@ -28,8 +28,7 @@ hostil e validam no parse.
   exigem as duas metades (a leitura direta falta; a cópia protegida passa) e foram vistos a
   reprovar com as mitigações desligadas; o cenário `boot` exige `CR4.SMEP=true, CR4.SMAP=true`
   no log, para que um modelo de CPU sem elas não passe em silêncio; handles verificados por tipo e **direitos**
-  (read/write/transfer/duplicate — `user_syscall_error`, `user_isolation`); limites
-  explícitos em toda entrada (`MSG_MAX`, `MEMORY_MAX_PAGES`, `SPAWN_MEM_MAX`…); fuzz de
+  (read/write/transfer/duplicate — `user_syscall_error`, `user_isolation`); limites explícitos em toda entrada, **tabelados e exigidos por teste** (`docs/spec/syscall-abi.md` §3.3): handles (256), threads vivas por processo (64, novo no bloco 128 — cada thread custa 256 KiB de quadros, que são recurso global), páginas partilháveis por processo, tamanho de mensagem, fila de canal, espera múltipla e quota de CPU por job; sem teto ainda: número de processos e de canais; fuzz de
   syscalls (20 000/rodada no boot + `make fuzz` semanal) sem pânico nem vazamento; pânico
   com backtrace simbolizado para diagnóstico. Instruções privilegiadas em ring 3 →
   exceção → processo morto (`user_isolation`).
