@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Alterado (bloco 131 — as frentes permanentes de drivers, armazenamento e rede auditadas contra o código)
+
+- As checklists das frentes permanentes (Plano §6) estavam quase todas **por marcar**, embora muito do que listam esteja feito há meses: §6.2 Drivers tinha 16 itens em branco com cinco drivers VirtIO, NVMe e AHCI a funcionar; §6.3 Armazenamento tinha o NexoFS, o VFS com namespaces e os testes de corte de energia todos por assinalar; §6.4 Rede tinha 14 em branco com a pilha inteira exercitada contra o host real.
+- Um roadmap que subestima o que existe é tão enganador quanto um que exagera: leva a reimplementar o que já está lá e esconde o que **de facto** falta. E já custou caro nesta série — foi uma nota desatualizada que escondeu a corrida nas cópias usuário↔kernel (bloco 121) e outra que dizia pendente uma quota de handles que existia (bloco 128).
+- Os 30 itens destas três frentes foram verificados **no código**, um a um, e reescritos com a evidência e com o que falta. O que aparece agora: ECAM/MCFG do PCIe nunca foi preciso; não há política de reinício de driver nem hotplug; não há arquivos mapeados em memória; o writeback é write-through por desenho (é daí que vem a segurança contra corte de energia); e o que trava a rede é decisão adiada (TLS) ou hardware (Wi-Fi), não trabalho por fazer.
+- O percentual do `ROADMAP_STATUS` passou de 42% para 45% — não porque algo novo ficou pronto, mas porque o documento parou de mentir para menos.
+
 ### Alterado (Fase 1, bloco 130 — o inventário de `unsafe` passou a ser gerado)
 
 - `docs/unsafe-inventory.md` era escrito à mão e dizia **355** ocorrências, contadas em 2026-08-30. A árvore tinha **474**. Ficara 119 usos atrás sem que ninguém reparasse — e um inventário que envelhece é pior que nenhum, porque dá a impressão de que se sabe o que há na árvore.

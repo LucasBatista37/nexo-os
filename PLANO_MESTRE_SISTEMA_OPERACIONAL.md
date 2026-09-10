@@ -690,56 +690,60 @@ Estas listas atravessam várias fases e devem ser revisadas a cada release.
 
 ### 6.2 Drivers
 
-- [ ] modelo e lifecycle de driver;
-- [ ] descoberta e binding;
-- [ ] isolamento por host de driver;
-- [ ] PCI/PCIe;
+- [-] modelo e lifecycle de driver — *cada driver é um **processo** em ring 3 que recebe no handle 0 uma **concessão de dispositivo** (config, MMIO e IRQ limitados ao seu BDF) e serve clientes por protocolo tipado; morrer é um estado previsto — o cliente vê `PeerClosed` e o kernel devolve quadros, canais e o vetor de IRQ (`user_block_crash`). Pendem: política de **reinício** de driver (o `svcmgr` supervisiona serviços, não drivers) e um documento de ciclo de vida com os estados nomeados*;
+- [-] descoberta e binding — *enumeração PCI completa do barramento 0 (multifunção, classe, IRQ, BARs por sondagem) e binding por **IDs** (vendor + tipo VirtIO) e por **propriedades** (classe/subclasse/prog_if → `nvmedev`/`ahcidev`), com o papel de cada disco vindo da identidade `nexo.block` e não da ordem do barramento (bloco 110). Pendem binding por ACPI e hotplug*;
+- [-] isolamento por host de driver — *um processo por driver, sem privilégio, com apenas a sua concessão: `mmio_map` só dentro dos BARs daquele BDF, IRQ por handle, DMA por página concedida; a queda de um não abala kernel nem vizinhos (`user_block_crash`). O buraco conhecido é o **DMA**: sem IOMMU, um driver comprometido programa o dispositivo para escrever em qualquer lugar (ADR-0015, aviso explícito no boot)*;
+- [-] PCI/PCIe — *configuração pelo mecanismo legado (0xCF8/0xCFC): enumeração multifunção, classe, IRQ legada, BARs de 32/64 bits e E/S por sondagem, capabilities e MSI-X. Pende o **ECAM/MCFG** (os 4 KiB de configuração estendida do PCIe), que nenhum dispositivo usado até agora exigiu — os 256 bytes legados bastam para VirtIO, NVMe e AHCI*;
 - [-] ACPI — *RSDP/XSDT/MADT/HPET; sem AML*;
-- [ ] VirtIO block, net, input, console e RNG;
+- [x] VirtIO block, net, input, console e RNG — *os cinco existem como drivers em modo usuário (`blockdev`, `netdev`, `inputdev`, `consoledev`, `rngdev`), VirtIO 1.x sobre PCI com capabilities modernas, filas divididas e MSI-X, cada um com protocolo tipado próprio gerado da IDL e exercitado em cenário de teste*;
 - [ ] USB e HID;
-- [ ] NVMe/AHCI;
-- [ ] display/GPU;
+- [x] NVMe/AHCI — *ambos em modo usuário (`nvmedev` com filas de submissão/conclusão, MSI-X e até 4 pedidos em voo; `ahcidev` com FIS e porta 0), ligados por classe PCI pelo `devmgr` e usados de verdade no boot (discos de dados, A/B e espelho de backup)*;
+- [-] display/GPU — *framebuffer UEFI capturado pelo loader (GOP) e desenhado pelo kernel e pelo compositor, com o mapeamento gated pela concessão do dispositivo de vídeo. Não há driver de GPU nem aceleração: enumeração e troca de modos, e qualquer 2D/3D acelerado, pendem*;
 - [ ] áudio;
-- [ ] Ethernet e Wi-Fi limitado;
+- [-] Ethernet e Wi-Fi limitado — *Ethernet existe pelo `netdev` (VirtIO-net 1.x, filas de recepção e transmissão, MSI-X) e é exercitada de ponta a ponta no cenário `net` (ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS e HTTP reais contra o host). Ethernet em hardware real e Wi-Fi pendem da Fase 7 e do computador de referência*;
 - [ ] energia e bateria;
-- [ ] DMA/IOMMU;
+- [-] DMA/IOMMU — *DMA por capability (`dma_alloc` dá páginas físicas ao driver que tem a concessão) e abstração de IOMMU criada (`kernel/src/iommu.rs`: detecção da tabela DMAR, modo `Passthrough` **explícito** e aviso `IRRESTRITO (caminho inseguro)` no boot, verificado por marcador). A tradução VT-d/AMD-Vi — que é o que de facto conteria um driver comprometido — pende*;
 - [ ] hotplug;
 - [ ] assinatura e distribuição de drivers;
 - [ ] suíte de conformidade por classe de dispositivo.
 
 ### 6.3 Armazenamento
 
-- [ ] VFS e namespaces;
-- [ ] cache e writeback;
-- [ ] permissões e ACLs/capabilities;
-- [ ] arquivos mapeados em memória;
-- [ ] mounts e mídia removível;
-- [ ] filesystem persistente;
-- [ ] ferramenta de verificação e reparo;
+- [x] VFS e namespaces — *`services/vfs` dá a **cada cliente uma instância** com o seu namespace (`/disk` → `fs`, `/boot` → `espfs` somente leitura, `/tmp` → ramfs volátil por instância), roteando pelo prefixo sobre o mesmo protocolo tipado `nexo.fs`; namespaces isolados verificados em `user_vfs`*;
+- [-] cache e writeback — *cache de blocos no `fs` com contadores expostos no fim da sessão (acertos vs leituras do driver) e `sync` explícito no protocolo, chamado ao desconectar o cliente. As escritas são **através** (write-through) por desenho: a segurança contra corte de energia vem daí. Writeback com janela e ordenação pende, e só faz sentido depois de um teste de queda que o cubra*;
+- [-] permissões e ACLs/capabilities — *o acesso é **por capability**: quem não tem o handle do `nexo.fs` não fala com o sistema de arquivos, e o portal de arquivos entrega só o conteúdo escolhido pelo usuário, nunca o fs. Não há permissões **por arquivo** (dono, modo, ACL) — dependem do modelo de usuários da Fase 6*;
+- [ ] arquivos mapeados em memória — *não existe: há memória compartilhável (`memory_create`/`map`) e leitura/escrita por mensagem, mas nada liga um arquivo a um mapeamento*;
+- [-] mounts e mídia removível — *montagens existem no `vfs` (por instância, escolhidas por máscara no spawn) e o `devmgr` decide qual disco vira `/disk` pela identidade do dispositivo. Mídia removível — detecção de inserção/remoção, montagem automática, desmontagem segura — pende de hotplug*;
+- [x] filesystem persistente — *NexoFS v0 (`libraries/nexofs`, `#![forbid(unsafe_code)]`): superbloco, bitmaps, inodes com bloco indireto, diretórios, `rename` crash-safe, e escrita que sobrevive a corte de energia por desenho (versões alternadas). Montado no boot pelo `fs`, exercitado em `user_fs`, no cenário `powercut` e por testes de host que cortam a energia em **cada** escrita*;
+- [-] ferramenta de verificação e reparo — *`tools/nexo-disk check` verifica um volume do host (sai 1 em inconsistência; roda no cenário `storage`) e a **montagem repara sozinha** blocos e inodes órfãos, contando os reparos (`repairs`, registrado no log do boot). Falta um `fsck` de dentro do sistema, com reparo interativo e relatório*;
 - [ ] snapshots;
 - [ ] criptografia;
 - [ ] quotas;
-- [ ] testes de corrupção;
-- [ ] testes de queda de energia;
+- [x] testes de corrupção — *400 imagens corrompidas de propósito montadas sem pânico (`nexofs`), mais 500 imagens FAT e fuzz-lite determinístico dos parsers de ELF, initrd, ACPI, símbolos e ABI de boot: nenhuma entrada inválida pode derrubar quem a lê*;
+- [x] testes de queda de energia — *corte em **cada** escrita, no host, com verificação de que o volume fica numa versão permitida (a anterior ou a nova) e sem vazamento; e o cenário `powercut` corta o QEMU a meio de uma escrita real e confere a recuperação no boot seguinte*;
 - [ ] migração de formato;
-- [ ] backup e restauração.
+- [-] backup e restauração — *`services/backup` espelha árvores inteiras entre **dois discos físicos distintos** pelo protocolo tipado, com o fs emprestado por pedido e devolvido, e com **agendamento** (o empréstimo ganhou prazo); `user_backup` sofre um desastre (arquivo apagado, arquivo adulterado, subdiretório removido) e restaura byte a byte. Pende a interface de usuário*.
 
 ### 6.4 Rede
 
-- [ ] Ethernet;
-- [ ] IPv4 e IPv6;
-- [ ] ICMP, UDP e TCP;
-- [ ] DHCP e DNS;
-- [ ] sockets nativos e POSIX;
-- [ ] TLS;
-- [ ] certificados e relógio confiável;
-- [ ] firewall;
-- [ ] permissões por aplicativo;
+Estado desta frente: tudo o que não depende de criptografia está feito e exercitado contra o
+host real no cenário `net`; o que falta é ou **decisão adiada** (TLS e o que dele depende) ou
+**hardware** (Wi-Fi, Ethernet real).
+
+- [x] Ethernet — *`netdev` (VirtIO-net 1.x, filas de recepção e transmissão, MSI-X) e quadros Ethernet + ARP/NDP em `nexo-netstack`, com pcap do cenário `net` a confirmar o que sai no fio*;
+- [-] IPv4 e IPv6 — *IPv4 com cabeçalho, checksum validado e ping real; IPv6 com endereço link-local, cabeçalho, checksum, ICMPv6 echo e NDP (o `netd` responde a Neighbor Solicitation). Pendem roteamento, fragmentação e sockets IPv6 no `netd`*;
+- [-] ICMP, UDP e TCP — *ICMP echo completo; UDP com sockets por porta e eco real; TCP com máquina de estados (ativo e passivo), janela deslizante de 4 segmentos, ACKs cumulativos e retransmissão, `docs/spec/tcp-states.md` e suíte de 10 casos no host. Pendem backlog de escuta e controle de congestionamento*;
+- [-] DHCP e DNS — *DHCP obtém lease real do slirp (DISCOVER→OFFER→REQUEST→ACK com opções); DNS resolve com cache (a 2ª consulta é servida do cache). Pendem renovação por temporizador, expiração por TTL e serviço residente para vários clientes*;
+- [-] sockets nativos e POSIX — *`nexo.sock` no `netd` (UDP por porta, TCP conectar/enviar/receber/fechar/escutar, multi-cliente com transferência de handles) e API BSD completa no `sdk/nexo-net` dos dois lados, com `poll` e `select` de verdade sobre `tcp_avail`/`udp_avail`, e `sys/socket.h` em C. Pendem isolamento por sessão (os sockets ainda são globais), eventos assíncronos ao cliente e integração com uma libc*;
+- [ ] TLS — *adiado por decisão: nenhuma criptografia entra sem escolha de biblioteca auditada e política de certificados. É o que bloqueia a release `0.4-network`*;
+- [ ] certificados e relógio confiável — *depende do item anterior; o relógio de parede existe (RTC no boot, UTC), mas "confiável" exige âncora externa*;
+- [-] firewall — *`nexo-netstack::firewall` com perfil negar-por-padrão (sub-rede, porta, protocolo, DNS e escuta) aplicado pelo `netd` **por sessão**, negando o que está fora do perfil; comprovado permitido/negado no cenário `net`. Pendem perfis persistentes e por aplicativo instalado*;
+- [-] permissões por aplicativo — *cada sessão do `netd` carrega o seu perfil, que autoriza destino/porta/protocolo pacote a pacote. Falta a interface de usuário para conceder e revogar, e a ligação com o aplicativo instalado*;
 - [ ] VPN em fase posterior;
-- [ ] Wi-Fi e gerenciamento de redes;
+- [ ] Wi-Fi e gerenciamento de redes — *depende do computador de referência (Fase 7): a regra é um único chipset inicial, documentado*;
 - [ ] captive portal;
-- [ ] diagnósticos;
-- [ ] fuzzing contínuo.
+- [-] diagnósticos — *`tools/netcap` grava um pcap de toda a interface e resume por protocolo e fluxo (captura autorizada, usada para depurar o próprio cenário `net`); o `netd` regista estado e erros. Faltam ferramentas de dentro do sistema (ping, traceroute, estatísticas por socket)*;
+- [x] fuzzing contínuo — *parsers de Ethernet/ARP/IPv4/ICMP/UDP/DHCP/DNS/TCP/IPv6 com fuzz-lite determinístico e a **máquina de estados TCP** submetida a sequências aleatórias de segmentos e ações com invariantes verificadas, tudo no workflow semanal do CI*.
 
 ### 6.5 Desktop e experiência
 
