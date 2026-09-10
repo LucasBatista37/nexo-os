@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `de670fe`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `d81f76a`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 193 · 🟡 59 · ⬜ 283 · ⛔ 0 → **42% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 193 · 🟡 60 · ⬜ 282 · ⛔ 0 → **42% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -343,7 +343,7 @@ Gate: ⬜ não iniciado.
 
 | Frente | ✅ | 🟡 | ⬜ | % |
 |---|---|---|---|---|
-| 6.1 Kernel e baixo nível | 9 | 3 | 2 | 75% |
+| 6.1 Kernel e baixo nível | 9 | 4 | 1 | 79% |
 | 6.2 Drivers | 0 | 1 | 15 | 3% |
 | 6.3 Armazenamento | 0 | 0 | 14 | 0% |
 | 6.4 Rede | 0 | 0 | 14 | 0% |
@@ -369,7 +369,7 @@ Gate: ⬜ não iniciado.
 | 🟡 | contabilidade e limites de recursos | contabilidade: tempo de CPU por processo (`debug_info 8`, creditado nas trocas de contexto mais a fatia em curso) e por job, com **quota** e throttle no escalonador (`job_set_cpu_limit`); handles, threads e processos listáveis (`process_list`). Limites: todos tabelados em `docs/spec/syscall-abi.md` §3.3 e **exigidos por auto-teste**, incluindo o teto novo de **threads vivas por processo** (bloco 128) — sem ele, um processo sem privilégio esgotava a memória da máquina inteira criando threads de 256 KiB cada, porque quadros são recurso global; o teto de handles existia desde cedo e passou a ser exigido. Pendem tetos para número de processos e de canais, e cotas de memória por job |
 | ✅ | panic, dump e symbolication | panic com backtrace simbolizado e **dump em disco** (setores reservados do disco de dados, caminho de emergência sem alocação; `tools/nexo-disk crashdump`; cenário `panic` no CI) — o consentimento de envio é o item da Fase 8 |
 | 🟡 | mitigação de classes de exploração | ligadas e **provadas**: W^X nas seções e nas páginas de usuário, `CR0.WP`, `EFER.NXE`, guard pages, ASLR de código (PIE), pilha e mapeamentos, e agora **SMEP e SMAP** em CR4 (bloco 126) — o kernel não executa página de usuário nem a toca fora da janela `EFLAGS.AC` da cópia protegida (`x86::usercopy`), que é o único caminho do sistema para memória de usuário. Auto-testes `smep`/`smap` exigem as duas metades e foram vistos reprovar com as mitigações desligadas; o QEMU passa a expor `+smep,+smap` para que sejam exercitadas de verdade. Pendem: KPTI/retpoline e afins (canais laterais), *stack canaries* e CFI |
-| ⬜ | benchmarks de contexto, syscall e IPC |  |
+| 🟡 | benchmarks de contexto, syscall e IPC | medidos e registrados a cada boot (`docs/bench.md`, marcadores `[BENCH]` exigidos no cenário `boot`): troca de contexto entre duas threads presas à mesma CPU, syscall nula do espaço de usuário, IPC sem escalonamento (o mecanismo) e IPC ida-e-volta (com escalonamento). Nenhum é asserido contra um alvo — sob TCG do QEMU não se comparam com hardware, e um limite apertado viraria falha por ambiente; a asserção é de sanidade e o valor serve para comparar releases e apanhar regressões grosseiras. Já renderam um achado registrado: **cada mensagem aloca** no heap do kernel, e é aí que está o grosso do custo do IPC. Pendem: medição em hardware real e um histórico entre releases |
 | 🟡 | stress de 24h e posteriormente 7 dias | 24 h: **feito** (2026-09-01, zero erros — `docs/progress/2026-09-01-stress-24h.md`); 7 dias: rodada de 2026-09-01 chegou a **5,84 dias com zero erros** (723 M trocas de contexto) e foi interrompida de fora em 2026-09-07 — `docs/progress/2026-09-07-stress-7d-parcial.md`; a rodada completa foi relançada com o kernel atual em 2026-09-09 10:17 — **veredito 2026-09-16 10:17**, rastreado em `docs/COMPROMISSOS.md` e conferido por `make prazos` (a data anterior anotada aqui, 09-14, vinha de um relançamento planejado que não aconteceu nesse dia: prazo de relógio anotado à mão sai de dia) |
 | ⬜ | documentação de todas as invariantes `unsafe` |  |
 

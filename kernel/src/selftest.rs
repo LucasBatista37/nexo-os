@@ -64,6 +64,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("timer_resolution", test_timer_resolution),
     ("usercopy_fixup", test_usercopy_fixup),
     ("pml4_recycling", test_pml4_recycling),
+    ("bench_switch", test_bench_switch),
     ("smap", test_smap),
     ("smep", test_smep),
     ("threads_affinity", test_threads_affinity),
@@ -130,6 +131,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_rights_fuzz", test_user_rights_fuzz),
     ("user_thread_limit", test_user_thread_limit),
     ("user_handle_limit", test_user_handle_limit),
+    ("user_bench", test_user_bench),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1198,6 +1200,50 @@ fn test_user_threads() -> TestResult {
 }
 
 /// Contabilidade de CPU por processo: girar credita, dormir não (modo 79).
+/// Rodadas de troca de contexto medidas por thread (duas threads, mesma CPU).
+const BENCH_TROCAS: u64 = 20_000;
+
+fn bench_parceiro(_arg: usize) {
+    for _ in 0..BENCH_TROCAS {
+        sched::yield_now();
+    }
+}
+
+/// Custo de uma troca de contexto, medido onde ele existe: duas threads na mesma CPU.
+///
+/// As duas threads são novas e presas à mesma CPU; a principal só cronometra e espera. Uma
+/// versão anterior prendia a **própria** thread principal para participar do rodízio, e o
+/// teste `threads_affinity` apanhou o efeito colateral: a principal acabava noutra CPU. Um
+/// benchmark que muda o estado de quem o chama não é uma medição, é um bug com um número.
+///
+/// O número é **registrado**, não asserido contra um alvo: sob TCG do QEMU não se compara com
+/// hardware, e um limite apertado viraria falha por ambiente. A asserção é de sanidade.
+fn test_bench_switch() -> TestResult {
+    let cpu = crate::x86::percpu::current().index;
+    let antes = sched::stats().switches;
+    let t0 = crate::time::monotonic_ns();
+    let a = sched::spawn_on("bench-a", bench_parceiro, 0, cpu);
+    let b = sched::spawn_on("bench-b", bench_parceiro, 0, cpu);
+    sched::join(a);
+    sched::join(b);
+    let dt = crate::time::monotonic_ns() - t0;
+    let trocas = sched::stats().switches - antes;
+    let rodizios = 2 * BENCH_TROCAS;
+    check!(
+        trocas >= rodizios,
+        "so {trocas} trocas para {rodizios} yields"
+    );
+    check!(dt > 0, "tempo medido nulo");
+    kprint!(
+        "[BENCH] troca_de_contexto {} ns ({} yields em {} us, cpu {})\n",
+        dt / rodizios,
+        rodizios,
+        dt / 1000,
+        cpu
+    );
+    Ok(())
+}
+
 /// Endereço da metade de usuário usado pelos testes de SMEP/SMAP (longe de tudo o mais).
 const PAGINA_DE_PROVA: u64 = 0x0000_5100_0000_0000;
 
@@ -1388,6 +1434,13 @@ fn test_user_thread_limit() -> TestResult {
 fn test_user_handle_limit() -> TestResult {
     let code = run_utest(88)?;
     check!(code == 0, "handle_limit saiu com {code}");
+    Ok(())
+}
+
+/// Linha de base de syscall e IPC medida do espaço de usuário (bloco 129).
+fn test_user_bench() -> TestResult {
+    let code = run_utest(89)?;
+    check!(code == 0, "bench saiu com {code}");
     Ok(())
 }
 

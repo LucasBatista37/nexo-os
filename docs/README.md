@@ -7,6 +7,7 @@
 | `spec/boot-abi.md` | contrato loader→kernel |
 | `toolchain.md` | versões fixadas e setup |
 | `testing.md` | camadas de teste e protocolo serial |
+| `bench.md` | linha de base de desempenho (troca de contexto, syscall, IPC) e o que ela não é |
 | `unsafe-inventory.md` | classes de `unsafe` por crate |
 | `board.md` | board da Fase 0 / 90 dias com evidências |
 | `CHECKLIST_STATUS.md` | estado dos gates e decisões pendentes |

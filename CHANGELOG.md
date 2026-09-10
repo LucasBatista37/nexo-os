@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 1, bloco 129 — linha de base de desempenho)
+
+- **O projeto não tinha número nenhum.** Agora tem quatro, medidos a cada boot e registrados com o marcador `[BENCH]`: troca de contexto entre duas threads presas à **mesma** CPU (~800 ns), syscall nula do espaço de usuário (~322 ns), IPC sem escalonamento (~4,1 µs) e IPC ida-e-volta com escalonamento (~42,8 µs).
+- **Nenhum é asserido contra um alvo**, e `docs/bench.md` explica porquê antes de dar os valores: sob TCG do QEMU eles não se comparam com hardware, nem entre máquinas, nem sequer entre execuções com carga diferente do host. Servem para comparar releases na mesma máquina e apanhar regressões de uma ordem de grandeza — é o que um benchmark em CI pode prometer sem mentir. As asserções são de sanidade: as trocas aconteceram, o relógio andou, as voltas completaram.
+- Já renderam um achado registrado: **cada mensagem aloca** no heap do kernel (`Message` carrega os dados num `Vec`), e é aí que está o grosso do custo do IPC — as duas syscalls explicam ~0,6 µs dos ~4,1 µs. Um caminho sem alocação para mensagens pequenas é a otimização óbvia, ainda não feita e anotada para não se perder.
+- O cenário `boot` exige os dois marcadores: um benchmark que deixa de correr em silêncio não é linha de base nenhuma. Auto-testes `bench_switch` (kernel) e `user_bench` (139º e 140º).
+
 ### Adicionado (Fase 1, bloco 128 — limites de recursos por processo)
 
 - **Um processo sem privilégio podia esgotar a memória da máquina inteira criando threads.** Não havia teto algum: cada `thread_create` reserva 256 KiB de pilha em quadros físicos, e quadros são um recurso **global** — o processo não gastava a sua cota, gastava a de todos. Agora há `THREADS_MAX_PER_PROCESS` (64 threads **vivas**, a principal incluída); acima disso, `NoMemory`. Uma thread que termina devolve a vaga e a pilha.

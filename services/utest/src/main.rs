@@ -132,6 +132,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         86 => rights_fuzz(param),
         87 => thread_limit(),
         88 => handle_limit(),
+        89 => bench(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5230,6 +5231,101 @@ fn cpu_time_test() -> ! {
 }
 
 static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+// --- Linha de base de desempenho (bloco 129) ---
+// Tres numeros que faltavam ao projeto: quanto custa uma syscall, quanto custa uma
+// ida-e-volta de IPC sem escalonamento, e quanto custa uma com ele. Sao REGISTRADOS, nao
+// asseridos contra alvo: sob TCG do QEMU nao se comparam com hardware, e um limite apertado
+// viraria falha por ambiente. Servem de linha de base entre releases e para ver regressoes
+// grosseiras — que e o que um benchmark de CI pode honestamente prometer.
+const BENCH_N: u64 = 100_000;
+const BENCH_IPC: u64 = 20_000;
+static BENCH_CANAL: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+extern "C" fn bench_eco(_arg: u64) -> ! {
+    use core::sync::atomic::Ordering::Relaxed;
+    let h = BENCH_CANAL.load(Relaxed) as nexo_sys::Handle;
+    let mut buf = [0u8; 16];
+    let mut hs = [0u32; 2];
+    for _ in 0..BENCH_IPC {
+        match nexo_sys::channel_recv(h, &mut buf, &mut hs) {
+            Ok((n, _)) => {
+                if nexo_sys::channel_send(h, &buf[..n], &[]) != Status::Ok {
+                    nexo_sys::thread_exit();
+                }
+            }
+            Err(_) => nexo_sys::thread_exit(),
+        }
+    }
+    nexo_sys::thread_exit();
+}
+
+fn bench() -> ! {
+    use core::sync::atomic::Ordering::Relaxed;
+    // 1. Syscall nula: entrada em ring 0, despacho e volta.
+    let t0 = nexo_sys::time_now();
+    for _ in 0..BENCH_N {
+        core::hint::black_box(nexo_sys::get_pid());
+    }
+    let syscall_ns = (nexo_sys::time_now() - t0) / BENCH_N;
+
+    // 2. IPC sem escalonamento: enviar e receber na MESMA thread, pelas duas pontas. Mede o
+    //    mecanismo (fila, copia, handles), sem o custo de acordar ninguem.
+    let (a, b) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(580));
+    let mut buf = [0u8; 16];
+    let mut hs = [0u32; 2];
+    let t0 = nexo_sys::time_now();
+    for _ in 0..BENCH_IPC {
+        if nexo_sys::channel_send(a, b"12345678", &[]) != Status::Ok {
+            nexo_sys::exit(581);
+        }
+        if nexo_sys::channel_recv(b, &mut buf, &mut hs).is_err() {
+            nexo_sys::exit(582);
+        }
+    }
+    let ipc_ns = (nexo_sys::time_now() - t0) / BENCH_IPC;
+
+    // 3. IPC com escalonamento: ida-e-volta contra outra thread, que precisa acordar.
+    let (meu, dele) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(583));
+    BENCH_CANAL.store(dele as u64, Relaxed);
+    let eco = nexo_sys::thread_create(bench_eco, 0).unwrap_or_else(|_| nexo_sys::exit(584));
+    let t0 = nexo_sys::time_now();
+    let mut voltas = 0u64;
+    for _ in 0..BENCH_IPC {
+        if nexo_sys::channel_send(meu, b"12345678", &[]) != Status::Ok {
+            break;
+        }
+        if nexo_sys::channel_recv(meu, &mut buf, &mut hs).is_err() {
+            break;
+        }
+        voltas += 1;
+    }
+    let rtt_ns = (nexo_sys::time_now() - t0).checked_div(voltas).unwrap_or(0);
+    let _ = nexo_sys::thread_join(eco);
+    if voltas != BENCH_IPC {
+        nexo_rt::log!(
+            "utest: bench so completou {} de {} voltas",
+            voltas,
+            BENCH_IPC
+        );
+        nexo_sys::exit(585);
+    }
+    if syscall_ns == 0 || ipc_ns == 0 || rtt_ns == 0 {
+        nexo_sys::exit(586); // relogio parado: a medicao nao vale nada
+    }
+    nexo_rt::log!(
+        "[BENCH] syscall {} ns · ipc_sem_troca {} ns · ipc_ida_volta {} ns ({} amostras/{} voltas)",
+        syscall_ns,
+        ipc_ns,
+        rtt_ns,
+        BENCH_N,
+        BENCH_IPC
+    );
+    let _ = nexo_sys::handle_close(meu);
+    let _ = nexo_sys::handle_close(a);
+    let _ = nexo_sys::handle_close(b);
+    nexo_sys::exit(0)
+}
 
 // --- Limites de recursos por processo (bloco 128) ---
 // Cada thread reserva 256 KiB de quadros, que sao um recurso GLOBAL: sem teto, um processo sem
