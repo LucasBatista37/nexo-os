@@ -16,6 +16,7 @@ path = "src/main.rs"
 nexo-sys.workspace = true
 nexo-rt = { workspace = true, features = ["panic-handler"] }
 nexo-proto.workspace = true
+nexo-prefs.workspace = true
 nexo-gfx.workspace = true
 nexo-wm.workspace = true
 

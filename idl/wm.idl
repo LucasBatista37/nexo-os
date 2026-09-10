@@ -7,7 +7,7 @@
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
 # 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
-protocol wm 1.22
+protocol wm 1.23
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -483,5 +483,29 @@ method 45 set_idioma {
         idioma: u8,
     }
     response {
+    }
+}
+
+# Persiste as preferencias do sistema num arquivo, usando o `nexo.fs` EMPRESTADO pelo chamador:
+# o handle vai no pedido e VOLTA na resposta. O compositor nunca guarda acesso ao sistema de
+# arquivos — usa-o so durante a chamada, que e o padrao de capacidade do editor e do backup.
+# Exige a posse da entrada (erro 6), como as outras mudancas de preferencia.
+method 46 prefs_save {
+    request {
+        fs: handle,
+    }
+    response {
+        fs: handle,
+    }
+}
+
+# Le as preferencias do arquivo e aplica-as. Mesmo emprestimo, mesma exigencia. Arquivo ausente,
+# vazio ou ilegivel deixa cada preferencia no seu padrao — ler preferencias nunca falha.
+method 47 prefs_load {
+    request {
+        fs: handle,
+    }
+    response {
+        fs: handle,
     }
 }

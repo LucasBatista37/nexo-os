@@ -88,6 +88,10 @@ name = "nexo-pkg"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-prefs"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-proto"
 version = "0.0.1"
 

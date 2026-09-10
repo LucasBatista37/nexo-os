@@ -146,19 +146,19 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/sched.rs:824` | bloco | lock detido. |
 | `kernel/src/sched.rs:837` | bloco | lock detido. |
 | `kernel/src/sched.rs:856` | bloco | lock detido. |
-| `kernel/src/selftest.rs:301` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
-| `kernel/src/selftest.rs:324` | bloco | quadro alocado, dentro do physmap. |
-| `kernel/src/selftest.rs:374` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
-| `kernel/src/selftest.rs:677` | bloco | o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC). |
-| `kernel/src/selftest.rs:681` | bloco | encerra o canal 0. |
-| `kernel/src/selftest.rs:1225` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
-| `kernel/src/selftest.rs:1341` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
-| `kernel/src/selftest.rs:3102` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
-| `kernel/src/selftest.rs:4750` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4798` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4861` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4930` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5450` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
+| `kernel/src/selftest.rs:302` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
+| `kernel/src/selftest.rs:325` | bloco | quadro alocado, dentro do physmap. |
+| `kernel/src/selftest.rs:375` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
+| `kernel/src/selftest.rs:678` | bloco | o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC). |
+| `kernel/src/selftest.rs:682` | bloco | encerra o canal 0. |
+| `kernel/src/selftest.rs:1226` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
+| `kernel/src/selftest.rs:1342` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
+| `kernel/src/selftest.rs:3151` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
+| `kernel/src/selftest.rs:4799` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4847` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4910` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4979` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5499` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
 | `kernel/src/stress.rs:142` | bloco | página recém-mapeada RW e exclusiva desta thread. |
 | `kernel/src/symbols.rs:20` | bloco | páginas do tipo KernelFile, reservadas e imutáveis. |
 | `kernel/src/sync.rs:53` | bloco | estavam habilitadas antes. |
@@ -444,29 +444,29 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/utest/src/main.rs:36` | bloco | número inválido; o kernel responde com NotSupported. |
 | `services/utest/src/main.rs:42` | bloco | `cli` em ring 3 gera #GP; o kernel deve encerrar este processo. |
 | `services/utest/src/main.rs:48` | bloco | deliberadamente inválido: página somente leitura. |
-| `services/utest/src/main.rs:256` | bloco | o kernel valida o intervalo antes de ler. |
-| `services/utest/src/main.rs:384` | bloco | o kernel deve validar tudo; e o objetivo do teste. |
-| `services/utest/src/main.rs:1800` | bloco | unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha). |
-| `services/utest/src/main.rs:2073` | bloco | leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:2661` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:2664` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:2811` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:2821` | bloco | utest tem uma unica thread; buffers estaticos evitam estourar a pilha. |
-| `services/utest/src/main.rs:3003` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:3014` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
-| `services/utest/src/main.rs:3062` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
-| `services/utest/src/main.rs:3448` | bloco | regiao recem-mapeada por memory_map (USER\|RW) com pelo menos TAM bytes. |
-| `services/utest/src/main.rs:4682` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:4684` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
-| `services/utest/src/main.rs:6024` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
-| `services/utest/src/main.rs:6283` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:6295` | bloco | leitura da mesma pagina mapeada. |
-| `services/utest/src/main.rs:9002` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9377` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9392` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
-| `services/utest/src/main.rs:9409` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:9436` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
-| `services/utest/src/main.rs:9444` | bloco | mesma pagina compartilhada. |
+| `services/utest/src/main.rs:257` | bloco | o kernel valida o intervalo antes de ler. |
+| `services/utest/src/main.rs:385` | bloco | o kernel deve validar tudo; e o objetivo do teste. |
+| `services/utest/src/main.rs:1801` | bloco | unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha). |
+| `services/utest/src/main.rs:2074` | bloco | leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:2662` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:2665` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:2812` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:2822` | bloco | utest tem uma unica thread; buffers estaticos evitam estourar a pilha. |
+| `services/utest/src/main.rs:3004` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:3015` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
+| `services/utest/src/main.rs:3063` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
+| `services/utest/src/main.rs:3449` | bloco | regiao recem-mapeada por memory_map (USER\|RW) com pelo menos TAM bytes. |
+| `services/utest/src/main.rs:4683` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:4685` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
+| `services/utest/src/main.rs:6142` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
+| `services/utest/src/main.rs:6401` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:6413` | bloco | leitura da mesma pagina mapeada. |
+| `services/utest/src/main.rs:9120` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9495` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9510` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
+| `services/utest/src/main.rs:9527` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:9554` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
+| `services/utest/src/main.rs:9562` | bloco | mesma pagina compartilhada. |
 
 ## `nexo-loader` — 15 usos
 

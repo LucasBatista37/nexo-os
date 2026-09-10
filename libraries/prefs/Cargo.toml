@@ -1,0 +1,9 @@
+[package]
+name = "nexo-prefs"
+description = "Formato das preferencias do sistema Nexo (no_std, sem alocacao)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

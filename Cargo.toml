@@ -30,6 +30,7 @@ members = [
     "libraries/textgrid",
     "libraries/svcdep",
     "libraries/i18n",
+    "libraries/prefs",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
     "sdk/nexo-net",

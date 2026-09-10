@@ -288,6 +288,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-prefs"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-proto"
 version = "0.0.1"
 
@@ -451,6 +455,7 @@ name = "nexo-wmd"
 version = "0.0.1"
 dependencies = [
  "nexo-gfx",
+ "nexo-prefs",
  "nexo-proto",
  "nexo-rt",
  "nexo-sys",

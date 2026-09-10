@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.wm` v1.22 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
+//! Protocolo tipado `nexo.wm` v1.23 — **gerado por `tools/idlgen` de `idl/wm.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x1b0edd71;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 22;
+pub const VERSION_MINOR: u16 = 23;
 
 /// `nexo.wm.create_surface` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4326,6 +4326,186 @@ impl SetIdiomaResponse {
     }
 }
 
+/// `nexo.wm.prefs_save` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrefsSaveRequest {
+    /// Handle `fs` (viaja no vetor de handles, nunca no payload).
+    pub fs: u32,
+}
+
+impl PrefsSaveRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 46;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 1;
+    /// Handles na ordem de declaracao (para passar ao `channel_send`).
+    pub fn handles(&self) -> [u32; 1] {
+        [self.fs]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        let fs: u32 = 0; // injetado por decode_*_with_handles
+        Ok(PrefsSaveRequest { fs })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.prefs_save` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrefsSaveResponse {
+    /// Handle `fs` (viaja no vetor de handles, nunca no payload).
+    pub fs: u32,
+}
+
+impl PrefsSaveResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 46;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 1;
+    /// Handles na ordem de declaracao (para passar ao `channel_send`).
+    pub fn handles(&self) -> [u32; 1] {
+        [self.fs]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        let fs: u32 = 0; // injetado por decode_*_with_handles
+        Ok(PrefsSaveResponse { fs })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.prefs_load` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrefsLoadRequest {
+    /// Handle `fs` (viaja no vetor de handles, nunca no payload).
+    pub fs: u32,
+}
+
+impl PrefsLoadRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 47;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 1;
+    /// Handles na ordem de declaracao (para passar ao `channel_send`).
+    pub fn handles(&self) -> [u32; 1] {
+        [self.fs]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        let fs: u32 = 0; // injetado por decode_*_with_handles
+        Ok(PrefsLoadRequest { fs })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.wm.prefs_load` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrefsLoadResponse {
+    /// Handle `fs` (viaja no vetor de handles, nunca no payload).
+    pub fs: u32,
+}
+
+impl PrefsLoadResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 47;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 1;
+    /// Handles na ordem de declaracao (para passar ao `channel_send`).
+    pub fn handles(&self) -> [u32; 1] {
+        [self.fs]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        let fs: u32 = 0; // injetado por decode_*_with_handles
+        Ok(PrefsLoadResponse { fs })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// `nexo.wm.pointer` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PointerEvent {
@@ -4768,6 +4948,10 @@ pub enum Request {
     A11ySubscribe(A11ySubscribeRequest),
     /// `set_idioma`.
     SetIdioma(SetIdiomaRequest),
+    /// `prefs_save`.
+    PrefsSave(PrefsSaveRequest),
+    /// `prefs_load`.
+    PrefsLoad(PrefsLoadRequest),
 }
 
 /// Decodifica um pedido injetando os handles recebidos (ordem de declaracao por metodo).
@@ -4982,6 +5166,18 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
                 return Err(ProtoError::Length);
             }
         }
+        Request::PrefsSave(rq) => {
+            if hs.len() != 1 {
+                return Err(ProtoError::Length);
+            }
+            rq.fs = hs[0];
+        }
+        Request::PrefsLoad(rq) => {
+            if hs.len() != 1 {
+                return Err(ProtoError::Length);
+            }
+            rq.fs = hs[0];
+        }
     }
     Ok(r)
 }
@@ -5067,6 +5263,8 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
             A11ySubscribeRequest::decode_payload(p)?,
         )),
         45 => Ok(Request::SetIdioma(SetIdiomaRequest::decode_payload(p)?)),
+        46 => Ok(Request::PrefsSave(PrefsSaveRequest::decode_payload(p)?)),
+        47 => Ok(Request::PrefsLoad(PrefsLoadRequest::decode_payload(p)?)),
         _ => Err(ProtoError::Method),
     }
 }
@@ -6188,6 +6386,60 @@ pub fn decode_set_idioma_response(msg: &[u8]) -> Result<SetIdiomaResponse, Proto
         return Err(ProtoError::Flags);
     }
     SetIdiomaResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `prefs_save` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_prefs_save_response(msg: &[u8]) -> Result<PrefsSaveResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 46 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    PrefsSaveResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `prefs_load` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_prefs_load_response(msg: &[u8]) -> Result<PrefsLoadResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 47 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    PrefsLoadResponse::decode_payload(p)
 }
 
 /// Decodifica um evento `pointer` (mensagem sem resposta).

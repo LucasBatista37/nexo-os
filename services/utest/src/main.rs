@@ -136,6 +136,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         90 => affinity_test(),
         91 => idioma_test(),
         92 => fs_map_test(),
+        93 => prefs_persist_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5382,6 +5383,123 @@ fn cpu_time_test() -> ! {
 }
 
 static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Modo 93: preferencias que sobrevivem ao compositor (bloco 141).
+///
+/// Handle 0 = sessao nexo.wm; handle 1 = canal nexo.fs (emprestado ao wm durante a chamada).
+/// Muda uma preferencia, manda gravar, e confere que uma LEITURA a traz de volta depois de a
+/// ter mudado outra vez — se `prefs_load` nao lesse o arquivo, o valor ficaria o da memoria.
+fn prefs_persist_test() -> ! {
+    let sess: nexo_sys::Handle = 0;
+    let fs: nexo_sys::Handle = 1;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 2];
+
+    // Uma superficie com foco da a posse da entrada (exigida pelas preferencias).
+    let (a, a_base) = wm_create(sess, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 20, 20, 20);
+    wm_commit(sess, a);
+
+    let le_idioma = |out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 2]| -> u8 {
+        let m = nexo_proto::wm::PrefsRequest {}
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(680));
+        if nexo_sys::channel_send(sess, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(681);
+        }
+        match nexo_sys::channel_recv(sess, buf, hs) {
+            Ok((n, _)) => {
+                nexo_proto::wm::decode_prefs_response(&buf[..n])
+                    .unwrap_or_else(|_| nexo_sys::exit(682))
+                    .idioma
+            }
+            _ => nexo_sys::exit(683),
+        }
+    };
+
+    // 1. Muda para en-US.
+    let m = nexo_proto::wm::SetIdiomaRequest { idioma: 1 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(684));
+    if nexo_sys::channel_send(sess, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(685);
+    }
+    let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
+    if le_idioma(&mut out, &mut buf, &mut hs) != 1 {
+        nexo_sys::exit(686);
+    }
+
+    // 2. Grava, emprestando o fs. O handle tem de VOLTAR na resposta.
+    let m = nexo_proto::wm::PrefsSaveRequest { fs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(687));
+    if nexo_sys::channel_send(sess, &out[..m], &[fs]) != Status::Ok {
+        nexo_sys::exit(688);
+    }
+    let fs = match nexo_sys::channel_recv(sess, &mut buf, &mut hs) {
+        Ok((n, nh)) => {
+            if nh != 1 {
+                nexo_sys::exit(689); // o emprestimo nao voltou
+            }
+            if nexo_proto::wm::decode_prefs_save_response(&buf[..n]).is_err() {
+                nexo_sys::exit(690);
+            }
+            hs[0] as nexo_sys::Handle
+        }
+        _ => nexo_sys::exit(691),
+    };
+
+    // 3. Muda de volta na memoria — o arquivo continua com en-US.
+    let m = nexo_proto::wm::SetIdiomaRequest { idioma: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(692));
+    if nexo_sys::channel_send(sess, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(693);
+    }
+    let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
+    if le_idioma(&mut out, &mut buf, &mut hs) != 0 {
+        nexo_sys::exit(694);
+    }
+
+    // 4. Le do arquivo: tem de voltar a en-US. Se `prefs_load` nao lesse nada, ficaria em 0.
+    let m = nexo_proto::wm::PrefsLoadRequest { fs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(695));
+    if nexo_sys::channel_send(sess, &out[..m], &[fs]) != Status::Ok {
+        nexo_sys::exit(696);
+    }
+    let fs = match nexo_sys::channel_recv(sess, &mut buf, &mut hs) {
+        Ok((n, nh)) => {
+            if nh != 1 {
+                nexo_sys::exit(697);
+            }
+            if nexo_proto::wm::decode_prefs_load_response(&buf[..n]).is_err() {
+                nexo_sys::exit(698);
+            }
+            hs[0] as nexo_sys::Handle
+        }
+        _ => nexo_sys::exit(699),
+    };
+    if le_idioma(&mut out, &mut buf, &mut hs) != 1 {
+        nexo_sys::exit(700); // o arquivo nao foi lido
+    }
+
+    // 5. Volta ao padrao e grava, para nao deixar o volume com en-US para os outros testes.
+    let m = nexo_proto::wm::SetIdiomaRequest { idioma: 0 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(701));
+    let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
+    let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
+    let m = nexo_proto::wm::PrefsSaveRequest { fs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(702));
+    let _ = nexo_sys::channel_send(sess, &out[..m], &[fs]);
+    let _ = nexo_sys::channel_recv(sess, &mut buf, &mut hs);
+
+    nexo_sys::log("utest: prefs ok — gravadas no volume e lidas de volta pelo compositor");
+    nexo_sys::exit(0)
+}
 
 // --- Afinidade de thread de usuario (bloco 135) ---
 // Prender-se a uma CPU e uma restricao que o processo impoe A SI MESMO. O teste confere as

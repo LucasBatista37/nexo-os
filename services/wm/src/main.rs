@@ -484,6 +484,44 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                     continue;
                 }
             };
+            // Preferências: o `fs` vem emprestado e volta na resposta. Tratado aqui, como o
+            // `open`, porque a resposta transfere um handle — o despacho comum manda sem.
+            let pedido_prefs = match &request {
+                Request::PrefsSave(rq) => Some((rq.fs, true)),
+                Request::PrefsLoad(rq) => Some((rq.fs, false)),
+                _ => None,
+            };
+            if let Some((fs_h, salvar)) = pedido_prefs {
+                let metodo = if salvar {
+                    wm::PrefsSaveRequest::METHOD_ID
+                } else {
+                    wm::PrefsLoadRequest::METHOD_ID
+                };
+                if !input_owner(&surfaces, &focused, &grabbed, slot) {
+                    let m = wm::encode_error(metodo, E_NO_INPUT_OWNER, &mut out).unwrap_or(0);
+                    // Mesmo recusando, o empréstimo volta junto com o erro: quem emprestou não
+                    // pode perder a sua capacidade por ter pedido algo que lhe foi negado.
+                    let _ = nexo_sys::channel_send(ch, &out[..m], &[fs_h]);
+                    continue;
+                }
+                if salvar {
+                    prefs_grava(fs_h, &attention);
+                } else {
+                    prefs_le(fs_h, &mut attention);
+                    recompose(&surfaces, &outs, fb.as_ref(), active_ctx, &attention);
+                }
+                let m = if salvar {
+                    wm::PrefsSaveResponse { fs: fs_h }
+                        .encode_msg(&mut out)
+                        .unwrap_or(0)
+                } else {
+                    wm::PrefsLoadResponse { fs: fs_h }
+                        .encode_msg(&mut out)
+                        .unwrap_or(0)
+                };
+                let _ = nexo_sys::channel_send(ch, &out[..m], &[fs_h]);
+                continue;
+            }
             // `open` registra o canal transferido como mais uma sessão.
             if let Request::Open(rq) = &request {
                 let placed = (0..MAX_CLIENTS).find(|&i| sessions[i].is_none());
@@ -1499,7 +1537,10 @@ fn serve(
                 fail(58, "send output");
             }
         }
-        Request::Open(_) | Request::SetInput(_) => {} // tratados no laço principal
+        // Tratados no laço principal: `open` e as preferências transferem handles, e a
+        // resposta do despacho comum vai sem nenhum.
+        Request::Open(_) | Request::SetInput(_) | Request::PrefsSave(_) | Request::PrefsLoad(_) => {
+        }
     }
 }
 
@@ -1527,6 +1568,141 @@ fn a11y_emit(a11y: &mut Option<Handle>, kind: u32, surface: u32, text: &[u8]) {
 
 /// `true` se a sessão `owner` detém a **entrada**: possui a superfície capturada (grab) ou, sem
 /// captura, a focada. É a mediação do clipboard — só quem tem a entrada lê/escreve.
+/// Caminho do arquivo de preferências no volume emprestado.
+const PREFS_PATH: &[u8] = b"/prefs.txt";
+
+/// Fala `nexo.fs` no canal emprestado: uma ida-e-volta por pedido.
+fn fs_rpc(fs: Handle, req: &[u8], rep: &mut [u8; 512]) -> Option<usize> {
+    if nexo_sys::channel_send(fs, req, &[]) != Status::Ok {
+        return None;
+    }
+    let mut hs = [0u32; 1];
+    match nexo_sys::channel_recv(fs, rep, &mut hs) {
+        Ok((n, _)) => Some(n),
+        Err(_) => None,
+    }
+}
+
+/// Grava as preferências no volume emprestado. Falhar aqui é registrado e ignorado: não poder
+/// guardar a preferência não é motivo para derrubar o compositor.
+fn prefs_grava(fs: Handle, a: &Attention) {
+    use nexo_proto::fs as pfs;
+    let p = nexo_prefs::Prefs {
+        reduce_motion: a.reduce_motion,
+        scale_num: a.scale.0,
+        scale_den: a.scale.1,
+        theme: a.theme,
+        idioma: a.idioma,
+    };
+    let mut texto = [0u8; 128];
+    let n = nexo_prefs::serializa(&p, &mut texto);
+    let mut req = [0u8; 4096];
+    let mut rep = [0u8; 512];
+    let mut caminho = [0u8; 256];
+    caminho[..PREFS_PATH.len()].copy_from_slice(PREFS_PATH);
+    let path_len = PREFS_PATH.len() as u32;
+
+    // `create` num arquivo que já existe devolve o inode existente ou erro; nos dois casos o
+    // `stat` seguinte resolve, então não se distingue aqui.
+    let m = pfs::CreateRequest {
+        path: caminho,
+        path_len,
+    }
+    .encode_msg(&mut req)
+    .unwrap_or(0);
+    let _ = fs_rpc(fs, &req[..m], &mut rep);
+    let m = pfs::StatRequest {
+        path: caminho,
+        path_len,
+    }
+    .encode_msg(&mut req)
+    .unwrap_or(0);
+    let Some(r) = fs_rpc(fs, &req[..m], &mut rep) else {
+        log!("wm: prefs: fs nao respondeu ao stat");
+        return;
+    };
+    let Ok(st) = pfs::decode_stat_response(&rep[..r]) else {
+        log!("wm: prefs: stat recusado");
+        return;
+    };
+    // Trunca antes de escrever: um arquivo anterior maior deixaria lixo no fim.
+    let m = pfs::TruncateRequest {
+        ino: st.ino,
+        size: 0,
+    }
+    .encode_msg(&mut req)
+    .unwrap_or(0);
+    let _ = fs_rpc(fs, &req[..m], &mut rep);
+    let mut data = [0u8; 3900];
+    data[..n].copy_from_slice(&texto[..n]);
+    let m = pfs::WriteRequest {
+        ino: st.ino,
+        offset: 0,
+        data,
+        data_len: n as u32,
+    }
+    .encode_msg(&mut req)
+    .unwrap_or(0);
+    if fs_rpc(fs, &req[..m], &mut rep).is_none() {
+        log!("wm: prefs: escrita falhou");
+        return;
+    }
+    let m = pfs::SyncRequest {}.encode_msg(&mut req).unwrap_or(0);
+    let _ = fs_rpc(fs, &req[..m], &mut rep);
+    log!("wm: prefs gravadas ({} bytes)", n);
+}
+
+/// Lê as preferências do volume emprestado e aplica-as. Arquivo ausente ou ilegível deixa tudo
+/// como está — ler preferências nunca falha (ver `nexo-prefs`).
+fn prefs_le(fs: Handle, a: &mut Attention) {
+    use nexo_proto::fs as pfs;
+    let mut req = [0u8; 4096];
+    let mut rep = [0u8; 512];
+    let mut caminho = [0u8; 256];
+    caminho[..PREFS_PATH.len()].copy_from_slice(PREFS_PATH);
+    let path_len = PREFS_PATH.len() as u32;
+    let m = pfs::StatRequest {
+        path: caminho,
+        path_len,
+    }
+    .encode_msg(&mut req)
+    .unwrap_or(0);
+    let Some(r) = fs_rpc(fs, &req[..m], &mut rep) else {
+        return;
+    };
+    let Ok(st) = pfs::decode_stat_response(&rep[..r]) else {
+        log!("wm: prefs: sem arquivo, ficando nos padroes");
+        return;
+    };
+    let quer = (st.size as usize).min(128) as u32;
+    let m = pfs::ReadRequest {
+        ino: st.ino,
+        offset: 0,
+        len: quer,
+    }
+    .encode_msg(&mut req)
+    .unwrap_or(0);
+    let Some(r) = fs_rpc(fs, &req[..m], &mut rep) else {
+        return;
+    };
+    let Ok(rd) = pfs::decode_read_response(&rep[..r]) else {
+        return;
+    };
+    let p = nexo_prefs::parse(rd.data());
+    a.reduce_motion = p.reduce_motion;
+    a.scale = (p.scale_num, p.scale_den);
+    a.theme = p.theme;
+    a.idioma = p.idioma;
+    log!(
+        "wm: prefs lidas — idioma {}, tema {}, escala {}/{}, movimento reduzido {}",
+        p.idioma,
+        p.theme,
+        p.scale_num,
+        p.scale_den,
+        p.reduce_motion
+    );
+}
+
 fn input_owner(
     surfaces: &[Slot; MAX_SURFACES],
     focused: &Option<usize>,

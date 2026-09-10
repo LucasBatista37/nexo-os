@@ -30,6 +30,7 @@ nexo-cal = { path = "../libraries/cal" }
 nexo-textgrid = { path = "../libraries/textgrid" }
 nexo-svcdep = { path = "../libraries/svcdep" }
 nexo-i18n = { path = "../libraries/i18n" }
+nexo-prefs = { path = "../libraries/prefs" }
 
 [profile.dev]
 panic = "abort"

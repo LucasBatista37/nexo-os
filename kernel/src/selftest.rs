@@ -136,6 +136,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_affinity", test_user_affinity),
     ("user_idioma", test_user_idioma),
     ("user_fs_map", test_user_fs_map),
+    ("user_prefs_persist", test_user_prefs_persist),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1577,6 +1578,54 @@ fn test_user_fs_map() -> TestResult {
     let dc = crate::process::wait_and_reap(&driver);
     drop((driver, fs, client));
     check!(cc == 0, "cliente saiu com {cc}");
+    check!(fc == 0, "fs saiu com {fc}");
+    check!(dc == 0, "blockdev saiu com {dc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
+    Ok(())
+}
+
+/// Preferências gravadas no volume e lidas de volta pelo compositor (bloco 141).
+fn test_user_prefs_persist() -> TestResult {
+    use crate::ipc::ChannelEnd;
+    if !has_virtio_blk() {
+        return Err(String::from(
+            "virtio-blk ausente (rode com o disco de dados)",
+        ));
+    }
+    let ends0 = crate::ipc::live_channel_ends();
+    let (blk_a, blk_b) = ChannelEnd::create_pair();
+    let (fs_a, fs_b) = ChannelEnd::create_pair();
+    let (wm_a, wm_b) = ChannelEnd::create_pair();
+    let driver = crate::process::spawn_named(
+        "blockdev",
+        0,
+        alloc::vec![device_handle(), channel_handle(blk_a)],
+    )
+    .map_err(String::from)?;
+    let fs = crate::process::spawn_named(
+        "fs",
+        0,
+        alloc::vec![channel_handle(blk_b), channel_handle(fs_a)],
+    )
+    .map_err(String::from)?;
+    let wm = crate::process::spawn_named("wm", 0, alloc::vec![channel_handle(wm_a)])
+        .map_err(String::from)?;
+    // O cliente recebe a sessão do compositor (handle 0) e o canal do fs (handle 1), que
+    // empresta ao compositor durante cada chamada de preferências.
+    let client = crate::process::spawn_named(
+        "utest",
+        93,
+        alloc::vec![channel_handle(wm_b), channel_handle(fs_b)],
+    )
+    .map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let wc = crate::process::wait_and_reap(&wm);
+    let fc = crate::process::wait_and_reap(&fs);
+    let dc = crate::process::wait_and_reap(&driver);
+    drop((driver, fs, wm, client));
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
     check!(fc == 0, "fs saiu com {fc}");
     check!(dc == 0, "blockdev saiu com {dc}");
     let ends = crate::ipc::live_channel_ends();

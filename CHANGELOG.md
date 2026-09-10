@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 5, bloco 141 — preferências que sobrevivem ao compositor)
+
+- Movimento reduzido, escala, tema e idioma viviam só na memória do compositor e morriam com ele. `nexo.wm` **v1.23** ganhou `prefs_save` e `prefs_load`, e as quatro passam a viver num arquivo.
+- **O compositor não ganhou acesso ao disco.** O `nexo.fs` vai **emprestado** no pedido e volta na resposta — o padrão de capacidade que o editor e o backup já usavam. E volta **mesmo quando o pedido é recusado**: quem empresta não pode perder a sua capacidade por ter pedido algo que lhe foi negado. Como as outras mudanças de preferência, exige a posse da entrada.
+- **`libraries/prefs`** define o formato, e todas as suas regras são sobre sobreviver a um arquivo estranho — que é exatamente o que um arquivo de preferências fica depois de um corte de energia ou de uma atualização: chave desconhecida ignorada (um sistema novo lê o arquivo de um antigo, e vice-versa), linha malformada ignorada, chave ausente no padrão, valor absurdo no padrão, número que estoura recusado sem entrar em pânico. Sete testes de host exigem cada uma dessas regras. O formato é `chave=valor` legível de propósito: quem depurar um sistema que não arranca precisa de poder corrigir este arquivo com o editor mais simples que tiver à mão.
+- Auto-teste `user_prefs_persist` (145º), com quatro serviços reais (blockdev + fs + wm + cliente): muda o idioma, grava, **muda de volta na memória** e manda ler — se `prefs_load` não lesse o arquivo, o valor ficaria o da memória e o teste passaria por engano. Confere também que o empréstimo volta nas duas chamadas.
+
 ### Adicionado (Fase 3, bloco 140 — conteúdo de arquivo como objeto de memória)
 
 - Ler um arquivo custava uma mensagem por fatia de 4000 bytes — para uma imagem ou um binário, dezenas de idas e voltas. O `nexo.fs` **v1.2** ganhou `map{ino}`: o serviço copia o conteúdo para um **objeto de memória** e transfere o handle; o cliente mapeia e lê direto.
