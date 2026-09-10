@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `374d2a7`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `cbb720c`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 192 · 🟡 58 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 193 · 🟡 57 · ⬜ 285 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -10,7 +10,7 @@ Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.
 |---|---|---|---|---|---|---|---|
 | Fase 0 — Fundação e preparação (meses 0–6) | ✅ atendido | 13 | 2 | 0 | 93% | 0 (concluída) | gate F0 atendido em clone limpo; release 0.0.1-boot publicada |
 | Fase 1 — Kernel mínimo confiável (meses 6–18) | 🟡 quase | 18 | 1 | 0 | 97% | 1–3 semanas | só falta executar o stress de 24 h e cortar 0.1-kernel; melhorias: fila por CPU, shootdown com confirmação |
-| Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 13 | 5 | 0 | 86% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
+| Fase 2 — Modo usuário, IPC e capabilities (ano 2) | 🟡 quase | 14 | 4 | 0 | 89% | 2–4 meses | IDL + gerador de código, fuzzing sistemático, shell de diagnóstico, jobs/domínios, múltiplas threads por processo, memória compartilhada, eventos/espera múltipla, release 0.2-userspace |
 | Fase 3 — Dispositivos virtuais e armazenamento (anos 2–3) | 🟡 critérios atendidos; release pendente | 18 | 3 | 0 | 93% | 6–12 meses | PCI/ACPI, VirtIO (block/input/rng/console), drivers isolados com DMA/MMIO por capability, cache de blocos, VFS, ramfs, FAT, escrita persistente, testes de corte de energia |
 | Fase 4 — Rede e serviços básicos (anos 3–4) | ⬜ não iniciado | 2 | 14 | 3 | 47% | 6–12 meses | VirtIO net, Ethernet/ARP/IPv4/ICMP/UDP/TCP/DHCP/DNS, sockets, IPv6, firewall, TLS portado, HTTP, fuzzing de rede |
 | Fase 5 — Gráficos, entrada e shell próprio (anos 3–5) | ⬜ não iniciado | 13 | 10 | 2 | 72% | 12–18 meses | renderer 2D, compositor, entrada, janelas, toolkit, temas, login/sessão, Contextos, Central de Ações, Faixa de Atividades, acessibilidade, testes de usabilidade |
@@ -88,7 +88,7 @@ Gate: 🟡 quase. 2 h de stress com 4 CPUs sem erros (2026-08-30: 17 M trocas, c
 | ✅ | adicionar symbolication e dump mínimo de falhas |  |
 | ✅ | publicar release `0.1-kernel` | gate F1 **completo**: 24 h de stress SMP (2026-09-01, `docs/progress/2026-09-01-stress-24h.md`) — 102 M trocas de contexto, 7,6 M processos, contador com lock exato, 4/4 CPUs e zero erros em 86 401 amostras; quadros e heap estáveis. Tag `v0.1-kernel` |
 
-### Fase 2 — Modo usuário, IPC e capabilities (ano 2) — 86% (13 ✅, 5 🟡, 0 ⬜)
+### Fase 2 — Modo usuário, IPC e capabilities (ano 2) — 89% (14 ✅, 4 🟡, 0 ⬜)
 
 Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem reiniciar o kernel (`user_services`); negação por direitos testada; falta fuzzing sistemático e protocolo tipado
 
@@ -105,7 +105,7 @@ Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem re
 | ✅ | criar formato de protocolo tipado e gerador de código | IDL própria (`idl/*.idl`) + `tools/idlgen` → `abi/proto` (cabeçalho NXIP, ipc-compat §2, testes de compatibilidade e fuzz-lite); `nexo.rng` migrado, demais protocolos na fila |
 | ✅ | definir regras de compatibilidade do IPC | docs/spec/ipc-compat.md |
 | ✅ | criar `init` e `service-manager` | `services/init` e `services/svcmgr` em ring 3 |
-| 🟡 | criar políticas de reinício e dependências | reinício com limite implementado e testado (`echo` cai e volta); dependências declarativas pendentes |
+| ✅ | criar políticas de reinício e dependências | reinício com limite implementado e testado (`echo` cai e volta) e **dependências declarativas** (bloco 123): o `svcmgr` tem uma tabela de serviços com `depende: &["nome"]`, e a ordem de partida sai dela por `nexo-svcdep::ordem` — biblioteca própria, `no_std` e sem alocação, com 9 testes de host (ordem estável, diamante, ciclo, auto-dependência, dependência inexistente, nome repetido, saída pequena, tabela vazia). Tabela inválida **não inicia nada**: falha cedo, por inteiro, nomeando o culpado. E a partida não usa `sleep` esperançoso: cada serviço **anuncia prontidão** (`nexo.svc` v1.1, método `ready`) e só então seus dependentes começam; sem anúncio no prazo, os dependentes não são iniciados (falha fechada). A ordem é asserida no cenário `boot` por marcadores **em_ordem** — verificação nova no `tools/test-qemu`, que compara as primeiras ocorrências justamente porque um serviço que reinicia repete os marcadores |
 | ✅ | criar loader ELF de usuário | `process::spawn_elf` (W^X, USER, pilha com guarda) |
 | ✅ | criar runtime mínimo Rust e ABI C | `sdk/nexo-sys` + `sdk/nexo-rt` (Rust, sem alocação); **ABI C**: `abi/c/nexo.h` (syscalls e handles), `abi/c/proto/*.h` gerados do mesmo IDL (`fs`, `sock`), a **nexo-libc** (`sdk/libc`: string, stdio, stdlib, fd/dirent, sockets, crt0 com a convenção h0..h3 — ADR-0017) e o toolchain empacotado (`make toolchain`, `nexo-cc`) |
 | ✅ | criar shell de diagnóstico no espaço de usuário | `services/shell` sobre a console VirtIO e o VFS; cenário `shell` interativo |

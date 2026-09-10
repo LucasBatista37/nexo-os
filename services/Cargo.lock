@@ -333,11 +333,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexo-svcdep"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-svcmgr"
 version = "0.0.1"
 dependencies = [
  "nexo-proto",
  "nexo-rt",
+ "nexo-svcdep",
  "nexo-sys",
 ]
 

@@ -5,9 +5,13 @@
 #![no_std]
 #![no_main]
 
-use nexo_proto::svc::{self, EchoResponse, Request};
+use nexo_proto::svc::{self, EchoResponse, ReadyRequest, Request};
 use nexo_rt::log;
 use nexo_sys::abi::Status;
+
+/// Tempo de "inicialização" antes de anunciar prontidão: existe para que a ordem de partida
+/// seja observável no log (o dependente só aparece depois deste tempo), e não uma coincidência.
+const INICIALIZACAO_NS: u64 = 10_000_000;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(crash_after: u64) -> ! {
@@ -17,10 +21,27 @@ pub extern "C" fn _start(crash_after: u64) -> ! {
     let mut out = [0u8; 256];
     let mut hs = [0u32; 2];
     log!(
-        "echo: pid {} pronto (cai apos {} pedidos)",
+        "echo: pid {} iniciando (cai apos {} pedidos)",
         nexo_sys::get_pid(),
         crash_after
     );
+    // Inicialização (aqui, simulada): quem depende deste serviço não pode começar antes.
+    nexo_sys::sleep_ns(INICIALIZACAO_NS);
+    // Anúncio de prontidão (nexo.svc v1.1, método 4): é isto que solta os dependentes.
+    //
+    // Best-effort de propósito: este mesmo binário roda como app comum (o teste do lançador o
+    // instala e executa), e nesse papel não há gerenciador nenhum do outro lado. Anunciar é
+    // dever do serviço; decidir o que fazer na ausência do anúncio é do gerenciador, que trata
+    // o silêncio como falha fechada e não inicia os dependentes.
+    let m = ReadyRequest {}.encode_msg(&mut out).unwrap_or(0);
+    match nexo_sys::channel_send(control, &out[..m], &[]) {
+        Status::Ok => log!("echo: pid {} pronto", nexo_sys::get_pid()),
+        e => log!(
+            "echo: pid {} sem quem ouca a prontidao ({:?})",
+            nexo_sys::get_pid(),
+            e
+        ),
+    }
     loop {
         let (n, nh) = match nexo_sys::channel_recv(control, &mut buf, &mut hs) {
             Ok(v) => v,

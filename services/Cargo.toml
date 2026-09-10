@@ -28,6 +28,7 @@ nexo-inst = { path = "../libraries/inst" }
 nexo-img = { path = "../libraries/img" }
 nexo-cal = { path = "../libraries/cal" }
 nexo-textgrid = { path = "../libraries/textgrid" }
+nexo-svcdep = { path = "../libraries/svcdep" }
 
 [profile.dev]
 panic = "abort"

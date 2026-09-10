@@ -21,6 +21,15 @@ SCENARIOS = {
     "boot": {
         "cmdline": "exit",
         "exit_code": 33,
+        # Ordem de partida por dependencia declarada (svcmgr + nexo-svcdep, bloco 123): o
+        # cliente so pode ser iniciado DEPOIS de o servico anunciar prontidao. Presenca dos
+        # marcadores nao provaria isso — a ordem entre eles e a afirmacao.
+        "em_ordem": [
+            r"echo: pid \d+ iniciando",
+            r"echo: pid \d+ pronto",
+            r"svcmgr: echo pronto em \d+ ms",
+            r"svcmgr: echo-client iniciado \(pid \d+\)",
+        ],
         "expect": [
             r"nexo-loader: v\S+ iniciando",
             r"nexo-loader: .*saltando para o kernel",
@@ -65,6 +74,8 @@ SCENARIOS = {
             r"\[pid \d+ utest\] utest: ipc ok",
             r"\[pid \d+ utest\] utest: ola do modo usuario",
             r"\[TEST\] user_services .*ok",
+            r"svcmgr: echo pronto em \d+ ms",
+            r"svcmgr: echo-client iniciado \(pid \d+\)",
             r"\[TEST\] user_syscall_fuzz .*ok",
             r"pci: \d+ funcao\(oes\):",
             r"iommu: (ausente|tabela DMAR presente).*DMA de drivers IRRESTRITO \(caminho inseguro",
@@ -928,6 +939,26 @@ def run_scenario(name: str, timeout: float) -> bool:
             if re.search(pat, text):
                 log(f"FALHA: marcador proibido presente: /{pat}/")
                 ok = False
+        # Marcadores que precisam aparecer NESTA ORDEM. Presenca nao prova ordem: uma
+        # dependencia declarada e uma afirmacao sobre o que vem antes de que.
+        #
+        # A comparacao e entre as PRIMEIRAS ocorrencias de cada padrao, e nao por busca
+        # sequencial: com um servico que reinicia, os mesmos marcadores se repetem, e uma
+        # busca sequencial encontraria ocorrencias posteriores e aprovaria ate a ordem
+        # invertida (verificado — foi assim que a primeira versao desta checagem passou num
+        # teste que deveria reprovar).
+        primeiras = []
+        for pat in sc.get("em_ordem", []):
+            m = re.search(pat, text)
+            if not m:
+                log(f"FALHA: marcador de ordem ausente: /{pat}/")
+                ok = False
+                break
+            primeiras.append((m.start(), pat))
+        if len(primeiras) == len(sc.get("em_ordem", [])) and primeiras != sorted(primeiras, key=lambda x: x[0]):
+            fora = " -> ".join(f"/{pat}/" for _, pat in sorted(primeiras, key=lambda x: x[0]))
+            log(f"FALHA: marcadores fora de ordem; a serial trouxe: {fora}")
+            ok = False
     for args, pat in sc.get("host_check", []):
         r = subprocess.run([sys.executable, ROOT / "tools" / "nexo-disk", "--offset", "0", disk, *args],
                            capture_output=True, text=True)

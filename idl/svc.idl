@@ -1,7 +1,7 @@
 # nexo.svc — bring-up tipado (svcmgr/echo/echo-client), Fase 2 revisitada: a limitacao
 # "canais do bring-up com mensagens cruas" anunciada na release 0.2 fecha aqui.
 # Erros remotos: 1 = pedido invalido; 2 = tente de novo (servico reiniciando).
-protocol svc 1.0
+protocol svc 1.1
 
 # svcmgr -> servico: entrega a ponta de um canal de cliente. Sem resposta por desenho:
 # o svcmgr nao bloqueia no servico (que pode cair a qualquer momento).
@@ -29,5 +29,15 @@ method 3 echo {
     }
     response {
         text: bytes<96>,
+    }
+}
+
+# servico -> svcmgr: "estou pronto para atender". O gerenciador so inicia quem DEPENDE deste
+# servico depois deste aviso — a ordem de partida sai da tabela declarada, e a prontidao de
+# quem foi iniciado, nao de um sleep esperancoso no gerenciador.
+method 4 ready {
+    request {
+    }
+    response {
     }
 }
