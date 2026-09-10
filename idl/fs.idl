@@ -1,6 +1,6 @@
 # nexo.fs — sistema de arquivos (services/fs e services/vfs)
 # Erros remotos: 1..=11 = nexofs::FsError::code(); 13 = montagem somente leitura (vfs /boot).
-protocol fs 1.2
+protocol fs 1.3
 
 # Metadados de um caminho.
 method 1 stat {
@@ -134,5 +134,23 @@ method 12 map {
     response {
         mem: handle,
         len: u64,
+    }
+}
+
+# Verifica o volume SEM O ALTERAR e devolve o que encontrou. A montagem ja repara o que ve, e
+# cala-se sobre o que era; isto diz O QUE esta errado, que e o que se quer antes de decidir se
+# se confia no disco. Tudo zero = integro.
+method 13 check {
+    request {
+    }
+    response {
+        inodes: u32,
+        blocos: u32,
+        penduradas: u32,
+        duplicadas: u32,
+        orfaos: u32,
+        blocos_duplicados: u32,
+        fora_da_faixa: u32,
+        bitmap: u32,
     }
 }

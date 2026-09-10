@@ -367,6 +367,39 @@ impl Dirent {
     }
 }
 
+/// O que uma verificação (`Fs::verifica`) encontrou. Tudo zero = volume íntegro.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Relatorio {
+    /// Inodes alcançáveis a partir da raiz.
+    pub inodes_alcancados: u32,
+    /// Blocos de dados alcançáveis.
+    pub blocos_alcancados: u32,
+    /// Entradas de diretório que apontam para um inode livre.
+    pub entradas_penduradas: u32,
+    /// O mesmo inode alcançado por dois nomes (a v0 não tem hardlinks).
+    pub entradas_duplicadas: u32,
+    /// Inodes ocupados que ninguém alcança.
+    pub inodes_orfaos: u32,
+    /// O mesmo bloco referenciado duas vezes.
+    pub blocos_duplicados: u32,
+    /// Ponteiro para bloco fora da faixa de dados.
+    pub blocos_fora_da_faixa: u32,
+    /// Bits em que o bitmap do disco discorda da árvore.
+    pub bitmap_divergente: u32,
+}
+
+impl Relatorio {
+    /// `true` se não há nada a corrigir.
+    pub fn integro(&self) -> bool {
+        self.entradas_penduradas == 0
+            && self.entradas_duplicadas == 0
+            && self.inodes_orfaos == 0
+            && self.blocos_duplicados == 0
+            && self.blocos_fora_da_faixa == 0
+            && self.bitmap_divergente == 0
+    }
+}
+
 /// Estatísticas do volume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Info {
@@ -1196,6 +1229,144 @@ impl<D: BlockDevice> Fs<D> {
         if disk_bitmap[..] != self.bitmap[..] {
             self.repairs += 1;
             self.write_bitmap()?;
+        }
+        Ok(())
+    }
+
+    /// Relatório de uma verificação (`verifica`): o que se encontrou, sem alterar nada.
+    ///
+    /// A montagem já repara o que encontra, e cala-se sobre o quê — só conta quantos reparos
+    /// fez. Isto é o complemento: diz **o que** está errado e não toca no volume, que é o que
+    /// se quer antes de decidir se se confia no disco.
+    pub fn verifica(&mut self) -> Result<Relatorio, FsError> {
+        let mut r = Relatorio::default();
+        let mut disco = [0u8; MAX_BLOCKS / 8];
+        self.read_bitmap(&mut disco)?;
+        // Reconstrói o mapa de blocos por alcançabilidade, num buffer próprio: o `self.bitmap`
+        // não é tocado, senão a verificação passaria a ser um reparo disfarçado.
+        let mut visto = [0u8; MAX_BLOCKS / 8];
+        for b in 0..self.sb.data_start {
+            visto[(b / 8) as usize] |= 1 << (b % 8);
+        }
+        let mut inode_usado = [0u8; 8192];
+        let mut pilha = [(0u32, 0usize); MAX_DEPTH];
+        let mut nivel = 0;
+        let raiz = self.read_inode(ROOT_INO)?;
+        if raiz.kind() != Some(Kind::Dir) {
+            return Err(FsError::Corrupted("raiz"));
+        }
+        self.conta_inode(ROOT_INO, &raiz, &mut inode_usado, &mut visto, &mut r)?;
+        pilha[0] = (ROOT_INO, 0);
+        loop {
+            let (dino, proximo) = pilha[nivel];
+            let dir = self.read_inode(dino)?;
+            let mut achado = None;
+            self.for_each_entry(&dir, |i, e| {
+                if i >= proximo {
+                    achado = Some((i, e.ino));
+                    false
+                } else {
+                    true
+                }
+            })?;
+            match achado {
+                Some((i, filho)) => {
+                    pilha[nivel].1 = i + 1;
+                    let inode = self.read_inode(filho)?;
+                    if inode.kind == 0 {
+                        r.entradas_penduradas += 1;
+                        continue;
+                    }
+                    let (iu, mu) = (filho as usize / 8, 1u8 << (filho % 8));
+                    if inode_usado[iu] & mu != 0 {
+                        r.entradas_duplicadas += 1;
+                        continue;
+                    }
+                    self.conta_inode(filho, &inode, &mut inode_usado, &mut visto, &mut r)?;
+                    if inode.kind() == Some(Kind::Dir) {
+                        nivel += 1;
+                        if nivel >= MAX_DEPTH {
+                            return Err(FsError::Corrupted("diretorios profundos demais"));
+                        }
+                        pilha[nivel] = (filho, 0);
+                    }
+                }
+                None => {
+                    if nivel == 0 {
+                        break;
+                    }
+                    nivel -= 1;
+                }
+            }
+        }
+        // Inodes ocupados que ninguém alcança.
+        let mut buf = [0u8; BLOCK];
+        for blk in 0..self.sb.inode_blocks {
+            self.dev.read_block(self.sb.inode_start + blk, &mut buf)?;
+            for i in 0..BLOCK / INODE_SIZE {
+                let ino = (blk as usize * (BLOCK / INODE_SIZE) + i) as u32;
+                if ino == 0 || ino >= self.sb.inode_count {
+                    continue;
+                }
+                if u32_at(&buf, i * INODE_SIZE) != 0
+                    && inode_usado[ino as usize / 8] & (1 << (ino % 8)) == 0
+                {
+                    r.inodes_orfaos += 1;
+                }
+            }
+        }
+        // Bitmap do disco contra o que a árvore diz.
+        let bytes = self.sb.total_blocks.div_ceil(8) as usize;
+        for i in 0..bytes.min(MAX_BLOCKS / 8) {
+            let dif = disco[i] ^ visto[i];
+            if dif != 0 {
+                r.bitmap_divergente += dif.count_ones();
+            }
+        }
+        Ok(r)
+    }
+
+    /// Conta um inode alcançado: marca-o, marca os seus blocos e acusa bloco referenciado duas
+    /// vezes ou fora da faixa de dados.
+    fn conta_inode(
+        &mut self,
+        ino: u32,
+        inode: &Inode,
+        inode_usado: &mut [u8; 8192],
+        visto: &mut [u8; MAX_BLOCKS / 8],
+        r: &mut Relatorio,
+    ) -> Result<(), FsError> {
+        inode_usado[ino as usize / 8] |= 1 << (ino % 8);
+        r.inodes_alcancados += 1;
+        let (inicio_dados, total) = (self.sb.data_start, self.sb.total_blocks);
+        let mut conta = |b: u64, r: &mut Relatorio| {
+            if b < inicio_dados || b >= total {
+                r.blocos_fora_da_faixa += 1;
+                return;
+            }
+            let (i, m) = ((b / 8) as usize, 1u8 << (b % 8));
+            if visto[i] & m != 0 {
+                r.blocos_duplicados += 1;
+            } else {
+                visto[i] |= m;
+                r.blocos_alcancados += 1;
+            }
+        };
+        for &d in &inode.direct {
+            if d != 0 {
+                conta(d, r);
+            }
+        }
+        if inode.indirect != 0 {
+            conta(inode.indirect, r);
+            let mut ind = [0u8; BLOCK];
+            self.read_data_block(inode.indirect, &mut ind)?;
+            for k in 0..PTRS_PER_BLOCK {
+                let p = u64_at(&ind, k * 8);
+                if p != 0 {
+                    conta(p, r);
+                }
+            }
         }
         Ok(())
     }

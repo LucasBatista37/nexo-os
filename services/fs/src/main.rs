@@ -372,6 +372,21 @@ pub extern "C" fn _start(arg: u64) -> ! {
                 Ok(()) => pfs::TruncateResponse {}.encode_msg(&mut out).unwrap_or(0),
                 Err(e) => err(pfs::TruncateRequest::METHOD_ID, e, &mut out),
             },
+            pfs::Request::Check(_) => match fs.verifica() {
+                Ok(r) => pfs::CheckResponse {
+                    inodes: r.inodes_alcancados,
+                    blocos: r.blocos_alcancados,
+                    penduradas: r.entradas_penduradas,
+                    duplicadas: r.entradas_duplicadas,
+                    orfaos: r.inodes_orfaos,
+                    blocos_duplicados: r.blocos_duplicados,
+                    fora_da_faixa: r.blocos_fora_da_faixa,
+                    bitmap: r.bitmap_divergente,
+                }
+                .encode_msg(&mut out)
+                .unwrap_or(0),
+                Err(e) => err(pfs::CheckRequest::METHOD_ID, e, &mut out),
+            },
             pfs::Request::Map(rq) => {
                 // Único pedido que devolve um HANDLE: responde aqui e segue, porque o envio
                 // comum no fim da volta manda sem handles.

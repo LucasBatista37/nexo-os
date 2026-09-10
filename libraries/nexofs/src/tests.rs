@@ -445,3 +445,77 @@ fn fuzz_lite_corrupted_images_never_panic() {
     }
     assert!(mounted > 0);
 }
+
+// --- Verificacao somente leitura (`Fs::verifica`, bloco 145) ---
+
+/// Um volume com alguns arquivos e diretorios, para verificar.
+fn volume_com_conteudo() -> Fs<MemDisk> {
+    let mut fs = Fs::format(MemDisk::new(512), 64).unwrap();
+    fs.create(b"/dir", Kind::Dir).unwrap();
+    let a = fs.create(b"/dir/a.txt", Kind::File).unwrap();
+    fs.write(a, 0, &std::vec![7u8; 5000]).unwrap();
+    let b = fs.create(b"/b.txt", Kind::File).unwrap();
+    fs.write(b, 0, b"ola").unwrap();
+    fs
+}
+
+#[test]
+fn volume_saudavel_nao_tem_nada_a_relatar() {
+    let mut fs = volume_com_conteudo();
+    let r = fs.verifica().unwrap();
+    assert!(r.integro(), "volume recem-criado acusou {r:?}");
+    assert!(r.inodes_alcancados >= 4, "raiz + dir + 2 arquivos: {r:?}");
+    assert!(r.blocos_alcancados > 0);
+}
+
+#[test]
+fn verificar_nao_altera_o_volume() {
+    // A propriedade que separa "verificar" de "reparar": duas verificacoes seguidas dao o
+    // mesmo relatorio, e os bytes do disco nao mudam entre elas.
+    let mut fs = volume_com_conteudo();
+    let primeira = fs.verifica().unwrap();
+    let antes = fs.device().data.clone();
+    let segunda = fs.verifica().unwrap();
+    assert_eq!(primeira, segunda, "verificacao nao e deterministica");
+    assert!(
+        fs.device().data == antes,
+        "a verificacao escreveu no disco: deixaria de ser verificacao"
+    );
+}
+
+#[test]
+fn acusa_bitmap_divergente() {
+    let mut fs = volume_com_conteudo();
+    let sb_bitmap = fs.sb.bitmap_start;
+    // Marca um bloco de dados como ocupado no bitmap sem ninguem o usar.
+    let mut buf = [0u8; BLOCK];
+    fs.dev.read_block(sb_bitmap, &mut buf).unwrap();
+    let alvo = (fs.sb.total_blocks - 1) as usize;
+    buf[alvo / 8] |= 1 << (alvo % 8);
+    fs.dev.write_block(sb_bitmap, &buf).unwrap();
+    let r = fs.verifica().unwrap();
+    assert!(!r.integro());
+    assert!(r.bitmap_divergente >= 1, "{r:?}");
+}
+
+#[test]
+fn acusa_inode_orfao() {
+    let mut fs = volume_com_conteudo();
+    // Um arquivo cujo NOME desaparece continua a ocupar o inode: ninguem o alcanca.
+    let (ino, _) = fs.resolve(b"/b.txt").unwrap();
+    let dir = fs.read_inode(ROOT_INO).unwrap();
+    let mut idx = None;
+    fs.for_each_entry(&dir, |i, e| {
+        if e.ino == ino {
+            idx = Some(i);
+            false
+        } else {
+            true
+        }
+    })
+    .unwrap();
+    fs.write_entry(&dir, idx.unwrap(), 0, b"").unwrap();
+    let r = fs.verifica().unwrap();
+    assert!(!r.integro());
+    assert_eq!(r.inodes_orfaos, 1, "{r:?}");
+}

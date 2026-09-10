@@ -205,6 +205,57 @@ macro_rules! outln {
     ($($t:tt)*) => { print(format_args!($($t)*)); con_write(b"\r\n"); };
 }
 
+/// `fsck`: verifica o volume **sem o alterar** e diz o que encontrou.
+///
+/// A montagem já repara sozinha o que vê; este comando existe para responder à outra pergunta
+/// — *o disco está são?* — sem mexer nele, que é o que se quer antes de decidir se se confia
+/// no volume depois de uma queda.
+fn cmd_fsck(reply: &mut [u8; 4096]) {
+    use nexo_proto::fs as pfs;
+    let mut req = [0u8; 64];
+    let pedido = pfs::CheckRequest {};
+    let m = match pedido.encode_msg(&mut req) {
+        Ok(m) => m,
+        Err(_) => {
+            outln!("fsck: erro ao montar o pedido");
+            return;
+        }
+    };
+    if nexo_sys::channel_send(VFS, &req[..m], &[]) != Status::Ok {
+        outln!("fsck: o sistema de arquivos nao respondeu");
+        return;
+    }
+    let mut hs = [0u32; 1];
+    let n = match nexo_sys::channel_recv(VFS, reply, &mut hs) {
+        Ok((n, _)) => n,
+        Err(_) => {
+            outln!("fsck: sem resposta");
+            return;
+        }
+    };
+    let Ok(r) = pfs::decode_check_response(&reply[..n]) else {
+        outln!("fsck: esta montagem nao suporta verificacao");
+        return;
+    };
+    outln!("fsck: {} inodes e {} blocos alcancados", r.inodes, r.blocos);
+    let problemas =
+        r.penduradas + r.duplicadas + r.orfaos + r.blocos_duplicados + r.fora_da_faixa + r.bitmap;
+    if problemas == 0 {
+        outln!("fsck: volume integro");
+    } else {
+        outln!(
+            "fsck: {} problema(s): {} entrada(s) pendurada(s), {} duplicada(s), {} inode(s) orfao(s), {} bloco(s) duplicado(s), {} fora da faixa, {} bit(s) de bitmap divergente(s)",
+            problemas,
+            r.penduradas,
+            r.duplicadas,
+            r.orfaos,
+            r.blocos_duplicados,
+            r.fora_da_faixa,
+            r.bitmap
+        );
+    }
+}
+
 fn cmd_info() {
     let cpus = nexo_sys::debug_info(0);
     let uptime = nexo_sys::debug_info(1);
@@ -413,10 +464,11 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                         b"" => {}
                         b"ajuda" => {
                             outln!(
-                                "comandos: ajuda info tempo ls cat escreve remove eco sair (outro nome = utilitario do initrd)"
+                                "comandos: ajuda info fsck tempo ls cat escreve remove eco sair (outro nome = utilitario do initrd)"
                             );
                         }
                         b"info" => cmd_info(),
+                        b"fsck" => cmd_fsck(&mut reply),
                         b"tempo" => {
                             outln!("{} ms desde o boot", nexo_sys::time_now() / 1_000_000);
                         }

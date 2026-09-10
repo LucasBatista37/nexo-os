@@ -336,6 +336,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 3, bloco 145 — verificar o volume sem o alterar)
+
+- A montagem do NexoFS já repara o que encontra — e cala-se sobre o quê, contando só quantos reparos fez. Faltava a outra pergunta: *o disco está são?*, respondida **sem mexer nele**, que é o que se quer antes de decidir se se confia no volume depois de uma queda.
+- `nexofs::verifica()` percorre a árvore a partir da raiz e relata: entradas de diretório penduradas (apontam para inode livre), o mesmo inode alcançado por dois nomes, inodes ocupados que ninguém alcança, blocos referenciados duas vezes, ponteiros fora da faixa de dados, e bits em que o bitmap do disco discorda da árvore. Tudo zero = íntegro.
+- **A propriedade que separa verificar de reparar é testada**: um teste de host corre a verificação duas vezes e compara os **bytes do disco** antes e depois — se escrevesse, deixaria de ser verificação. O reconstruir do mapa de blocos usa um buffer próprio em vez do bitmap do objeto, precisamente para não ser um reparo disfarçado.
+- Os defeitos são exercitados um a um em testes de host (bitmap divergente, inode órfão), porque um relatório que nunca acusa nada é indistinguível de um comando que não faz nada.
+- Exposta no `nexo.fs` **v1.3** (`check`), encaminhada pelo `vfs` na montagem de disco, e com um consumidor real: o comando **`fsck`** do shell de diagnóstico, verificado no cenário `shell`.
+
 ### Corrigido (bloco 144 — `make validar`, porque encadear à mão já falhou duas vezes)
 
 - **O bloco 143 foi para `main` com o CI vermelho**, e a causa não foi o código: o inventário de `unsafe` ficou defasado (o `visor` ganhou um `unsafe`) e eu não vi o lint falhar, porque encadeei `make lint` e a varredura com `;` e li só o fim da saída — o resumo verde da varredura escondeu o erro anterior. É a segunda vez no mesmo dia (o bloco 136 foi red pela mesma classe de descuido).

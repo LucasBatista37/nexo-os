@@ -270,8 +270,12 @@ SCENARIOS = {
 
 SHELL_SCRIPT = [
     # (comando, regex esperado na resposta)
-    ("ajuda", r"comandos: ajuda info tempo ls cat escreve remove eco sair \(outro nome = utilitario do initrd\)"),
+    ("ajuda", r"comandos: ajuda info fsck tempo ls cat escreve remove eco sair \(outro nome = utilitario do initrd\)"),
     ("info", r"cpus: [1-9]\d*"),
+    # `fsck` verifica o volume SEM O ALTERAR: um volume que o boot acabou de montar tem
+    # de sair integro, e um relatorio que nunca acusa nada seria indistinguivel de um
+    # comando que nao faz nada — por isso os testes de host exercitam os defeitos.
+    ("fsck", r"fsck: volume integro"),
     ("tempo", r"\d+ ms desde o boot"),
     ("ls /", r"d boot"),
     ("ls /boot/nexo/a", r"- kernel\.elf"),

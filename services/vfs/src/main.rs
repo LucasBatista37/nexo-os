@@ -653,6 +653,24 @@ pub extern "C" fn _start(mounts: u64) -> ! {
             // exigiria receber o objeto de memória de uma montagem e transferi-lo adiante,
             // decidindo de quem é a cota. Recusa explícita é melhor que um encaminhamento
             // que perde o handle em silêncio — o cliente usa `read` ou fala com o `fs`.
+            // `check` vale para o volume de disco; as outras montagens não têm o que
+            // verificar (o `/boot` é somente leitura e o `/tmp` é volátil).
+            pfs::Request::Check(_) => {
+                if vfs.mounts & MOUNT_DISK == 0 {
+                    (pfs::CheckRequest::METHOD_ID, Err(13u8))
+                } else {
+                    let m = pfs::CheckRequest {}
+                        .encode_msg(&mut vfs.msg)
+                        .map(|m| {
+                            let n = roundtrip(FS, &mut vfs.msg, m);
+                            let fim = n.min(out.len());
+                            out[..fim].copy_from_slice(&vfs.msg[..fim]);
+                            fim
+                        })
+                        .map_err(|_| 1u8);
+                    (pfs::CheckRequest::METHOD_ID, m)
+                }
+            }
             // O `map` devolve um HANDLE, então é tratado fora do caminho comum (que responde
             // sem handles). Só a montagem de disco o suporta: o `espfs` não o implementa e o
             // `/tmp` é um ramfs interno sem objeto de memória para entregar.
