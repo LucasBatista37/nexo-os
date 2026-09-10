@@ -68,7 +68,7 @@ Campos desconhecidos são ignorados; campos ausentes desligam a verificação co
 
 - estado: aberto
 - o-que: duas quedas inexplicadas do serviço fs (um #UD e uma escrita em null+0x20 dentro de write_entry) sem causa raiz
-- acao: na próxima reincidência, converter rip-base com llvm-objdump, anotar o registrador do ponteiro e tentar relocation-model=static só no fs para isolar o PIE
+- acao: na próxima reincidência, converter rip-base com llvm-objdump, anotar o registrador do ponteiro e tentar relocation-model=static só no fs para isolar o PIE; para provocar, `tools/nexo-repro storage <n>` (12 execuções em 2026-09-10 não reproduziram)
 - cuidado: nexofs é forbid(unsafe_code), então a origem é externa ao serviço — não procurar o bug dentro dele
 - ref: docs/incidents/2026-09-09-fs-ponteiro-nulo.md
 

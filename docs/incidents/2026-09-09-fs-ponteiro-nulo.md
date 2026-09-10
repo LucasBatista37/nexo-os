@@ -149,3 +149,26 @@ bloco 125: quando um processo de usuário sofre falta de página, o kernel perco
 próprio processo e imprime as entradas de cada nível (PML4/PDPT/PD/PT) para o endereço da
 falta. Na próxima vez saberemos se a tradução some num nível intermediário, se a entrada existe
 sem o bit de presença, ou se o endereço nunca foi mapeado.
+
+## Tentativa de reprodução dirigida (2026-09-10)
+
+`tools/nexo-repro storage 12` — doze execuções do cenário onde a quarta ocorrência apareceu
+(cada execução faz dois boots, logo **24 boots**), com toda a instrumentação nova ligada:
+tradução nível a nível na falta de página (bloco 125) e preservação do log de qualquer cenário
+que falhe (bloco 135).
+
+**Não reproduziu: 0 falhas em 12 execuções, 40 minutos.**
+
+O denominador é o que dá significado ao resultado. Historicamente a falha apareceu uma vez em
+cerca de dez varreduras completas; 24 boots sem recorrência é compatível com uma taxa dessa
+ordem e **não** permite concluir que o problema desapareceu. Serve para dois efeitos:
+
+1. limita a frequência por cima — não é uma falha de uma em duas ou uma em cinco;
+2. confirma que a ferramenta e a instrumentação estão prontas para quando acontecer, o que era
+   metade do problema nas três primeiras ocorrências, em que a evidência se perdeu.
+
+Vale notar o que mudou no kernel desde a quarta ocorrência: identidade do espaço de
+endereçamento (125), SMEP/SMAP (126), teto de threads (128) e mensagens sem alocação (134).
+Nenhum deles é candidato a explicação: o contador de reciclagem de PML4 do bloco 125 mede
+exatamente o caso que se suspeitava e continua em **zero**, e os outros não tocam na carga de
+processos. A causa continua desconhecida.

@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (bloco 146 — caça a intermitentes, e uma tentativa que não reproduziu)
+
+- `tools/nexo-repro <cenario> <n>` repete um cenário, conta os desfechos e deixa que o `test-qemu` preserve o log de cada falha. Existe porque uma falha que aparece uma vez em cada dez execuções **não se estuda esperando que aconteça** — estuda-se provocando-a.
+- O relatório dá sempre o **denominador**, porque "não reproduziu" só tem significado com um: não reproduzir em 3 tentativas não diz nada; em 40, diz.
+- Primeira caçada, ao incidente aberto do `fs`: `nexo-repro storage 12` — 24 boots, 40 minutos, **zero reproduções**. O resultado está registrado no documento do incidente com o que ele permite e o que não permite concluir: limita a frequência por cima, e **não** autoriza dizer que o problema desapareceu.
+- Registrado também o que mudou no kernel desde a última ocorrência, e por que nenhuma dessas mudanças é candidata a explicação — em particular, o contador de reciclagem de PML4 do bloco 125 mede exatamente o caso que se suspeitava e continua em zero. A causa continua desconhecida, e dizê-lo é mais útil que arrumar uma explicação.
+
 ### Adicionado (Fase 3, bloco 145 — verificar o volume sem o alterar)
 
 - A montagem do NexoFS já repara o que encontra — e cala-se sobre o quê, contando só quantos reparos fez. Faltava a outra pergunta: *o disco está são?*, respondida **sem mexer nele**, que é o que se quer antes de decidir se se confia no volume depois de uma queda.

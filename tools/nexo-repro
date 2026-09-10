@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""nexo-repro — repete um cenario ate ele falhar, para caçar falhas intermitentes.
+
+Uma falha que aparece uma vez em cada dez execucoes nao se estuda esperando que aconteça
+sozinha: estuda-se provocando-a. Esta ferramenta corre o mesmo cenario N vezes, conta os
+desfechos e deixa que o `tools/test-qemu` preserve o log de cada falha (`<cenario>-FALHA-*.log`).
+
+O relatorio diz quantas vezes correu e quantas falhou, porque "nao reproduziu" so tem
+significado com um denominador: nao reproduzir em 3 tentativas nao diz nada; em 40, diz.
+
+Uso: tools/nexo-repro <cenario> [vezes]     # padrao: 10 vezes
+     tools/nexo-repro storage 40
+"""
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 2
+    cenario = sys.argv[1]
+    vezes = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+    print(f"[repro] {cenario}: {vezes} execucao(oes)")
+    falhas, inicio = [], time.time()
+    for i in range(1, vezes + 1):
+        t0 = time.time()
+        r = subprocess.run(
+            [sys.executable, ROOT / "tools" / "test-qemu", "--scenario", cenario],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+        saida = r.stdout + r.stderr
+        ok = f"cenario '{cenario}': PASS" in saida
+        dt = time.time() - t0
+        print(f"[repro] {i}/{vezes}: {'PASS' if ok else 'FALHA'} ({dt:.0f}s)", flush=True)
+        if not ok:
+            # A linha de FALHA do test-qemu diz o motivo; o log fica preservado por ele.
+            for linha in saida.splitlines():
+                if "FALHA" in linha or "FAIL:" in linha:
+                    print(f"[repro]     {linha.strip()}")
+            falhas.append(i)
+    total = time.time() - inicio
+    print(
+        f"[repro] {cenario}: {len(falhas)} falha(s) em {vezes} execucao(oes) "
+        f"({total / 60:.0f} min)"
+    )
+    if falhas:
+        print(f"[repro] falhou nas execucoes: {falhas}")
+        print("[repro] os logs das falhas ficaram em build/logs/*-FALHA-*.log")
+        return 1
+    print("[repro] nao reproduziu — o denominador acima e o que da significado a isto")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
