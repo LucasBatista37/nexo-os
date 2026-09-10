@@ -27,6 +27,7 @@
 | Fuzzing contínuo | `make fuzz DURATION=1800` · workflow `fuzz` (semanal/cron + manual) | rodadas de 20 000 syscalls com sementes aleatórias do TSC (logadas para reprodução) até esgotar o tempo, checando vazamentos por rodada; host: todos os testes `*fuzz*` |
 | Reprodutibilidade | `make reproducible` | duas builds → mesma imagem |
 | Lint | `make lint` | fmt + clippy `-D warnings` nos três workspaces, auditoria de `unsafe` e auto-teste do `nexo-prazos` |
+| Bateria por bloco | `make validar` | lint + imagem + os 11 cenários, **parando no primeiro erro**. É o alvo a usar antes de cada commit: encadear os passos à mão e ler só o fim da saída já deixou passar dois lints vermelhos para o `main` |
 | Compromissos de longa duração | `make prazos` | lê `docs/COMPROMISSOS.md`: prazos de relógio (stress de dias, agendamentos, incidentes em vigia), se o processo que sustenta cada um continua vivo e se o contador de saúde do log é zero; sai 1 quando algo venceu, cumpriu, morreu ou acusou erro. **Fora do `make ci`**: depende da máquina onde os processos rodam |
 
 ## Protocolo serial (o que o CI verifica)

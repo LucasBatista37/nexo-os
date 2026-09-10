@@ -15,7 +15,7 @@ Como ler: uma justificativa que não diga *por que a invariante vale* é uma dí
 justificativa. Revisar este arquivo a cada release é a forma barata de as encontrar.
 
 
-**479 usos de `unsafe`, 479 com justificativa registrada.**
+**480 usos de `unsafe`, 480 com justificativa registrada.**
 
 | Crate | Usos |
 | --- | ---: |
@@ -30,6 +30,7 @@ justificativa. Revisar este arquivo a cada release é a forma barata de as encon
 | `nexo-sync` | 9 |
 | `nexo-blockdev` | 8 |
 | `nexo-ahcidev` | 6 |
+| `nexo-visor` | 3 |
 | `nexo-wmd` | 3 |
 | `nexo-consoledev` | 2 |
 | `nexo-editor` | 2 |
@@ -37,7 +38,6 @@ justificativa. Revisar este arquivo a cada release é a forma barata de as encon
 | `nexo-netdev` | 2 |
 | `nexo-shellui` | 2 |
 | `nexo-vfs` | 2 |
-| `nexo-visor` | 2 |
 | `nexo-agenda` | 1 |
 | `nexo-arquivos` | 1 |
 | `nexo-backup` | 1 |
@@ -456,17 +456,17 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/utest/src/main.rs:3015` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
 | `services/utest/src/main.rs:3063` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
 | `services/utest/src/main.rs:3449` | bloco | regiao recem-mapeada por memory_map (USER\|RW) com pelo menos TAM bytes. |
-| `services/utest/src/main.rs:4683` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:4685` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
-| `services/utest/src/main.rs:6142` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
-| `services/utest/src/main.rs:6401` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:6413` | bloco | leitura da mesma pagina mapeada. |
-| `services/utest/src/main.rs:9120` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9495` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9510` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
-| `services/utest/src/main.rs:9527` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:9554` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
-| `services/utest/src/main.rs:9562` | bloco | mesma pagina compartilhada. |
+| `services/utest/src/main.rs:4712` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:4714` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
+| `services/utest/src/main.rs:6171` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
+| `services/utest/src/main.rs:6430` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:6442` | bloco | leitura da mesma pagina mapeada. |
+| `services/utest/src/main.rs:9149` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9524` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9539` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
+| `services/utest/src/main.rs:9556` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:9583` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
+| `services/utest/src/main.rs:9591` | bloco | mesma pagina compartilhada. |
 
 ## `nexo-loader` — 15 usos
 
@@ -558,6 +558,14 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/ahcidev/src/main.rs:293` | bloco | página de DMA exclusiva; bytes <= 3584. |
 | `services/ahcidev/src/main.rs:314` | bloco | página de DMA exclusiva; bytes <= 3584. |
 
+## `nexo-visor` — 3 usos
+
+| Local | Forma | Invariante afirmada |
+| --- | --- | --- |
+| `services/visor/src/main.rs:134` | bloco | unico acesso a IMG_BUF neste processo de uma so thread. |
+| `services/visor/src/main.rs:142` | bloco | `base` foi mapeado por memory_map (USER\|RW) com pelo menos `len` bytes. |
+| `services/visor/src/main.rs:228` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+
 ## `nexo-wmd` — 3 usos
 
 | Local | Forma | Invariante afirmada |
@@ -607,13 +615,6 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | --- | --- | --- |
 | `services/vfs/src/main.rs:76` | bloco | processo com uma única thread; nenhuma reentrância. |
 | `services/vfs/src/main.rs:93` | bloco | processo com uma única thread. |
-
-## `nexo-visor` — 2 usos
-
-| Local | Forma | Invariante afirmada |
-| --- | --- | --- |
-| `services/visor/src/main.rs:116` | bloco | unico acesso a IMG_BUF neste processo de uma so thread. |
-| `services/visor/src/main.rs:187` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
 
 ## `nexo-agenda` — 1 usos
 

@@ -3,11 +3,12 @@
 #   make run        -> inicia a imagem no QEMU com display e serial no terminal
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
+#   make validar    -> bateria por bloco (lint + imagem + cenários), para no 1º erro
 #   make prazos     -> compromissos de longa duração (docs/COMPROMISSOS.md)
 #   make unsafe-inventory -> regenera docs/unsafe-inventory.md da árvore
 #   make docs       -> documentação de API navegável em target/doc
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap prazos unsafe-inventory docs idl idl-check toolchain
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci validar check-toolchain reproducible clean stress fuzz netcap roadmap prazos unsafe-inventory docs idl idl-check toolchain
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 # Margem +900s +1% da duracao: o relogio do guest (TCG) atrasa em relacao a parede sob
@@ -68,6 +69,13 @@ reproducible:
 	@cmp build/repro-a.img build/repro-b.img && echo "[nexo] imagem reproduzivel: OK" || (echo "[nexo] imagem NAO reproduzivel; primeiras diferencas (offset, a, b):"; cmp -l build/repro-a.img build/repro-b.img | head -20; exit 1)
 
 ci: lint idl-check test-host image test-qemu reproducible
+
+# Bateria por bloco: PARA NO PRIMEIRO ERRO, porque o `make` encadeia com dependencia e nao com
+# `;`. Existe porque encadear os passos a mao (`make lint; tools/test-qemu`) e ler so o fim da
+# saida deixou passar dois lints vermelhos para o `main` — a varredura corria a seguir e o
+# resumo verde escondia o erro anterior.
+validar: lint image test-qemu
+	@echo "[nexo] validacao do bloco: lint + imagem + 11 cenarios OK"
 
 stress: image
 	tools/build-image --no-build --cmdline "selftest=0 stress=$(DURATION) exit" --out build/nexo-stress-long.img

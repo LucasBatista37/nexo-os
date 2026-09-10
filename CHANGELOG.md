@@ -336,6 +336,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Corrigido (bloco 144 — `make validar`, porque encadear à mão já falhou duas vezes)
+
+- **O bloco 143 foi para `main` com o CI vermelho**, e a causa não foi o código: o inventário de `unsafe` ficou defasado (o `visor` ganhou um `unsafe`) e eu não vi o lint falhar, porque encadeei `make lint` e a varredura com `;` e li só o fim da saída — o resumo verde da varredura escondeu o erro anterior. É a segunda vez no mesmo dia (o bloco 136 foi red pela mesma classe de descuido).
+- `make validar` (lint + imagem + os 11 cenários) passa a ser a bateria por bloco. O `make` encadeia por **dependência**, não com `;`: para no primeiro erro e não há fim de saída onde um erro se esconda. Documentado em `docs/testing.md` como o alvo a usar antes de cada commit.
+- A correção do inventário em si é trivial (`make unsafe-inventory`). O que valia a pena corrigir era o processo que deixou passar.
+
 ### Alterado (Fase 3, bloco 143 — o `map` ganhou um utilizador real)
 
 - O bloco 140 entregou o `map` do `nexo.fs`, mas o `vfs` recusava-o — e como os aplicativos falam com o `vfs`, a funcionalidade **não tinha utilizador nenhum**. A justificação que eu tinha dado ("repassar um handle exigiria decidir de quem é a cota") não se sustenta: o objeto é criado pelo `fs` e contado na cota do `fs`; o roteador só passa o handle adiante.
