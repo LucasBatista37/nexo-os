@@ -57,6 +57,24 @@ impl Fs {
     }
 
     /// Lê um bloco para `out`; devolve o tamanho lido.
+    /// Pede o arquivo inteiro como objeto de memória; `None` se a montagem não suportar.
+    fn map(&mut self, ino: u32) -> Option<(u64, u64)> {
+        use nexo_proto::fs as pfs;
+        let m = pfs::MapRequest { ino }.encode_msg(&mut self.req).ok()?;
+        if nexo_sys::channel_send(self.ch, &self.req[..m], &[]) != Status::Ok {
+            return None;
+        }
+        let mut hs = [0u32; 1];
+        let (n, nh) = nexo_sys::channel_recv(self.ch, &mut self.reply, &mut hs).ok()?;
+        if nh != 1 {
+            return None; // erro remoto: a montagem não entrega objeto de memória
+        }
+        let r = pfs::decode_map_response(&self.reply[..n]).ok()?;
+        let base = nexo_sys::memory_map(hs[0] as nexo_sys::Handle).ok()?;
+        let _ = nexo_sys::handle_close(hs[0] as nexo_sys::Handle);
+        Some((base, r.len))
+    }
+
     fn read(&mut self, ino: u32, offset: u64, len: u32, out: &mut [u8]) -> Option<usize> {
         use nexo_proto::fs as pfs;
         let m = pfs::ReadRequest { ino, offset, len }
@@ -114,16 +132,39 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     }
     // SAFETY: unico acesso a IMG_BUF neste processo de uma so thread.
     let img_buf = unsafe { &mut *core::ptr::addr_of_mut!(IMG_BUF) };
-    let mut off = 0usize;
-    while off < size {
-        let want = (size - off).min(3900) as u32;
-        let dl = fs
-            .read(ino, off as u64, want, &mut img_buf[off..])
-            .unwrap_or_else(|| fail(25, "read"));
-        if dl == 0 {
-            fail(26, "read curto");
+    // Caminho preferido: o arquivo inteiro num objeto de memoria (`nexo.fs` v1.2), em vez de
+    // uma mensagem por fatia de ~4 KiB — uma imagem de 300 KiB custava oitenta idas e voltas.
+    // Se a montagem nao suportar (o `/boot` e o `/tmp` nao suportam), cai no `read` de sempre.
+    let mut copiado = false;
+    if let Some((base, len)) = fs.map(ino) {
+        let n = (len as usize).min(size);
+        // SAFETY: `base` foi mapeado por memory_map (USER|RW) com pelo menos `len` bytes.
+        let vista = unsafe { core::slice::from_raw_parts(base as *const u8, n) };
+        img_buf[..n].copy_from_slice(vista);
+        let _ = nexo_sys::memory_unmap(base, (len as usize).div_ceil(4096) as u64 * 4096);
+        copiado = n == size;
+    }
+    log!(
+        "visor: {} ({} bytes)",
+        if copiado {
+            "carregado por objeto de memoria"
+        } else {
+            "carregado por leituras em fatias"
+        },
+        size
+    );
+    if !copiado {
+        let mut off = 0usize;
+        while off < size {
+            let want = (size - off).min(3900) as u32;
+            let dl = fs
+                .read(ino, off as u64, want, &mut img_buf[off..])
+                .unwrap_or_else(|| fail(25, "read"));
+            if dl == 0 {
+                fail(26, "read curto");
+            }
+            off += dl;
         }
-        off += dl;
     }
     // PPM valido = imagem; qualquer outra coisa = documento basico (texto)
     let img = Ppm::parse(&img_buf[..size]).ok();

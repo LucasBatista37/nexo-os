@@ -653,8 +653,43 @@ pub extern "C" fn _start(mounts: u64) -> ! {
             // exigiria receber o objeto de memória de uma montagem e transferi-lo adiante,
             // decidindo de quem é a cota. Recusa explícita é melhor que um encaminhamento
             // que perde o handle em silêncio — o cliente usa `read` ou fala com o `fs`.
-            // 13 = nao suportado por este servidor (o `fs` direto suporta).
-            pfs::Request::Map(_) => (pfs::MapRequest::METHOD_ID, Err(13u8)),
+            // O `map` devolve um HANDLE, então é tratado fora do caminho comum (que responde
+            // sem handles). Só a montagem de disco o suporta: o `espfs` não o implementa e o
+            // `/tmp` é um ramfs interno sem objeto de memória para entregar.
+            pfs::Request::Map(rq) => {
+                let (tag, raw) = (rq.ino >> TAG_SHIFT, rq.ino & ((1 << TAG_SHIFT) - 1));
+                if tag != TAG_DISK || vfs.mounts & MOUNT_DISK == 0 {
+                    let m =
+                        pfs::encode_error(pfs::MapRequest::METHOD_ID, 13, &mut out).unwrap_or(0);
+                    let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                    continue;
+                }
+                // Repassa ao `fs` e entrega o objeto de memória ao cliente. A cota é de quem
+                // CRIA o objeto — o `fs` —, então este roteador só passa o handle adiante.
+                let m = pfs::MapRequest { ino: raw }
+                    .encode_msg(&mut vfs.msg)
+                    .unwrap_or(0);
+                if nexo_sys::channel_send(FS, &vfs.msg[..m], &[]) != Status::Ok {
+                    let m = pfs::encode_error(pfs::MapRequest::METHOD_ID, 1, &mut out).unwrap_or(0);
+                    let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                    continue;
+                }
+                let mut hs_fs = [0u32; 1];
+                match nexo_sys::channel_recv(FS, &mut vfs.msg, &mut hs_fs) {
+                    Ok((n, nh)) => {
+                        let m = n.min(out.len());
+                        out[..m].copy_from_slice(&vfs.msg[..m]);
+                        let handles: &[u32] = if nh == 1 { &hs_fs[..1] } else { &[] };
+                        let _ = nexo_sys::channel_send(CLIENT, &out[..m], handles);
+                    }
+                    Err(_) => {
+                        let m =
+                            pfs::encode_error(pfs::MapRequest::METHOD_ID, 1, &mut out).unwrap_or(0);
+                        let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                    }
+                }
+                continue;
+            }
             pfs::Request::Stat(rq) => {
                 let (p, pl) = (rq.path, rq.path_len);
                 let path = &p[..(pl as usize).min(256)];

@@ -3936,6 +3936,35 @@ fn vfs_client() -> ! {
     if count != 1 {
         nexo_sys::exit(222);
     }
+    // `map` (nexo.fs v1.2) so vale na montagem de disco: no ramfs nao ha objeto de memoria
+    // para entregar, e a recusa tem de ser limpa — sem handle e sem derrubar a sessao.
+    {
+        let mut req = [0u8; 256];
+        let mut rep = [0u8; 256];
+        let mut hs = [0u32; 2];
+        let m = nexo_proto::fs::MapRequest { ino: tino }
+            .encode_msg(&mut req)
+            .unwrap_or_else(|_| nexo_sys::exit(225));
+        if nexo_sys::channel_send(a.ch, &req[..m], &[]) != Status::Ok {
+            nexo_sys::exit(226);
+        }
+        match nexo_sys::channel_recv(a.ch, &mut rep, &mut hs) {
+            Ok((n, nh)) => {
+                if nh != 0 {
+                    nexo_sys::exit(227); // veio handle de uma montagem que nao suporta
+                }
+                if nexo_proto::fs::decode_map_response(&rep[..n]).is_ok() {
+                    nexo_sys::exit(228); // devia ser erro
+                }
+            }
+            _ => nexo_sys::exit(229),
+        }
+        // A sessao continua util depois da recusa.
+        let (r2, n2) = a.ok(4, tino, 0, 32, &[], 230);
+        if r2 != 7 || a.data(n2) != b"ola tmp" {
+            nexo_sys::exit(231);
+        }
+    }
     a.ok(3, 0, 0, 0, b"/tmp/nota.txt", 223);
     let (st, _, _) = a.call(0, 0, 0, 0, b"/tmp/nota.txt");
     if st != 3 {

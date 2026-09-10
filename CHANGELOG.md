@@ -336,6 +336,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Alterado (Fase 3, bloco 143 — o `map` ganhou um utilizador real)
+
+- O bloco 140 entregou o `map` do `nexo.fs`, mas o `vfs` recusava-o — e como os aplicativos falam com o `vfs`, a funcionalidade **não tinha utilizador nenhum**. A justificação que eu tinha dado ("repassar um handle exigiria decidir de quem é a cota") não se sustenta: o objeto é criado pelo `fs` e contado na cota do `fs`; o roteador só passa o handle adiante.
+- O `vfs` passa a **encaminhar** o `map` na montagem de disco. `/boot` (o `espfs` não o implementa) e `/tmp` (ramfs interno, sem objeto de memória para entregar) recusam de forma limpa: erro, **sem handle**, e a sessão continua utilizável — o teste do `vfs` exige as três coisas.
+- O `visor` carrega imagens por aí, com **recuo automático** para leituras em fatias quando a montagem não suporta. E diz no log qual caminho usou, com marcador exigido no cenário `boot`: sem isso, o recuo esconderia uma regressão — o teste passaria igual com a funcionalidade quebrada, que é o pior tipo de teste verde.
+
 ### Documentação (bloco 142 — relatório dos blocos 120–141)
 
 - `docs/progress/2026-09-10-blocos-120-141.md`: vinte e dois blocos consolidados num relatório — os três bugs sérios encontrados (pânico de kernel ao alcance de qualquer processo, DoS de memória por threads sem teto, truncamento silencioso na ABI do PCI), a retratação do número de desempenho com a tabela do A/B intercalado, as quatro verificações que passaram a falhar sozinhas, e a auditoria que fez o roadmap parar de mentir para menos.
