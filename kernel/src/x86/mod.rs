@@ -6,3 +6,4 @@ pub mod percpu;
 pub mod smp;
 pub mod syscall;
 pub mod traps;
+pub mod usercopy;

@@ -15,18 +15,24 @@ hostil e validam no parse.
 
 - **Ativos**: isolamento entre processos; integridade do próprio kernel.
 - **Adversário**: app malicioso com syscalls arbitrárias.
-- **Superfície**: 34 syscalls (0–33; `docs/spec/syscall-abi.md`), ponteiros e handles vindos
+- **Superfície**: 44 syscalls (0–43; `docs/spec/syscall-abi.md`), ponteiros e handles vindos
   do usuário.
 - **Mitigações**: ponteiros validados por faixa + bit USER antes de qualquer cópia
-  (`copy_from_user`/`copy_to_user`); handles verificados por tipo e **direitos**
+  (`copy_from_user`/`copy_to_user`) **e a cópia em si protegida por tabela de fixup**
+  (`x86::usercopy`): a validação não é atômica com a cópia, e outra thread do mesmo processo
+  pode desmapear o buffer nessa janela — a falta vira `BadAddress` em vez de `#PF` fatal
+  (`usercopy_fixup`, `user_usercopy_race`; contador em `debug_info 9`); handles verificados por tipo e **direitos**
   (read/write/transfer/duplicate — `user_syscall_error`, `user_isolation`); limites
   explícitos em toda entrada (`MSG_MAX`, `MEMORY_MAX_PAGES`, `SPAWN_MEM_MAX`…); fuzz de
   syscalls (20 000/rodada no boot + `make fuzz` semanal) sem pânico nem vazamento; pânico
   com backtrace simbolizado para diagnóstico. Instruções privilegiadas em ring 3 →
   exceção → processo morto (`user_isolation`).
 - **Lacunas**: sem mitigação de canais laterais (o TSC é legível por qualquer app — inclusive
-  via trace, ver §9); auditoria externa nunca feita; uma thread por processo limita a
-  superfície hoje, mas a análise terá de ser refeita com threads.
+  via trace, ver §9); auditoria externa nunca feita; **sem SMEP/SMAP** (o kernel ainda pode
+  ler e executar páginas de usuário por engano — item de mitigação de classes de exploração,
+  Plano §6.1); com várias threads por processo a análise TOCTOU foi refeita para as cópias
+  usuário↔kernel (acima), mas o resto da superfície de syscalls ainda não foi reauditado sob
+  concorrência dentro do mesmo espaço de endereçamento.
 
 ## 2. IPC (canais, handles, coletor)
 

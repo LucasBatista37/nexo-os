@@ -48,11 +48,13 @@ pub fn copy_from_user(ptr: u64, len: u64) -> Result<Vec<u8>, Status> {
         }
         page += PAGE_SIZE;
     }
-    let mut out = Vec::with_capacity(len as usize);
-    // SAFETY: faixa validada como mapeada com USER no espaço atual; leitura de
-    // páginas de usuário pelo kernel é permitida (sem SMAP).
-    unsafe {
-        out.extend_from_slice(core::slice::from_raw_parts(ptr as *const u8, len as usize));
+    let mut out = alloc::vec![0u8; len as usize];
+    // A validação acima não é atômica com a cópia: outra thread do processo pode desmapear a
+    // faixa nesta janela. Por isso a cópia é a protegida por fixup (x86::usercopy) — a falta
+    // vira erro em vez de pânico de kernel. Ler páginas de usuário pelo kernel é permitido
+    // (sem SMAP).
+    if !super::usercopy::copiar(out.as_mut_ptr(), ptr as *const u8, len as usize) {
+        return Err(Status::BadAddress);
     }
     Ok(out)
 }
@@ -82,8 +84,13 @@ fn check_user_writable(ptr: u64, len: u64) -> Result<(), Status> {
 /// Copia `data` para `[ptr, ptr+len)` no espaço do usuário atual.
 pub fn copy_to_user(ptr: u64, data: &[u8]) -> Result<(), Status> {
     check_user_writable(ptr, data.len() as u64)?;
-    // SAFETY: faixa validada como mapeada USER|WRITABLE no espaço atual.
-    unsafe { core::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len()) };
+    // Mesma corrida da leitura, com uma consequência a mais: aqui a falta pode deixar o
+    // buffer do usuário escrito pela metade. Quem chama trata `BadAddress` como falha da
+    // syscall inteira — o processo que desmapeou o próprio buffer no meio de uma syscall
+    // recebe o erro que pediu.
+    if !super::usercopy::copiar(ptr as *mut u8, data.as_ptr(), data.len()) {
+        return Err(Status::BadAddress);
+    }
     Ok(())
 }
 
@@ -900,6 +907,9 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
                 Status::Ok,
                 p.cpu_ns.load(Ordering::Relaxed) + sched::current_slice_ns(),
             ),
+            // faltas de página recuperadas em cópias usuário↔kernel (corridas de
+            // desmapeamento vencidas pelo fixup); zero é o esperado
+            9 => (Status::Ok, super::usercopy::faltas()),
             _ => (Status::InvalidArgs, 0),
         },
         SYS_TRACE => match f.rdi {

@@ -126,6 +126,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         80 => quota_driver(),
         81 => quota_girador(),
         82 => process_list_test(),
+        83 => usercopy_race(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5224,6 +5225,72 @@ fn cpu_time_test() -> ! {
 }
 
 static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+// --- Corrida de desmapeamento durante uma copia usuario->kernel (bloco 121) ---
+// Uma thread desmapeia a ultima pagina do buffer enquanto a outra esta dentro de uma syscall
+// que copia 1 MiB desse mesmo buffer. A copia leva dezenas de microssegundos e o desmapeamento
+// poucos, entao o corte cai quase sempre no meio da copia. Sem a tabela de fixup do kernel isso
+// e um panico de kernel ao alcance de qualquer processo sem privilegio; com ela, a syscall
+// apenas falha com BadAddress. O teste passa se o sistema continuar de pe.
+const CORRIDA_PAGINAS: u64 = 256; // o maximo por objeto de memoria
+const CORRIDA_BYTES: u64 = CORRIDA_PAGINAS * 4096;
+const CORRIDA_RODADAS: u64 = 16;
+static CORRIDA_BASE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static CORRIDA_PARE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static CORRIDA_TIROS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+extern "C" fn corrida_desmapeador(_arg: u64) -> ! {
+    use core::sync::atomic::Ordering::Relaxed;
+    loop {
+        if CORRIDA_PARE.load(Relaxed) != 0 {
+            nexo_sys::thread_exit();
+        }
+        let base = CORRIDA_BASE.swap(0, Relaxed);
+        if base != 0 {
+            // a ULTIMA pagina: a copia gasta quase 1 MiB antes de chegar nela
+            let _ = nexo_sys::memory_unmap(base + CORRIDA_BYTES - 4096, 4096);
+            CORRIDA_TIROS.fetch_add(1, Relaxed);
+        }
+    }
+}
+
+fn usercopy_race() -> ! {
+    use core::sync::atomic::Ordering::Relaxed;
+    let antes = nexo_sys::debug_info(9);
+    let t = nexo_sys::thread_create(corrida_desmapeador, 0).unwrap_or_else(|_| nexo_sys::exit(470));
+    for _ in 0..CORRIDA_RODADAS {
+        let mem = match nexo_sys::memory_create(CORRIDA_PAGINAS) {
+            Ok(m) => m,
+            Err(_) => nexo_sys::exit(471),
+        };
+        let base = match nexo_sys::memory_map(mem) {
+            Ok(b) => b,
+            Err(_) => nexo_sys::exit(472),
+        };
+        CORRIDA_BASE.store(base, Relaxed);
+        // SAFETY: a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela
+        // falha com BadAddress — que e justamente um dos desfechos que o teste exercita.
+        let buf = unsafe { core::slice::from_raw_parts(base as *const u8, CORRIDA_BYTES as usize) };
+        // Nao e um ELF: o que interessa e a copia de 1 MiB que a syscall faz ANTES de olhar o
+        // conteudo. Se a copia sobreviver, o spawn falha depois — sem consequencia para o teste.
+        let _ = nexo_sys::process_spawn_mem(buf, 0, &[]);
+        CORRIDA_BASE.store(0, Relaxed);
+        let _ = nexo_sys::memory_unmap(base, CORRIDA_BYTES);
+        let _ = nexo_sys::handle_close(mem);
+    }
+    CORRIDA_PARE.store(1, Relaxed);
+    if nexo_sys::thread_join(t) != Status::Ok {
+        nexo_sys::exit(473);
+    }
+    let recuperadas = nexo_sys::debug_info(9) - antes;
+    nexo_rt::log!(
+        "utest: usercopy corrida ok — {} desmapeamentos em {} rodadas, {} faltas recuperadas pelo fixup, kernel vivo",
+        CORRIDA_TIROS.load(Relaxed),
+        CORRIDA_RODADAS,
+        recuperadas
+    );
+    nexo_sys::exit(0)
+}
 
 extern "C" fn thread_worker(arg: u64) -> ! {
     for _ in 0..1000 {

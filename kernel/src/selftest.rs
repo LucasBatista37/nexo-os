@@ -62,6 +62,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("threads_multi_cpu", test_threads_multi_cpu),
     ("timers", test_timers),
     ("timer_resolution", test_timer_resolution),
+    ("usercopy_fixup", test_usercopy_fixup),
     ("threads_affinity", test_threads_affinity),
     ("threads_priority", test_threads_priority),
     ("user_process", test_user_process),
@@ -120,6 +121,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_cpu_time", test_user_cpu_time),
     ("user_cpu_quota", test_user_cpu_quota),
     ("user_process_list", test_user_process_list),
+    ("user_usercopy_race", test_user_usercopy_race),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1187,6 +1189,55 @@ fn test_user_threads() -> TestResult {
 }
 
 /// Contabilidade de CPU por processo: girar credita, dormir não (modo 79).
+/// A cópia usuário↔kernel sobrevive a uma falta de página (tabela de fixup, bloco 121).
+///
+/// Endereço não mapeado no espaço atual: sem o fixup isto é um `#PF` fatal — o teste não
+/// falharia, o kernel morreria. Com ele, a cópia devolve "faltou" e o contador anda.
+fn test_usercopy_fixup() -> TestResult {
+    use crate::x86::usercopy;
+    // Endereço da metade de usuário, longe de código, pilhas e janela de mapeamentos.
+    const NAO_MAPEADO: u64 = 0x0000_5000_0000_0000;
+    let origem = [0xa5u8; 64];
+    let mut destino = [0u8; 64];
+    check!(
+        usercopy::copiar(destino.as_mut_ptr(), origem.as_ptr(), origem.len()),
+        "cópia válida falhou"
+    );
+    check!(destino == origem, "bytes não copiados");
+    let antes = usercopy::faltas();
+    check!(
+        !usercopy::copiar(NAO_MAPEADO as *mut u8, origem.as_ptr(), origem.len()),
+        "escrita em página ausente devia faltar"
+    );
+    check!(
+        !usercopy::copiar(destino.as_mut_ptr(), NAO_MAPEADO as *const u8, 64),
+        "leitura de página ausente devia faltar"
+    );
+    check!(
+        usercopy::faltas() == antes + 2,
+        "contador de faltas {} != {}",
+        usercopy::faltas(),
+        antes + 2
+    );
+    // A máquina continua sã depois de duas faltas recuperadas.
+    check!(
+        usercopy::copiar(destino.as_mut_ptr(), origem.as_ptr(), origem.len()),
+        "cópia válida depois da falta"
+    );
+    Ok(())
+}
+
+/// Uma thread desmapeia o buffer enquanto a outra está dentro de uma syscall que o copia.
+///
+/// Antes do fixup, este teste derrubava o kernel: sobreviver **é** a asserção. Quantas faltas
+/// foram recuperadas depende do escalonamento das CPUs e vai no log do `utest`, não numa
+/// asserção — a corrida existe de verdade, e um número exigido aqui seria frágil por ambiente.
+fn test_user_usercopy_race() -> TestResult {
+    let code = run_utest(83)?;
+    check!(code == 0, "usercopy_race saiu com {code}");
+    Ok(())
+}
+
 fn test_user_cpu_time() -> TestResult {
     let code = run_utest(79)?;
     check!(code == 0, "cpu_time saiu com {code}");

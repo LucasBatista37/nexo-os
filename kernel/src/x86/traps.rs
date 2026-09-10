@@ -224,6 +224,15 @@ fn page_fault(frame: &mut TrapFrame) {
     EXCEPTIONS.fetch_add(1, Ordering::Relaxed);
     let cr2 = cpu::read_cr2();
     let err = PageFaultError(frame.error_code);
+    // Corrida legitima e prevista: outra thread do processo desmapeou o buffer no meio de uma
+    // copia usuario<->kernel (ver x86::usercopy). A copia tem retomada propria e devolve
+    // "faltou"; sem isto, um `memory_unmap` bem cronometrado derruba o kernel inteiro.
+    if !err.user()
+        && let Some(retomada) = super::usercopy::retomada_para(frame.rip)
+    {
+        frame.rip = retomada;
+        return;
+    }
     let mut probe = PROBE.lock();
     if let Some(p) = probe.as_mut()
         && cr2 & !0xfff == p.page
