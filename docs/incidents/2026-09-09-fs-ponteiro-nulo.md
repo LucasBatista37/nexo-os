@@ -72,3 +72,51 @@ estrutura inválida em disco autoriza reformatar.
 
 As duas primeiras ocorrências (`#UD` e escrita em `null + 0x20`) continuam **sem explicação**
 e podem ter outra raiz; o plano de coleta acima segue valendo para elas.
+
+## Quarta ocorrência (2026-09-09, varredura do bloco 124) — e a causa raiz
+
+Cenário `storage`, segunda execução, teste `user_install`. O `fs` morreu **na primeira
+instrução**:
+
+```
+process: 'fs' pid 298 entry 0xe806254b0 (87 quadros) thread 417
+trap: pid 298 'fs' Page Fault (#14) em rip=0xe806254b0 rsp=0x7ffff1533ff8 err=0x14 cr2=0xe806254b0
+trap: pid 298 base do codigo 0xe80221000 (rip-base = 0x4044b0); rax=0x0 rcx=0x0 rdx=0x0 rsi=0x0 rdi=0x0
+```
+
+`rip == entry` e `cr2 == rip`: o processo faltou ao buscar a **própria primeira instrução**.
+O código de erro `0x14` decodifica como **busca de instrução** (bit 4) numa página **não
+presente** (bit 0 = 0) em **modo usuário** (bit 2). Não é um bug do `fs` — é o espaço de
+endereçamento do processo que não está lá quando ele começa a executar.
+
+Log preservado: `build/logs/incidente-fs-2026-09-09-storage2.log`.
+
+Hipótese descartada no caminho: a contagem de quadros do `fs` variar (87/88/89) no mesmo boot
+não indica página perdida — varia com a base aleatória do ASLR, que muda quantas tabelas
+intermediárias são necessárias.
+
+### Causa raiz: CR3 não recarregado quando o quadro da PML4 é reciclado
+
+`kernel/src/sched.rs` evitava a troca de CR3 comparando o **quadro físico** da PML4:
+
+```rust
+if cpu::read_cr3() & 0x000f_ffff_ffff_f000 != target {
+    unsafe { cpu::write_cr3(target) };
+}
+```
+
+É a otimização clássica ("mesmo espaço de endereçamento, não precisa esvaziar a TLB"), e ela
+está errada quando um quadro de PML4 é **liberado e reciclado**: o processo A termina, o
+`Drop` do `AddressSpace` devolve o quadro raiz ao alocador, e o processo B nasce recebendo o
+**mesmo quadro** (o alocador de bitmap devolve o quadro recém-liberado). Uma CPU que rodou A
+tem `CR3` numericamente igual ao alvo de B, não recarrega, e segue com as traduções em cache
+de um espaço que já morreu — TLB e caches de estrutura de paginação incluídos.
+
+O resultado depende do que estava em cache: uma tradução intermediária obsoleta cobrindo a
+faixa nova produz "não presente" na primeira busca de instrução (esta ocorrência), e uma
+tradução obsoleta *presente* faz a CPU executar memória alheia — o que explica as ocorrências
+anteriores (`#UD` = instrução inválida em memória que não é o código do `fs`; escrita em
+`null + 0x20` dentro de `write_entry` = código errado a correr).
+
+Gravidade além da queda: com traduções de um espaço morto ainda válidas na CPU, um processo
+pode **alcançar memória de outro** — é uma falha de isolamento, não só de estabilidade.

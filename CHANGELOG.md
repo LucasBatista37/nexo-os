@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 2, bloco 124 — matriz direito × operação)
+
+- **Um direito só existe de verdade quando a sua ausência é recusada.** O auto-teste `user_rights` (132º) percorre os direitos aplicados hoje e, para cada um, exige as **duas metades**: sem o direito a operação é negada, e **com** o direito a mesma operação funciona. Sem a segunda metade, um sistema em que tudo falha passaria por seguro.
+- Cobertura: canal (`READ` para receber, `WRITE` para enviar, `DUPLICATE` para copiar, `TRANSFER` para o handle viajar numa mensagem), memória (`MAP` para mapear), evento (`SIGNAL` para sinalizar, e `READ` basta para esperar) e processo (`READ` para esperar o filho).
+- **Escalada recusada**: `handle_duplicate` pedindo um direito que a origem não tem é `Denied` — a regra "direitos só diminuem" deixou de ser só uma frase na especificação.
+- O primeiro rascunho do teste media a coisa errada: transferia uma cópia do próprio canal por onde a mensagem seguia, e o kernel a recusava por ser um **ciclo** (`InvalidArgs`, uma regra anterior), não por falta de `TRANSFER`. Agora o handle transferido é de um terceiro canal, e a negação testada é mesmo a do direito.
+
 ### Adicionado (Fase 2, bloco 123 — dependências declarativas entre serviços)
 
 - **`libraries/svcdep` (`nexo-svcdep`)**: a ordem de partida sai de uma tabela declarada (`nome` + `depende: &["outro"]`), não de uma sequência escrita à mão que ninguém revisa e que sai de ordem quando alguém acrescenta um serviço no meio. `no_std`, sem alocação (o chamador dá o vetor de saída), ordem **estável** (entre serviços igualmente prontos vence quem foi declarado antes, para que a mesma tabela dê sempre o mesmo log). A resolução mora fora do serviço por um motivo prático: assim é uma função pura sobre dados, com **9 testes de host** — ordem, ordem de declaração irrelevante, diamante, ciclo, depender de si mesmo, dependência inexistente, nome repetido, saída pequena e tabela vazia.

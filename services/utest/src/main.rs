@@ -128,6 +128,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         82 => process_list_test(),
         83 => usercopy_race(),
         84 => events_test(),
+        85 => rights_matrix(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5226,6 +5227,127 @@ fn cpu_time_test() -> ! {
 }
 
 static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+// --- Matriz direito x operacao (bloco 124) ---
+// Um direito so existe de verdade quando a sua ausencia e recusada. Este teste percorre os
+// direitos aplicados hoje e, para cada um, exige as DUAS metades: sem o direito a operacao e
+// negada, e COM o direito a mesma operacao funciona — senao "tudo falha" passaria por
+// seguranca. Tambem exige que direitos nao possam ser escalados numa copia.
+fn rights_matrix() -> ! {
+    use nexo_sys::abi::{
+        RIGHT_DUPLICATE, RIGHT_MAP, RIGHT_READ, RIGHT_SIGNAL, RIGHT_TRANSFER, RIGHT_WRITE,
+    };
+    let mut buf = [0u8; 64];
+    let mut hs = [0u32; 2];
+
+    // ---- canal: READ, WRITE, DUPLICATE, TRANSFER ----
+    let (a, b) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(510));
+    let so_ler = nexo_sys::handle_duplicate(a, RIGHT_READ).unwrap_or_else(|_| nexo_sys::exit(511));
+    if nexo_sys::channel_send(so_ler, b"x", &[]) != Status::Denied {
+        nexo_sys::exit(512); // sem WRITE nao se envia
+    }
+    let so_escrever =
+        nexo_sys::handle_duplicate(a, RIGHT_WRITE).unwrap_or_else(|_| nexo_sys::exit(513));
+    if nexo_sys::channel_recv(so_escrever, &mut buf, &mut hs) != Err(Status::Denied) {
+        nexo_sys::exit(514); // sem READ nao se recebe
+    }
+    if nexo_sys::channel_send(so_escrever, b"x", &[]) != Status::Ok {
+        nexo_sys::exit(515); // ... mas escrever continua permitido
+    }
+    if nexo_sys::channel_recv(b, &mut buf, &mut hs) != Ok((1, 0)) {
+        nexo_sys::exit(516);
+    }
+    if nexo_sys::handle_duplicate(so_ler, RIGHT_READ) != Err(Status::Denied) {
+        nexo_sys::exit(517); // sem DUPLICATE nao se copia
+    }
+    // Escalada: a copia nao pode pedir mais do que a origem tem.
+    let sem_transfer = nexo_sys::handle_duplicate(a, RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE)
+        .unwrap_or_else(|_| nexo_sys::exit(518));
+    if nexo_sys::handle_duplicate(
+        sem_transfer,
+        RIGHT_READ | RIGHT_WRITE | RIGHT_DUPLICATE | RIGHT_TRANSFER,
+    ) != Err(Status::Denied)
+    {
+        nexo_sys::exit(519); // direitos so diminuem
+    }
+    let _ = nexo_sys::handle_close(sem_transfer);
+    // O handle transferido e de um TERCEIRO canal, e nao uma copia de `a`: mandar uma ponta
+    // pelo proprio canal e recusado como ciclo (InvalidArgs), e o teste estaria a medir essa
+    // regra em vez do direito TRANSFER — foi o que aconteceu na primeira versao.
+    let (c, d) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(520));
+    let c_sem_transfer = nexo_sys::handle_duplicate(c, RIGHT_READ | RIGHT_WRITE)
+        .unwrap_or_else(|_| nexo_sys::exit(521));
+    if nexo_sys::channel_send(b, b"h", &[c_sem_transfer]) != Status::Denied {
+        nexo_sys::exit(522); // sem TRANSFER o handle nao viaja
+    }
+    let c_com_transfer = nexo_sys::handle_duplicate(c, RIGHT_READ | RIGHT_TRANSFER)
+        .unwrap_or_else(|_| nexo_sys::exit(523));
+    if nexo_sys::channel_send(b, b"h", &[c_com_transfer]) != Status::Ok {
+        nexo_sys::exit(524); // ... com TRANSFER viaja
+    }
+    let _ = nexo_sys::handle_close(c_sem_transfer);
+    let _ = nexo_sys::handle_close(c);
+    let _ = nexo_sys::handle_close(d);
+    if nexo_sys::channel_recv(a, &mut buf, &mut hs) != Ok((1, 1)) {
+        nexo_sys::exit(525);
+    }
+    let _ = nexo_sys::handle_close(hs[0] as nexo_sys::Handle);
+
+    // ---- memoria: MAP ----
+    let mem = nexo_sys::memory_create(1).unwrap_or_else(|_| nexo_sys::exit(524));
+    let sem_map = nexo_sys::handle_duplicate(mem, RIGHT_READ | RIGHT_WRITE)
+        .unwrap_or_else(|_| nexo_sys::exit(525));
+    if nexo_sys::memory_map(sem_map) != Err(Status::Denied) {
+        nexo_sys::exit(526); // sem MAP nao se mapeia
+    }
+    let com_map = nexo_sys::handle_duplicate(mem, RIGHT_READ | RIGHT_MAP)
+        .unwrap_or_else(|_| nexo_sys::exit(527));
+    let base = nexo_sys::memory_map(com_map).unwrap_or_else(|_| nexo_sys::exit(528));
+    if nexo_sys::memory_unmap(base, 4096) != Status::Ok {
+        nexo_sys::exit(529);
+    }
+
+    // ---- evento: SIGNAL ----
+    let ev = nexo_sys::event_create(false).unwrap_or_else(|_| nexo_sys::exit(530));
+    let sem_signal =
+        nexo_sys::handle_duplicate(ev, RIGHT_READ).unwrap_or_else(|_| nexo_sys::exit(531));
+    if nexo_sys::event_signal(sem_signal) != Status::Denied {
+        nexo_sys::exit(532);
+    }
+    let com_signal = nexo_sys::handle_duplicate(ev, RIGHT_READ | RIGHT_SIGNAL)
+        .unwrap_or_else(|_| nexo_sys::exit(533));
+    if nexo_sys::event_signal(com_signal) != Status::Ok {
+        nexo_sys::exit(534);
+    }
+    if nexo_sys::channel_wait_any_timeout(&[sem_signal], 10_000_000) != Ok(0) {
+        nexo_sys::exit(535); // esperar so precisa de READ
+    }
+
+    // ---- processo: READ ----
+    let (ctl, deles) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(536));
+    let filho = match nexo_sys::process_spawn("echo", 99, &[deles]) {
+        Ok(h) => h,
+        Err(_) => nexo_sys::exit(537),
+    };
+    let sem_read = nexo_sys::handle_duplicate(filho, RIGHT_TRANSFER | RIGHT_DUPLICATE)
+        .unwrap_or_else(|_| nexo_sys::exit(538));
+    if nexo_sys::process_wait(sem_read) != Err(Status::Denied) {
+        nexo_sys::exit(539); // sem READ nao se espera um processo
+    }
+    let _ = nexo_sys::handle_close(ctl); // o echo sai por PeerClosed
+    if nexo_sys::process_wait(filho).is_err() {
+        nexo_sys::exit(540); // ... com READ espera-se
+    }
+
+    let _ = nexo_sys::handle_close(a);
+    let _ = nexo_sys::handle_close(b);
+    let _ = nexo_sys::handle_close(mem);
+    let _ = nexo_sys::handle_close(ev);
+    nexo_sys::log(
+        "utest: matriz de direitos ok — READ/WRITE/DUPLICATE/TRANSFER/MAP/SIGNAL negados sem o direito e permitidos com ele; escalada recusada",
+    );
+    nexo_sys::exit(0)
+}
 
 // --- Objetos de evento e o direito SINALIZAR (bloco 122) ---
 static EVENTO_H: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);

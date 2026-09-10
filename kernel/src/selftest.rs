@@ -123,6 +123,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_process_list", test_user_process_list),
     ("user_usercopy_race", test_user_usercopy_race),
     ("user_events", test_user_events),
+    ("user_rights", test_user_rights),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1243,6 +1244,13 @@ fn test_user_usercopy_race() -> TestResult {
 fn test_user_events() -> TestResult {
     let code = run_utest(84)?;
     check!(code == 0, "events saiu com {code}");
+    Ok(())
+}
+
+/// Matriz direito x operacao: cada direito negado sem ele e permitido com ele (bloco 124).
+fn test_user_rights() -> TestResult {
+    let code = run_utest(85)?;
+    check!(code == 0, "rights_matrix saiu com {code}");
     Ok(())
 }
 
