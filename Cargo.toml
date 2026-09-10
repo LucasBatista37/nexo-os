@@ -29,6 +29,7 @@ members = [
     "libraries/cal",
     "libraries/textgrid",
     "libraries/svcdep",
+    "libraries/i18n",
     "sdk/nexo-sys",
     "sdk/nexo-rt",
     "sdk/nexo-net",

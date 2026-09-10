@@ -46,6 +46,10 @@ name = "nexo-heap"
 version = "0.0.1"
 
 [[package]]
+name = "nexo-i18n"
+version = "0.0.1"
+
+[[package]]
 name = "nexo-img"
 version = "0.0.1"
 

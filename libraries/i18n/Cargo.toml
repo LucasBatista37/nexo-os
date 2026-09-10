@@ -1,0 +1,9 @@
+[package]
+name = "nexo-i18n"
+description = "Catalogo de mensagens do Nexo OS (no_std, sem alocacao, verificado no host)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

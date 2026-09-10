@@ -659,7 +659,7 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
-| `services/greeter/src/main.rs:88` | bloco | base .. base+W*H*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/greeter/src/main.rs:92` | bloco | base .. base+W*H*4 foi mapeada por memory_map (USER\|RW) neste processo. |
 
 ## `nexo-inputdev` — 1 usos
 

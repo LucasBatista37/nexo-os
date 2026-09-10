@@ -336,6 +336,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 6, bloco 138 — mecanismo de localização)
+
+- O sistema é escrito em português e as suas mensagens estavam **no código**, o que impede traduzir sem reescrever. `libraries/i18n` (`nexo-i18n`) é o mecanismo que faltava: um catálogo de chaves com uma tradução por idioma (pt-BR, en-US), consultado em tempo de execução, `no_std` e sem alocação.
+- **Sem falha, por desenho**: `texto` devolve `&'static str` e nunca entra em pânico; chave desconhecida devolve um marcador. Uma interface com um rótulo estranho é ruim; uma que morre ao desenhar um rótulo é pior.
+- **A completude é verificada, não prometida**: `valida()` recusa chave fora de ordem, repetida ou com tradução vazia — e é uma função pública, não só um teste, para valer em qualquer catálogo. A busca é binária, e sem ordem ela erra **em silêncio**, que é a pior forma de errar.
+- O validador é testado a **reprovar** cada um dos três defeitos. A primeira versão deste teste afirmava o que a busca binária faz num catálogo desordenado — comportamento não especificado — e falhou por estar errada: a busca encontrou a chave por acaso. Trocado por um teste do validador, que é o que de facto define a invariante.
+- Primeiro utilizador real: o rótulo "Senha" do `greeter` vem do catálogo. O idioma ainda é uma constante — escolher e persistir a preferência depende de onde ela vai morar, e a conversão dos outros serviços é progressiva de propósito: converter tudo de uma vez seria uma mudança grande demais para se rever. As mensagens de **log** ficam em português: são diagnóstico, não interface.
+
 ### Corrigido (bloco 137 — o gate de documentação tinha de ver o que o CI vê)
 
 - **O bloco 136 foi para `main` com o CI vermelho.** O gate de documentação que ele criou passava na minha máquina e falhava no runner, pela razão mais banal e mais fácil de repetir: o host é aarch64 e o CI é x86_64, então metade do `nexo-arch-x86_64` — tudo o que está atrás de `#[cfg(target_arch = "x86_64")]` — nunca era documentado aqui. Dois links quebrados viviam exatamente lá.

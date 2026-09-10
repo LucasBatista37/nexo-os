@@ -12,6 +12,7 @@ nexo-rt = { workspace = true, features = ["panic-handler"] }
 nexo-proto.workspace = true
 nexo-gfx.workspace = true
 nexo-ui.workspace = true
+nexo-i18n.workspace = true
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

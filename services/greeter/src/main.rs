@@ -10,6 +10,7 @@
 #![no_main]
 
 use nexo_gfx::{PixelFormat, Rect, Surface};
+use nexo_i18n::{Idioma, texto};
 use nexo_proto::wm;
 use nexo_rt::log;
 use nexo_sys::Handle;
@@ -17,6 +18,9 @@ use nexo_sys::abi::Status;
 use nexo_ui::{Label, Theme};
 
 const PIPE: Handle = 0;
+/// Idioma da interface. Constante por enquanto — ver a nota no desenho do rótulo.
+const IDIOMA: Idioma = Idioma::PtBr;
+
 /// Senha demo: "nexo" em códigos evdev (n, e, x, o) + Enter.
 const PASSWORD: [u32; 4] = [49, 18, 45, 24];
 const KEY_ENTER: u32 = 28;
@@ -90,7 +94,10 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             .unwrap_or_else(|| fail(39, "superficie"));
         s.clear(theme.bg);
         s.stroke_rect(Rect::new(0, 0, W, H), theme.accent);
-        Label::new("senha").draw(&mut s, 12, 20, &theme);
+        // Primeiro rótulo do sistema que vem do catálogo em vez do código-fonte. O idioma
+        // ainda é fixo aqui: escolher e persistir a preferência é o passo seguinte, e depende
+        // de onde ela vai morar (prefs do compositor).
+        Label::new(texto(IDIOMA, "greeter.senha")).draw(&mut s, 12, 20, &theme);
     }
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)

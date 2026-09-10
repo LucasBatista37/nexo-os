@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-10 (commit `ce65c89`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-10 (commit `c855d27`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 221 · 🟡 110 · ⬜ 204 · ⛔ 0 → **52% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 221 · 🟡 111 · ⬜ 203 · ⛔ 0 → **52% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -351,7 +351,7 @@ Gate: ⬜ não iniciado.
 | 6.6 Aplicativos e SDK | 10 | 7 | 1 | 75% |
 | 6.7 Segurança e privacidade | 3 | 4 | 10 | 29% |
 | 6.8 Qualidade e confiabilidade | 6 | 8 | 2 | 62% |
-| 6.9 Acessibilidade e internacionalização | 0 | 7 | 7 | 25% |
+| 6.9 Acessibilidade e internacionalização | 0 | 8 | 6 | 29% |
 | 6.10 Distribuição e operação | 0 | 1 | 13 | 4% |
 
 ### 6.1 Kernel e baixo nível
@@ -533,7 +533,7 @@ Gate: ⬜ não iniciado.
 | ⬜ | tamanhos de texto ajustáveis | a fonte é bitmap 8×8 com escala inteira; não há tamanho de texto ajustável independente da escala global |
 | ⬜ | métodos de entrada | só teclado e ponteiro diretos; nada de composição, IME ou entrada alternativa |
 | ⬜ | Unicode completo nas camadas fundamentais | a fonte cobre a faixa ASCII com glifo de fallback fora dela; texto e fontes vetoriais pendem |
-| ⬜ | localização pt-BR e en-US | o sistema é escrito em português, mas **sem** mecanismo de localização: as strings estão no código |
+| 🟡 | localização pt-BR e en-US | o **mecanismo** existe (bloco 138): `libraries/i18n` tem um catálogo de chaves com tradução para os dois idiomas, consultado em tempo de execução, `no_std`, sem alocação e **sem falha** — chave desconhecida devolve um marcador, porque uma interface com rótulo estranho é ruim mas uma que morre ao desenhar um rótulo é pior. A completude é **verificada**, não prometida: `valida()` recusa chave fora de ordem, repetida ou com tradução vazia, e é testada a reprovar cada um dos três defeitos (a busca é binária, e sem ordem ela erra em silêncio). O primeiro rótulo do sistema a vir do catálogo é o do `greeter`. Pendem a **conversão progressiva** dos demais serviços (as mensagens de log ficam em português, por serem diagnóstico) e a **escolha** do idioma em tempo de execução, que depende de onde a preferência vai morar |
 | 🟡 | formatos de data, hora, número e moeda | datas civis e fusos horários existem (`nexo-cal`: conversão epoch↔civil com deslocamento em minutos, testada nos dois sentidos à meia-noite). Faltam formatos por localidade, e número e moeda inteiramente |
 | ⬜ | layouts da direita para a esquerda em fase posterior |  |
 | ⬜ | testes com pessoas e tecnologias assistivas | dependem de usuários externos (Fase 9); nada feito |

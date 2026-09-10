@@ -171,11 +171,16 @@ name = "nexo-greeter"
 version = "0.0.1"
 dependencies = [
  "nexo-gfx",
+ "nexo-i18n",
  "nexo-proto",
  "nexo-rt",
  "nexo-sys",
  "nexo-ui",
 ]
+
+[[package]]
+name = "nexo-i18n"
+version = "0.0.1"
 
 [[package]]
 name = "nexo-img"
