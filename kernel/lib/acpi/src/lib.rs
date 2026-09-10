@@ -461,6 +461,82 @@ impl Hpet {
     }
 }
 
+/// Uma faixa de barramentos do ECAM (uma entrada da tabela `MCFG`).
+///
+/// O ECAM (*Enhanced Configuration Access Mechanism*) é como o PCIe expõe os **4096** bytes de
+/// configuração de cada função, contra os 256 do mecanismo legado de portas `0xCF8/0xCFC`. É
+/// por lá que vivem as capabilities estendidas (AER, SR-IOV, ATS) — nada do que o sistema usa
+/// hoje precisa delas, mas hardware real precisa.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct McfgEntry {
+    /// Endereço físico base da janela deste segmento.
+    pub base: u64,
+    /// Número do segmento PCI (normalmente 0).
+    pub segment: u16,
+    /// Primeiro barramento coberto.
+    pub bus_start: u8,
+    /// Último barramento coberto (inclusive).
+    pub bus_end: u8,
+}
+
+impl McfgEntry {
+    /// Endereço físico da configuração da função `bdf` (bus:dev.fn), ou `None` fora da faixa.
+    ///
+    /// O deslocamento é `(bus - bus_start) << 20 | dev << 15 | fun << 12`, exatamente como a
+    /// especificação manda; `offset` entra nos 12 bits de baixo.
+    pub fn address(&self, bdf: u16, offset: u16) -> Option<u64> {
+        let bus = (bdf >> 8) as u8;
+        if bus < self.bus_start || bus > self.bus_end || offset >= 4096 {
+            return None;
+        }
+        let dev = ((bdf >> 3) & 0x1f) as u64;
+        let fun = (bdf & 7) as u64;
+        Some(
+            self.base
+                + ((u64::from(bus) - u64::from(self.bus_start)) << 20)
+                + (dev << 15)
+                + (fun << 12)
+                + u64::from(offset),
+        )
+    }
+}
+
+/// Interpreta a tabela `MCFG` e escreve as faixas em `saida`; devolve quantas couberam.
+///
+/// A tabela tem 8 bytes reservados antes das entradas, e cada entrada tem 16 bytes:
+/// base(8) segmento(2) inicio(1) fim(1) reservado(4).
+pub fn parse_mcfg(table: &Table<'_>, saida: &mut [McfgEntry]) -> Result<usize, AcpiError> {
+    if &table.header.signature != b"MCFG" {
+        return Err(AcpiError::BadSignature);
+    }
+    let p = table.payload();
+    if p.len() < 8 {
+        return Err(AcpiError::BadLength);
+    }
+    let mut n = 0;
+    let mut off = 8;
+    while off + 16 <= p.len() && n < saida.len() {
+        let base = u64_at(p, off).ok_or(AcpiError::BadLength)?;
+        let segment = u16_at(p, off + 8).ok_or(AcpiError::BadLength)?;
+        let bus_start = *p.get(off + 10).ok_or(AcpiError::BadLength)?;
+        let bus_end = *p.get(off + 11).ok_or(AcpiError::BadLength)?;
+        // Uma entrada com faixa invertida é tabela corrompida: ignorar em silêncio esconderia
+        // firmware quebrado, e aceitar produziria endereços absurdos.
+        if bus_end < bus_start {
+            return Err(AcpiError::BadLength);
+        }
+        saida[n] = McfgEntry {
+            base,
+            segment,
+            bus_start,
+            bus_end,
+        };
+        n += 1;
+        off += 16;
+    }
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     /// PRNG determinístico para os testes "fuzz-lite" (sem dependências).
@@ -689,6 +765,108 @@ mod tests {
         assert_eq!(h.min_tick, 0x80);
         assert_eq!(h.event_timer_block_id, 0x8086_a201);
         assert_eq!(Madt::parse(&t).unwrap_err(), AcpiError::BadSignature);
+    }
+
+    /// Constrói uma tabela MCFG sintética com `n` faixas, para testar o parser sem firmware.
+    fn mcfg_bytes(faixas: &[(u64, u16, u8, u8)]) -> Vec<u8> {
+        let mut p = vec![0u8; 8]; // 8 bytes reservados antes das entradas
+        for (base, seg, ini, fim) in faixas {
+            p.extend_from_slice(&base.to_le_bytes());
+            p.extend_from_slice(&seg.to_le_bytes());
+            p.push(*ini);
+            p.push(*fim);
+            p.extend_from_slice(&[0u8; 4]);
+        }
+        p
+    }
+
+    fn tabela(sig: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let len = 36 + payload.len();
+        let mut t = Vec::with_capacity(len);
+        t.extend_from_slice(sig);
+        t.extend_from_slice(&(len as u32).to_le_bytes());
+        t.extend_from_slice(&[1, 0]); // revisão, checksum (corrigido abaixo)
+        t.extend_from_slice(b"NEXO  NEXOTEST\x01\x00\x00\x00NEXO\x01\x00\x00\x00");
+        t.resize(36, 0);
+        t.extend_from_slice(payload);
+        let soma = t.iter().fold(0u8, |a, b| a.wrapping_add(*b));
+        t[9] = t[9].wrapping_sub(soma);
+        t
+    }
+
+    #[test]
+    fn parses_mcfg_e_calcula_enderecos() {
+        let bytes = tabela(b"MCFG", &mcfg_bytes(&[(0xb000_0000, 0, 0, 255)]));
+        let mem = Mem {
+            base: 0x9000,
+            data: bytes,
+        };
+        let t = Table::parse(&mem, 0x9000).unwrap();
+        let mut faixas = [McfgEntry {
+            base: 0,
+            segment: 0,
+            bus_start: 0,
+            bus_end: 0,
+        }; 4];
+        assert_eq!(parse_mcfg(&t, &mut faixas).unwrap(), 1);
+        let e = faixas[0];
+        assert_eq!(
+            (e.base, e.segment, e.bus_start, e.bus_end),
+            (0xb000_0000, 0, 0, 255)
+        );
+        // 00:1f.3, offset 0 → base + (0<<20) + (0x1f<<15) + (3<<12)
+        assert_eq!(
+            e.address(0x00fb, 0),
+            Some(0xb000_0000 + (0x1f << 15) + (3 << 12))
+        );
+        // barramento 1 avança 1 MiB
+        assert_eq!(e.address(0x0100, 0x100), Some(0xb010_0000 + 0x100));
+        // deslocamento fora dos 4 KiB não existe
+        assert_eq!(e.address(0x0000, 4096), None);
+    }
+
+    #[test]
+    fn mcfg_recusa_faixa_invertida_e_assinatura_errada() {
+        let bytes = tabela(b"MCFG", &mcfg_bytes(&[(0xb000_0000, 0, 200, 100)]));
+        let mem = Mem {
+            base: 0x9000,
+            data: bytes,
+        };
+        let t = Table::parse(&mem, 0x9000).unwrap();
+        let mut faixas = [McfgEntry {
+            base: 0,
+            segment: 0,
+            bus_start: 0,
+            bus_end: 0,
+        }; 2];
+        assert_eq!(
+            parse_mcfg(&t, &mut faixas).unwrap_err(),
+            AcpiError::BadLength
+        );
+
+        let outra = tabela(b"HPET", &mcfg_bytes(&[(0xb000_0000, 0, 0, 255)]));
+        let mem2 = Mem {
+            base: 0x9000,
+            data: outra,
+        };
+        let t2 = Table::parse(&mem2, 0x9000).unwrap();
+        assert_eq!(
+            parse_mcfg(&t2, &mut faixas).unwrap_err(),
+            AcpiError::BadSignature
+        );
+    }
+
+    #[test]
+    fn mcfg_fora_da_faixa_de_barramentos_nao_tem_endereco() {
+        let e = McfgEntry {
+            base: 0xc000_0000,
+            segment: 0,
+            bus_start: 16,
+            bus_end: 31,
+        };
+        assert_eq!(e.address(0x0f00, 0), None); // barramento 15, abaixo do início
+        assert_eq!(e.address(0x2000, 0), None); // barramento 32, acima do fim
+        assert_eq!(e.address(0x1000, 0), Some(0xc000_0000)); // barramento 16 = deslocamento 0
     }
 
     #[test]

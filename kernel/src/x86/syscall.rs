@@ -665,7 +665,12 @@ fn sys_device(p: &Arc<process::Process>, f: &TrapFrame) -> (Status, u64) {
                 return (Status::Denied, 0);
             }
             if n == SYS_PCI_CFG_READ {
-                (Status::Ok, crate::pci::cfg_read(bdf, f.rdx as u8) as u64)
+                // Deslocamento de 12 bits: os 256 bytes legados e, com ECAM, os 4096 do PCIe.
+                // Antes truncava a 8 bits em silêncio — pedir 0x100 devolvia o vendor ID.
+                match crate::pci::cfg_read_ext(bdf, f.rdx as u16) {
+                    Some(v) => (Status::Ok, v as u64),
+                    None => (Status::NotSupported, 0),
+                }
             } else {
                 crate::pci::cfg_write(bdf, f.rdx as u8, f.r10 as u32);
                 (Status::Ok, 0)

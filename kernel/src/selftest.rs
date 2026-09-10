@@ -64,6 +64,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("timer_resolution", test_timer_resolution),
     ("usercopy_fixup", test_usercopy_fixup),
     ("pml4_recycling", test_pml4_recycling),
+    ("pci_ecam", test_pci_ecam),
     ("bench_switch", test_bench_switch),
     ("smap", test_smap),
     ("smep", test_smep),
@@ -1200,6 +1201,76 @@ fn test_user_threads() -> TestResult {
 }
 
 /// Contabilidade de CPU por processo: girar credita, dormir não (modo 79).
+/// ECAM: a configuração estendida do PCIe concorda com a legada onde as duas se sobrepõem.
+///
+/// É a única verificação que faz sentido sem hardware que use capabilities estendidas: os dois
+/// caminhos (portas `0xCF8/0xCFC` e MMIO) leem o **mesmo** espaço nos primeiros 256 bytes, e
+/// discordar significa janela mal mapeada ou endereço mal calculado — que é justamente o erro
+/// difícil de ver, porque devolve lixo plausível em vez de falhar.
+fn test_pci_ecam() -> TestResult {
+    if !crate::pci::ecam_disponivel() {
+        kprint!("[TEST] pci_ecam: sem ECAM nesta maquina; acesso legado apenas\n");
+        return Ok(());
+    }
+    let dispositivos = crate::pci::devices();
+    check!(!dispositivos.is_empty(), "nenhuma funcao PCI enumerada");
+    let mut conferidas = 0;
+    for d in &dispositivos {
+        // Cabeçalho inteiro: vendor/device, classe, BARs, IRQ — 64 bytes de 4 em 4.
+        for off in (0..64u16).step_by(4) {
+            // SAFETY: leitura de configuração PCI de uma função já enumerada; sem efeitos.
+            let legado = unsafe {
+                nexo_arch_x86_64::pci::config_read32(crate::pci::Bdf::from_packed(d.bdf), off as u8)
+            };
+            let ecam = crate::pci::ecam_read32(d.bdf, off).ok_or("ecam_read32 recusou")?;
+            check!(
+                legado == ecam,
+                "bdf {:#06x} offset {off:#x}: legado {legado:#010x} != ecam {ecam:#010x}",
+                d.bdf
+            );
+            conferidas += 1;
+        }
+    }
+    // Fora dos 256 bytes legados só o ECAM alcança; e além dos 4096 nem ele.
+    check!(
+        crate::pci::ecam_read32(dispositivos[0].bdf, 0x100).is_some(),
+        "ECAM devia alcancar o deslocamento 0x100"
+    );
+    check!(
+        crate::pci::ecam_read32(dispositivos[0].bdf, 4096).is_none(),
+        "ECAM nao pode ler alem de 4096"
+    );
+    check!(
+        crate::pci::ecam_read32(dispositivos[0].bdf, 2).is_none(),
+        "ECAM exige deslocamento alinhado"
+    );
+    // O caminho que a syscall usa: 12 bits de deslocamento, sem truncar em silêncio.
+    let bdf0 = crate::pci::Bdf::from_packed(dispositivos[0].bdf);
+    check!(
+        crate::pci::cfg_read_ext(bdf0, 0) == crate::pci::ecam_read32(dispositivos[0].bdf, 0),
+        "cfg_read_ext discorda do ECAM no deslocamento 0"
+    );
+    check!(
+        crate::pci::cfg_read_ext(bdf0, 0x100)
+            == crate::pci::ecam_read32(dispositivos[0].bdf, 0x100),
+        "cfg_read_ext nao alcanca a configuracao estendida"
+    );
+    check!(
+        crate::pci::cfg_read_ext(bdf0, 0x100) != crate::pci::cfg_read_ext(bdf0, 0),
+        "0x100 devolveu o mesmo que 0: o deslocamento foi truncado a 8 bits"
+    );
+    check!(
+        crate::pci::cfg_read_ext(bdf0, 4096).is_none(),
+        "cfg_read_ext nao pode passar de 4096"
+    );
+    kprint!(
+        "[PCI] ECAM confere com o acesso legado em {} leituras de {} funcao(oes)\n",
+        conferidas,
+        dispositivos.len()
+    );
+    Ok(())
+}
+
 /// Rodadas de troca de contexto medidas por thread (duas threads, mesma CPU).
 const BENCH_TROCAS: u64 = 20_000;
 

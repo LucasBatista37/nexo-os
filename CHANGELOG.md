@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado e corrigido (Fase 3, bloco 133 — ECAM/MCFG, a configuração estendida do PCIe)
+
+- O sistema só alcançava os **256** bytes de configuração de cada função PCI, pelo mecanismo legado das portas `0xCF8/0xCFC`. O PCIe tem **4096**, e é nos outros 3840 que vivem as capabilities estendidas (AER, SR-IOV, ATS) de que hardware real precisa — nada do que corre em QEMU precisou delas até hoje, o que é exatamente o motivo de a lacuna ter passado despercebida até a auditoria do bloco 131 lhe dar um nome.
+- A tabela **`MCFG`** passou a ser lida (`nexo-acpi::parse_mcfg`, com três testes de host: endereços calculados, faixa de barramentos invertida recusada, assinatura errada recusada) e a janela do barramento 0 é mapeada como MMIO sem cache. No q35: base `0xe0000000`, barramentos 0–255.
+- **Bug silencioso corrigido**: a syscall `pci_cfg_read` truncava o deslocamento a 8 bits (`as u8`). Pedir `0x100` devolvia o vendor ID — um driver à procura de uma capability estendida encontraria lixo plausível em vez de um erro. Agora o deslocamento tem 12 bits, `0x100..0xffc` passa pelo ECAM, e sem ECAM a resposta é `NotSupported` em vez de um número errado.
+- Auto-teste `pci_ecam` (141º) confere os dois caminhos **um contra o outro** nos 256 bytes em que se sobrepõem — 176 leituras em 11 funções — porque é a única verificação que faz sentido sem hardware que use as extensões: discordar significa janela mal mapeada ou endereço mal calculado. Visto a reprovar: com os deslocamentos de dispositivo e função trocados, a primeira leitura já acusa (`legado 0x11111234 != ecam 0xffffffff`).
+
 ### Alterado (bloco 132 — as cinco frentes permanentes restantes auditadas contra o código)
 
 - Continuação do bloco anterior, agora para desktop (§6.5), aplicativos e SDK (§6.6), segurança e privacidade (§6.7), qualidade e confiabilidade (§6.8) e acessibilidade e internacionalização (§6.9): 73 itens verificados **no código**, um a um, e reescritos com a evidência e com o que falta.

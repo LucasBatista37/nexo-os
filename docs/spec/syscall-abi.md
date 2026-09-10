@@ -47,7 +47,7 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 15 | `process_wait` | h | código de saída (i64) | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs` (não é processo / é o próprio) — bloqueia |
 | 16 | `process_info` | h | `pid \| (1 << 63 se terminou)` | `BadHandle`, `InvalidArgs` |
 | 17 | `pci_enum` | dev, buf, cap | nº total de funções PCI (copia até `cap` `PciInfo` em `buf`) | `BadHandle`, `Denied` (sem `READ`), `BadAddress` |
-| 18 | `pci_cfg_read` | dev, bdf, offset (múltiplo de 4, ≤ 0xfc) | valor de 32 bits | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs` |
+| 18 | `pci_cfg_read` | dev, bdf, offset (múltiplo de 4). **≤ 0xfc** pelo mecanismo legado; **0x100..0xffc** exige ECAM (tabela `MCFG`) e é a configuração estendida do PCIe | valor de 32 bits | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs`, `NotSupported` (≥ 0x100 sem ECAM, ou ≥ 0x1000) |
 | 19 | `pci_cfg_write` | dev, bdf, offset, valor | 0 | `BadHandle`, `Denied` (sem `WRITE`), `InvalidArgs` |
 | 20 | `mmio_map` | dev, phys (alinhado a 4 KiB), len (≤ 16 MiB) | endereço virtual (região `0x6000_0000_0000`, sem cache) | `BadHandle`, `Denied` (sem `MAP`, ou faixa fora de um BAR MMIO enumerado), `InvalidArgs`, `NoMemory` |
 | 21 | `dma_alloc` | dev, out (`DmaBuffer`) | endereço virtual da página (4 KiB zerada, contígua, mapeada `RW`) | `BadHandle`, `Denied` (sem `MAP`), `NoMemory`, `BadAddress` |

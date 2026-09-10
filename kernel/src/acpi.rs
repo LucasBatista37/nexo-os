@@ -8,6 +8,8 @@ use nexo_sync::Once;
 /// Máximo de CPUs suportadas nesta versão.
 pub const MAX_CPUS: usize = 64;
 const MAX_IOAPICS: usize = 8;
+/// Faixas ECAM guardadas (um segmento basta em toda máquina que não seja um servidor grande).
+const MAX_MCFG: usize = 4;
 const MAX_OVERRIDES: usize = 24;
 
 /// Leitor de tabelas pelo physmap.
@@ -76,6 +78,10 @@ pub struct PlatformInfo {
     override_count: usize,
     /// HPET (se houver).
     pub hpet: Option<Hpet>,
+    /// Faixas ECAM anunciadas pela tabela `MCFG` (configuração estendida do PCIe).
+    pub mcfg: [Option<nexo_acpi::McfgEntry>; MAX_MCFG],
+    /// Quantas faixas ECAM foram lidas.
+    pub mcfg_count: usize,
     /// APIC ID da CPU de boot.
     pub bsp_apic_id: u32,
 }
@@ -122,6 +128,8 @@ pub fn init() {
         overrides: [IsaOverride::default(); MAX_OVERRIDES],
         override_count: 0,
         hpet: None,
+        mcfg: [None; MAX_MCFG],
+        mcfg_count: 0,
         bsp_apic_id,
     };
     let vendor = cpu::vendor();
@@ -151,6 +159,34 @@ pub fn init() {
             match find_table(&reader, &rsdp, b"APIC").and_then(|t| Madt::parse(&t)) {
                 Ok(madt) => fill_from_madt(&mut info, &madt),
                 Err(e) => kwarn!("acpi: MADT indisponivel ({e}); assumindo 1 CPU"),
+            }
+            match find_table(&reader, &rsdp, b"MCFG") {
+                Ok(t) => {
+                    let mut faixas = [nexo_acpi::McfgEntry {
+                        base: 0,
+                        segment: 0,
+                        bus_start: 0,
+                        bus_end: 0,
+                    }; MAX_MCFG];
+                    match nexo_acpi::parse_mcfg(&t, &mut faixas) {
+                        Ok(n) => {
+                            for (destino, faixa) in info.mcfg.iter_mut().zip(faixas.iter()).take(n)
+                            {
+                                kinfo!(
+                                    "acpi: MCFG segmento {} barramentos {}..={} em {:#x} (ECAM)",
+                                    faixa.segment,
+                                    faixa.bus_start,
+                                    faixa.bus_end,
+                                    faixa.base
+                                );
+                                *destino = Some(*faixa);
+                            }
+                            info.mcfg_count = n;
+                        }
+                        Err(e) => kwarn!("acpi: MCFG ilegivel ({e}); PCIe fica no acesso legado"),
+                    }
+                }
+                Err(e) => kdebug!("acpi: MCFG ausente ({e}); so configuracao legada"),
             }
             match find_table(&reader, &rsdp, b"HPET").and_then(|t| Hpet::parse(&t)) {
                 Ok(h) => {

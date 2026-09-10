@@ -15,11 +15,11 @@ Como ler: uma justificativa que não diga *por que a invariante vale* é uma dí
 justificativa. Revisar este arquivo a cada release é a forma barata de as encontrar.
 
 
-**474 usos de `unsafe`, 474 com justificativa registrada.**
+**476 usos de `unsafe`, 476 com justificativa registrada.**
 
 | Crate | Usos |
 | --- | ---: |
-| `nexo-kernel` | 144 |
+| `nexo-kernel` | 146 |
 | `nexo-arch-x86_64` | 126 |
 | `nexo-sys` | 56 |
 | `nexo-heap` | 30 |
@@ -56,11 +56,11 @@ justificativa. Revisar este arquivo a cada release é a forma barata de as encon
 
 Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_code)`.
 
-## `nexo-kernel` — 144 usos
+## `nexo-kernel` — 146 usos
 
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
-| `kernel/src/acpi.rs:24` | bloco | intervalo dentro do physmap; tabelas ACPI são somente leitura. |
+| `kernel/src/acpi.rs:26` | bloco | intervalo dentro do physmap; tabelas ACPI são somente leitura. |
 | `kernel/src/aslr.rs:17` | bloco | a instrução existe (bit 30 de CPUID.1:ECX conferido acima); só escreve em `v`. |
 | `kernel/src/boot.rs:69` | bloco | o loader gravou `memory_map_len` regiões nesse endereço, em páginas reservadas (BootInfo) que nunca são reutilizadas. |
 | `kernel/src/boot.rs:80` | bloco | páginas do tipo Initrd, reservadas e imutáveis. |
@@ -98,8 +98,9 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/mm/virt.rs:154` | bloco | tabela de páginas dentro do physmap; leitura de uma entrada alinhada. |
 | `kernel/src/panic.rs:21` | bloco | o detentor de qualquer lock de saída não voltará a executar. |
 | `kernel/src/panic.rs:93` | bloco | `rbp` está dentro de uma pilha mapeada e alinhado a 8. |
-| `kernel/src/pci.rs:17` | bloco | acesso serializado pelo lock. |
-| `kernel/src/pci.rs:24` | bloco | acesso serializado pelo lock. |
+| `kernel/src/pci.rs:20` | bloco | acesso serializado pelo lock. |
+| `kernel/src/pci.rs:27` | bloco | acesso serializado pelo lock. |
+| `kernel/src/pci.rs:284` | bloco | página mapeada por `ecam_init` como MMIO sem cache; leitura alinhada de 32 bits dentro da janela de 4 KiB daquela função. |
 | `kernel/src/process.rs:75` | bloco | ambas as tabelas estão no physmap; copia as 256 entradas da metade alta. |
 | `kernel/src/process.rs:95` | bloco | PML4 válida construída em `new`. |
 | `kernel/src/process.rs:174` | bloco | página mapeada e exclusiva do processo; `n` respeita o limite da página. |
@@ -144,18 +145,19 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/sched.rs:824` | bloco | lock detido. |
 | `kernel/src/sched.rs:837` | bloco | lock detido. |
 | `kernel/src/sched.rs:856` | bloco | lock detido. |
-| `kernel/src/selftest.rs:297` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
-| `kernel/src/selftest.rs:320` | bloco | quadro alocado, dentro do physmap. |
-| `kernel/src/selftest.rs:370` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
-| `kernel/src/selftest.rs:673` | bloco | o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC). |
-| `kernel/src/selftest.rs:677` | bloco | encerra o canal 0. |
-| `kernel/src/selftest.rs:1267` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
-| `kernel/src/selftest.rs:2962` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
-| `kernel/src/selftest.rs:4610` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4658` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4721` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4790` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5310` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
+| `kernel/src/selftest.rs:298` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
+| `kernel/src/selftest.rs:321` | bloco | quadro alocado, dentro do physmap. |
+| `kernel/src/selftest.rs:371` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
+| `kernel/src/selftest.rs:674` | bloco | o canal 0 do PIT esta livre (o tick do sistema vem do LAPIC). |
+| `kernel/src/selftest.rs:678` | bloco | encerra o canal 0. |
+| `kernel/src/selftest.rs:1222` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
+| `kernel/src/selftest.rs:1338` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
+| `kernel/src/selftest.rs:3033` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
+| `kernel/src/selftest.rs:4681` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4729` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4792` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4861` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5381` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
 | `kernel/src/stress.rs:142` | bloco | página recém-mapeada RW e exclusiva desta thread. |
 | `kernel/src/symbols.rs:20` | bloco | páginas do tipo KernelFile, reservadas e imutáveis. |
 | `kernel/src/sync.rs:53` | bloco | estavam habilitadas antes. |
@@ -187,13 +189,13 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/x86/smp.rs:110` | bloco | página 0x8000 reservada (primeiro MiB), acessível pelo physmap. |
 | `kernel/src/x86/syscall.rs:268` | bloco | FramebufferInfo é repr(C) com 40 bytes sem padding (8+8+4×6); lemos seus bytes. |
 | `kernel/src/x86/syscall.rs:635` | bloco | PciInfo é repr(C) sem padding interno relevante para leitura como bytes. |
-| `kernel/src/x86/syscall.rs:713` | bloco | quadro recem-alocado, visivel pelo physmap, ainda nao entregue ao usuario. |
-| `kernel/src/x86/syscall.rs:726` | bloco | DmaBuffer é repr(C) de inteiros. |
-| `kernel/src/x86/syscall.rs:755` | bloco | IrqInfo é repr(C) de inteiros. |
-| `kernel/src/x86/syscall.rs:978` | bloco | Event e repr(C) de 16 bytes sem padding invalido; got <= cap. |
-| `kernel/src/x86/syscall.rs:1075` | bloco | `lista` é um `Vec<ProcInfo>` (repr(C), sem padding indefinido) vivo aqui. |
-| `kernel/src/x86/syscall.rs:1232` | bloco | frame empilhado por `nexo_syscall_entry` na pilha de kernel desta thread. |
-| `kernel/src/x86/syscall.rs:1234` | bloco | estamos na pilha de kernel com gs configurado; a syscall pode bloquear. |
+| `kernel/src/x86/syscall.rs:718` | bloco | quadro recem-alocado, visivel pelo physmap, ainda nao entregue ao usuario. |
+| `kernel/src/x86/syscall.rs:731` | bloco | DmaBuffer é repr(C) de inteiros. |
+| `kernel/src/x86/syscall.rs:760` | bloco | IrqInfo é repr(C) de inteiros. |
+| `kernel/src/x86/syscall.rs:983` | bloco | Event e repr(C) de 16 bytes sem padding invalido; got <= cap. |
+| `kernel/src/x86/syscall.rs:1080` | bloco | `lista` é um `Vec<ProcInfo>` (repr(C), sem padding indefinido) vivo aqui. |
+| `kernel/src/x86/syscall.rs:1237` | bloco | frame empilhado por `nexo_syscall_entry` na pilha de kernel desta thread. |
+| `kernel/src/x86/syscall.rs:1239` | bloco | estamos na pilha de kernel com gs configurado; a syscall pode bloquear. |
 | `kernel/src/x86/traps.rs:35` | bloco | inicialização única em uma CPU; a tabela nunca mais é escrita. |
 | `kernel/src/x86/traps.rs:42` | bloco | todos os handlers apontam para stubs válidos gerados em assembly. |
 | `kernel/src/x86/traps.rs:56` | fn | # Safety `init` deve ter sido executado pela BSP. |
