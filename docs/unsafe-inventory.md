@@ -187,15 +187,15 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/x86/smp.rs:27` | bloco | primeira ativação nesta CPU. |
 | `kernel/src/x86/smp.rs:47` | bloco | IDT carregada e LAPIC configurado nesta CPU. |
 | `kernel/src/x86/smp.rs:110` | bloco | página 0x8000 reservada (primeiro MiB), acessível pelo physmap. |
-| `kernel/src/x86/syscall.rs:268` | bloco | FramebufferInfo é repr(C) com 40 bytes sem padding (8+8+4×6); lemos seus bytes. |
-| `kernel/src/x86/syscall.rs:635` | bloco | PciInfo é repr(C) sem padding interno relevante para leitura como bytes. |
-| `kernel/src/x86/syscall.rs:718` | bloco | quadro recem-alocado, visivel pelo physmap, ainda nao entregue ao usuario. |
-| `kernel/src/x86/syscall.rs:731` | bloco | DmaBuffer é repr(C) de inteiros. |
-| `kernel/src/x86/syscall.rs:760` | bloco | IrqInfo é repr(C) de inteiros. |
-| `kernel/src/x86/syscall.rs:983` | bloco | Event e repr(C) de 16 bytes sem padding invalido; got <= cap. |
-| `kernel/src/x86/syscall.rs:1080` | bloco | `lista` é um `Vec<ProcInfo>` (repr(C), sem padding indefinido) vivo aqui. |
-| `kernel/src/x86/syscall.rs:1237` | bloco | frame empilhado por `nexo_syscall_entry` na pilha de kernel desta thread. |
-| `kernel/src/x86/syscall.rs:1239` | bloco | estamos na pilha de kernel com gs configurado; a syscall pode bloquear. |
+| `kernel/src/x86/syscall.rs:316` | bloco | FramebufferInfo é repr(C) com 40 bytes sem padding (8+8+4×6); lemos seus bytes. |
+| `kernel/src/x86/syscall.rs:688` | bloco | PciInfo é repr(C) sem padding interno relevante para leitura como bytes. |
+| `kernel/src/x86/syscall.rs:771` | bloco | quadro recem-alocado, visivel pelo physmap, ainda nao entregue ao usuario. |
+| `kernel/src/x86/syscall.rs:784` | bloco | DmaBuffer é repr(C) de inteiros. |
+| `kernel/src/x86/syscall.rs:813` | bloco | IrqInfo é repr(C) de inteiros. |
+| `kernel/src/x86/syscall.rs:1036` | bloco | Event e repr(C) de 16 bytes sem padding invalido; got <= cap. |
+| `kernel/src/x86/syscall.rs:1133` | bloco | `lista` é um `Vec<ProcInfo>` (repr(C), sem padding indefinido) vivo aqui. |
+| `kernel/src/x86/syscall.rs:1290` | bloco | frame empilhado por `nexo_syscall_entry` na pilha de kernel desta thread. |
+| `kernel/src/x86/syscall.rs:1292` | bloco | estamos na pilha de kernel com gs configurado; a syscall pode bloquear. |
 | `kernel/src/x86/traps.rs:35` | bloco | inicialização única em uma CPU; a tabela nunca mais é escrita. |
 | `kernel/src/x86/traps.rs:42` | bloco | todos os handlers apontam para stubs válidos gerados em assembly. |
 | `kernel/src/x86/traps.rs:56` | fn | # Safety `init` deve ter sido executado pela BSP. |
@@ -455,15 +455,15 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/utest/src/main.rs:3059` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
 | `services/utest/src/main.rs:4531` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
 | `services/utest/src/main.rs:4533` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
-| `services/utest/src/main.rs:5789` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
-| `services/utest/src/main.rs:6048` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:6060` | bloco | leitura da mesma pagina mapeada. |
-| `services/utest/src/main.rs:8658` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9033` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9048` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
-| `services/utest/src/main.rs:9065` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:9092` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
-| `services/utest/src/main.rs:9100` | bloco | mesma pagina compartilhada. |
+| `services/utest/src/main.rs:5798` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
+| `services/utest/src/main.rs:6057` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:6069` | bloco | leitura da mesma pagina mapeada. |
+| `services/utest/src/main.rs:8667` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9042` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9057` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
+| `services/utest/src/main.rs:9074` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:9101` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
+| `services/utest/src/main.rs:9109` | bloco | mesma pagina compartilhada. |
 
 ## `nexo-loader` — 15 usos
 

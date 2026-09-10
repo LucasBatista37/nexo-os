@@ -30,6 +30,39 @@ pub fn last_user_log() -> String {
     LAST_LOG.lock().clone()
 }
 
+/// Valida `[ptr, ptr+len)` no espaço do usuário atual (faixa, `USER` e presença por página).
+fn check_user_readable(ptr: u64, len: u64) -> Result<(), Status> {
+    if len == 0 {
+        return Ok(());
+    }
+    let end = ptr.checked_add(len).ok_or(Status::BadAddress)?;
+    if end > USER_ADDRESS_LIMIT {
+        return Err(Status::BadAddress);
+    }
+    let mut page = ptr & !(PAGE_SIZE - 1);
+    while page < end {
+        match crate::mm::virt::translate(VirtAddr::new(page)) {
+            Some(t)
+                if t.flags.contains(PageFlags::USER) && t.flags.contains(PageFlags::PRESENT) => {}
+            _ => return Err(Status::BadAddress),
+        }
+        page += PAGE_SIZE;
+    }
+    Ok(())
+}
+
+/// Copia do espaço do usuário para um buffer **do chamador**, sem alocar.
+///
+/// É o caminho das mensagens pequenas: o `Vec` de [`copy_from_user`] custava mais que as duas
+/// syscalls do envio (linha de base do bloco 129).
+pub fn copy_from_user_into(ptr: u64, destino: &mut [u8]) -> Result<(), Status> {
+    check_user_readable(ptr, destino.len() as u64)?;
+    if !super::usercopy::copiar(destino.as_mut_ptr(), ptr as *const u8, destino.len()) {
+        return Err(Status::BadAddress);
+    }
+    Ok(())
+}
+
 /// Copia `[ptr, ptr+len)` do espaço do usuário atual, validando faixa e mapeamento.
 pub fn copy_from_user(ptr: u64, len: u64) -> Result<Vec<u8>, Status> {
     if len == 0 {
@@ -109,14 +142,29 @@ fn sys_channel_send(p: &process::Process, f: &TrapFrame) -> (Status, u64) {
     let Object::Channel(end) = &handle.object else {
         return (Status::InvalidArgs, 0);
     };
-    let data = match copy_from_user(ptr, len) {
-        Ok(d) => d,
-        Err(e) => return (e, 0),
+    // Mensagem pequena (a esmagadora maioria: pedidos de bloco, eventos de entrada, respostas
+    // de status) não toca no heap — nem para os dados, nem para os handles.
+    let mut inline = [0u8; crate::ipc::PAYLOAD_INLINE];
+    let data: crate::ipc::Payload = if (len as usize) <= crate::ipc::PAYLOAD_INLINE {
+        let n = len as usize;
+        if let Err(e) = copy_from_user_into(ptr, &mut inline[..n]) {
+            return (e, 0);
+        }
+        crate::ipc::Payload::Inline {
+            bytes: inline,
+            len: n,
+        }
+    } else {
+        match copy_from_user(ptr, len) {
+            Ok(d) => d.into(),
+            Err(e) => return (e, 0),
+        }
     };
-    let raw_handles = match copy_from_user(hptr, (nh * 4) as u64) {
-        Ok(d) => d,
-        Err(e) => return (e, 0),
-    };
+    let mut hbuf = [0u8; MSG_HANDLES_MAX * 4];
+    if let Err(e) = copy_from_user_into(hptr, &mut hbuf[..nh * 4]) {
+        return (e, 0);
+    }
+    let raw_handles = &hbuf[..nh * 4];
     let ids: Vec<u32> = raw_handles
         .as_chunks::<4>()
         .0
@@ -475,22 +523,27 @@ fn sys_channel_recv(p: &process::Process, f: &TrapFrame, nonblock: bool) -> (Sta
     if let Err(e) = copy_to_user(buf, &msg.data) {
         return (e, 0);
     }
-    let mut ids = Vec::with_capacity(msg.handles.len() * 4);
+    // No máximo MSG_HANDLES_MAX handles por mensagem: cabe na pilha, não precisa de heap.
+    let mut ids_buf = [0u8; MSG_HANDLES_MAX * 4];
+    let mut ids_len = 0usize;
     {
         let mut table = p.handles.lock();
         for hh in msg.handles {
             match table.insert(hh) {
-                Ok(i) => ids.extend_from_slice(&i.to_le_bytes()),
+                Ok(i) => {
+                    ids_buf[ids_len..ids_len + 4].copy_from_slice(&i.to_le_bytes());
+                    ids_len += 4;
+                }
                 Err(e) => return (e, 0),
             }
         }
     }
-    if let Err(e) = copy_to_user(hbuf, &ids) {
+    if let Err(e) = copy_to_user(hbuf, &ids_buf[..ids_len]) {
         return (e, 0);
     }
     (
         Status::Ok,
-        (msg.data.len() as u64) | ((ids.len() as u64 / 4) << 32),
+        (msg.data.len() as u64) | ((ids_len as u64 / 4) << 32),
     )
 }
 

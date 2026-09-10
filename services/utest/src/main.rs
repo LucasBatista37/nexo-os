@@ -5313,11 +5313,20 @@ fn bench() -> ! {
     if syscall_ns == 0 || ipc_ns == 0 || rtt_ns == 0 {
         nexo_sys::exit(586); // relogio parado: a medicao nao vale nada
     }
+    // Razoes contra a syscall medida NA MESMA execucao. Os numeros absolutos oscilam com a
+    // carga do host (o mesmo binario ja mediu 322 e 430 ns na mesma tarde); a razao nao — e e
+    // ela que permite comparar duas execucoes honestamente.
+    let ipc_x10 = ipc_ns * 10 / syscall_ns;
+    let rtt_x10 = rtt_ns * 10 / syscall_ns;
     nexo_rt::log!(
-        "[BENCH] syscall {} ns · ipc_sem_troca {} ns · ipc_ida_volta {} ns ({} amostras/{} voltas)",
+        "[BENCH] syscall {} ns · ipc_sem_troca {} ns ({}.{}x) · ipc_ida_volta {} ns ({}.{}x) ({} amostras/{} voltas)",
         syscall_ns,
         ipc_ns,
+        ipc_x10 / 10,
+        ipc_x10 % 10,
         rtt_ns,
+        rtt_x10 / 10,
+        rtt_x10 % 10,
         BENCH_N,
         BENCH_IPC
     );

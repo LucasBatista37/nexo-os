@@ -2543,7 +2543,7 @@ pub fn net_test_mode() {
     let argv = alloc::format!("fetch\010.0.2.2\0{http_port}\0/nexo.txt\0");
     argv_tx
         .send(crate::ipc::Message {
-            data: argv.into_bytes(),
+            data: argv.into_bytes().into(),
             handles: alloc::vec![],
         })
         .expect("argv do fetch");
@@ -3640,14 +3640,14 @@ fn test_ipc_handoff() -> TestResult {
             return Err(String::from("objeto transferido nao e canal"));
         };
         vend.send(Message {
-            data: alloc::vec![b'v', b'i', b'v', b'o'],
+            data: alloc::vec![b'v', b'i', b'v', b'o'].into(),
             handles: alloc::vec![],
         })
         .map_err(|e| alloc::format!("ponta transferida morta na iteracao {i}: {e:?}"))?;
         let eco = ca
             .try_recv()
             .map_err(|e| alloc::format!("eco nao chegou na iteracao {i}: {e:?}"))?;
-        check!(eco.data == b"vivo", "eco divergente (iteracao {i})");
+        check!(&*eco.data == b"vivo", "eco divergente (iteracao {i})");
     }
     sched::reap();
     let ends = crate::ipc::live_channel_ends();
@@ -3999,7 +3999,7 @@ fn run_c_util_codes(bin: &str, argv: &[u8], stdin: Option<&[u8]>, ok: &[i64]) ->
     // A mensagem de argv precisa estar na fila ANTES do spawn: o crt0 le uma unica vez.
     argv_tx
         .send(Message {
-            data: argv.to_vec(),
+            data: argv.to_vec().into(),
             handles: alloc::vec![],
         })
         .map_err(|e| alloc::format!("envio do argv falhou: {e:?}"))?;
@@ -4019,7 +4019,7 @@ fn run_c_util_codes(bin: &str, argv: &[u8], stdin: Option<&[u8]>, ok: &[i64]) ->
         for parte in [&dados[..meio], &dados[meio..]] {
             if !parte.is_empty() {
                 tx.send(Message {
-                    data: parte.to_vec(),
+                    data: parte.to_vec().into(),
                     handles: alloc::vec![],
                 })
                 .map_err(|e| alloc::format!("envio do stdin falhou: {e:?}"))?;
@@ -4228,7 +4228,7 @@ fn test_user_pipe() -> TestResult {
     let (pipe_tx, pipe_rx) = ChannelEnd::create_pair();
     let manda = |end: &alloc::sync::Arc<ChannelEnd>, dados: &[u8]| {
         end.send(Message {
-            data: dados.to_vec(),
+            data: dados.to_vec().into(),
             handles: alloc::vec![],
         })
         .map_err(|e| alloc::format!("envio falhou: {e:?}"))

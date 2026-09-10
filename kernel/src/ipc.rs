@@ -286,9 +286,63 @@ impl HandleTable {
 /// Mensagem em trânsito.
 pub struct Message {
     /// Bytes.
-    pub data: Vec<u8>,
+    pub data: Payload,
     /// Handles transferidos.
     pub handles: Vec<Handle>,
+}
+
+/// Quantos bytes cabem numa mensagem sem tocar no heap.
+///
+/// A linha de base do bloco 129 mostrou onde estava o custo do IPC: das ~4,3 µs de um
+/// `send`+`recv` sem escalonamento, as duas syscalls explicavam ~0,6 µs — o resto era a fila e
+/// a **alocação**. Toda mensagem carregava um `Vec`, e mensagens do sistema são quase todas
+/// pequenas (um pedido de bloco, um evento de entrada, uma resposta de status).
+pub const PAYLOAD_INLINE: usize = 128;
+
+/// Bytes de uma mensagem: dentro da própria mensagem quando cabem, no heap quando não cabem.
+pub enum Payload {
+    /// Até [`PAYLOAD_INLINE`] bytes, sem alocação.
+    Inline {
+        /// Espaço fixo; só os primeiros `len` bytes valem.
+        bytes: [u8; PAYLOAD_INLINE],
+        /// Quantos bytes valem.
+        len: usize,
+    },
+    /// Mensagens grandes continuam no heap.
+    Heap(Vec<u8>),
+}
+
+impl Payload {
+    /// Copia `dados`, escolhendo sozinha entre embutir e alocar.
+    pub fn from_slice(dados: &[u8]) -> Payload {
+        if dados.len() <= PAYLOAD_INLINE {
+            let mut bytes = [0u8; PAYLOAD_INLINE];
+            bytes[..dados.len()].copy_from_slice(dados);
+            Payload::Inline {
+                bytes,
+                len: dados.len(),
+            }
+        } else {
+            Payload::Heap(dados.to_vec())
+        }
+    }
+}
+
+impl From<Vec<u8>> for Payload {
+    /// Assume a posse do vetor sem copiar (o caminho das mensagens grandes).
+    fn from(v: Vec<u8>) -> Payload {
+        Payload::Heap(v)
+    }
+}
+
+impl core::ops::Deref for Payload {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            Payload::Inline { bytes, len } => &bytes[..*len],
+            Payload::Heap(v) => v,
+        }
+    }
 }
 
 struct ChannelInner {

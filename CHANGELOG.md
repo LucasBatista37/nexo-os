@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Alterado (Fase 2, bloco 134 — mensagens pequenas sem alocação)
+
+- A linha de base do bloco 129 mostrou onde estava o custo do IPC: das ~4,3 µs de um `send`+`recv` sem escalonamento, as duas syscalls explicavam ~0,6 µs — o resto era a fila e a **alocação**. Toda mensagem carregava um `Vec`, e mensagens do sistema são quase todas pequenas: um pedido de bloco, um evento de entrada, uma resposta de status.
+- Agora até **128 bytes** viajam dentro da própria mensagem (`ipc::Payload::Inline`), e os handles idem — no máximo oito por mensagem, cabem na pilha. O aviso de interrupção, que alocava um `Vec` de **um byte** dentro do próprio handler, deixou de alocar. O caminho de envio ganhou `copy_from_user_into`, que copia do usuário para um buffer do chamador sem alocar; mensagens maiores continuam no heap, sem cópia extra.
+- **Medido, não presumido**: o custo relativo do IPC sem escalonamento caiu de **12,7–12,9× a syscall para 9,3–10,6×**. Foi o benchmark do bloco anterior que permitiu verificar — e que também mostrou por que os números absolutos não servem: o mesmo binário mediu a syscall nula em 322 ns e em 430 ns na mesma tarde, conforme a carga do host.
+- Por isso o marcador `[BENCH]` passou a trazer a **razão** de cada medida contra a syscall da mesma execução. É a razão que se compara entre execuções; o valor absoluto dá só a ordem de grandeza. `docs/bench.md` explica isso antes de mostrar os números.
+
 ### Adicionado e corrigido (Fase 3, bloco 133 — ECAM/MCFG, a configuração estendida do PCIe)
 
 - O sistema só alcançava os **256** bytes de configuração de cada função PCI, pelo mecanismo legado das portas `0xCF8/0xCFC`. O PCIe tem **4096**, e é nos outros 3840 que vivem as capabilities estendidas (AER, SR-IOV, ATS) de que hardware real precisa — nada do que corre em QEMU precisou delas até hoje, o que é exatamente o motivo de a lacuna ter passado despercebida até a auditoria do bloco 131 lhe dar um nome.

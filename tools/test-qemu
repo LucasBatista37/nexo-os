@@ -86,7 +86,7 @@ SCENARIOS = {
             # A linha de base tem de continuar a ser medida: um benchmark que deixa de
             # correr em silencio nao e linha de base nenhuma (docs/bench.md).
             r"\[BENCH\] troca_de_contexto \d+ ns",
-            r"\[BENCH\] syscall \d+ ns · ipc_sem_troca \d+ ns · ipc_ida_volta \d+ ns",
+            r"\[BENCH\] syscall \d+ ns · ipc_sem_troca \d+ ns \(\d+\.\dx\) · ipc_ida_volta \d+ ns \(\d+\.\dx\)",
             r"pci: \d+ funcao\(oes\):",
             r"iommu: (ausente|tabela DMAR presente).*DMA de drivers IRRESTRITO \(caminho inseguro",
             r"pci:   00:\d\d\.\d 1af4:10(01|42) classe 01\.00\.00 .*virtio",

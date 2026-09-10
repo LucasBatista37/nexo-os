@@ -77,7 +77,9 @@ pub fn on_interrupt(vector: u8) {
             }
             !matches!(
                 end.send(crate::ipc::Message {
-                    data: alloc::vec![1u8],
+                    // Um byte por disparo, e este caminho corre dentro do handler de
+                    // interrupção: alocar aqui era o pior lugar possível para o fazer.
+                    data: crate::ipc::Payload::from_slice(&[1u8]),
                     handles: Vec::new(),
                 }),
                 Err(nexo_syscall_abi::Status::PeerClosed)
