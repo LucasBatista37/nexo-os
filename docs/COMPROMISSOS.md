@@ -72,6 +72,16 @@ Campos desconhecidos são ignorados; campos ausentes desligam a verificação co
 - cuidado: nexofs é forbid(unsafe_code), então a origem é externa ao serviço — não procurar o bug dentro dele
 - ref: docs/incidents/2026-09-09-fs-ponteiro-nulo.md
 
+## painel-mensal
+
+- estado: aberto
+- o-que: preencher o painel mensal do Plano §10 (docs/progress/painel-mensal.md), cadência de 4 semanas
+- inicio: 2026-08-29
+- vence: 2026-09-26
+- acao: medir de novo tudo o que o painel pede (testes, tempo de boot, RAM ociosa, riscos, decisões pendentes) e acrescentar um bloco novo, sem apagar o anterior — a série é que mostra a tendência
+- cuidado: o conteúdo envelhece rápido (a medição de agosto ainda diz "40 testes de kernel"; hoje são 145) e ninguém repara, porque nada falha quando um painel fica velho
+- ref: PLANO_MESTRE_SISTEMA_OPERACIONAL.md §10; docs/progress/painel-mensal.md
+
 ## revisao-trimestral
 
 - estado: aberto

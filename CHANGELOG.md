@@ -336,6 +336,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Documentação (bloco 142 — relatório dos blocos 120–141)
+
+- `docs/progress/2026-09-10-blocos-120-141.md`: vinte e dois blocos consolidados num relatório — os três bugs sérios encontrados (pânico de kernel ao alcance de qualquer processo, DoS de memória por threads sem teto, truncamento silencioso na ABI do PCI), a retratação do número de desempenho com a tabela do A/B intercalado, as quatro verificações que passaram a falhar sozinhas, e a auditoria que fez o roadmap parar de mentir para menos.
+- O relatório diz também o que **não** se sabe: o incidente do `fs` continua sem causa, com a hipótese medida e refutada registrada — porque uma hipótese descartada com números poupa a próxima pessoa de a levantar outra vez.
+- **O painel mensal entrou no livro de prazos.** Ele vence a cada quatro semanas desde 2026-08-29 — ou seja, 2026-09-26 — e nada o rastreava; o seu conteúdo ainda diz "40 testes de kernel" quando são 145. Um painel velho não faz nada falhar, e é exatamente por isso que envelhece.
+
 ### Adicionado (Fase 5, bloco 141 — preferências que sobrevivem ao compositor)
 
 - Movimento reduzido, escala, tema e idioma viviam só na memória do compositor e morriam com ele. `nexo.wm` **v1.23** ganhou `prefs_save` e `prefs_load`, e as quatro passam a viver num arquivo.
