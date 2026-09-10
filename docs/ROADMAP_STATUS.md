@@ -1,8 +1,8 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `f90602e`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-10 (commit `ce65c89`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
-**Total de itens do plano:** 535 — ✅ 221 · 🟡 109 · ⬜ 205 · ⛔ 0 → **51% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
+**Total de itens do plano:** 535 — ✅ 221 · 🟡 110 · ⬜ 204 · ⛔ 0 → **52% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
 ## 1. Visão por fase
 
@@ -348,7 +348,7 @@ Gate: ⬜ não iniciado.
 | 6.3 Armazenamento | 4 | 5 | 5 | 46% |
 | 6.4 Rede | 2 | 7 | 5 | 39% |
 | 6.5 Desktop e experiência | 5 | 8 | 3 | 56% |
-| 6.6 Aplicativos e SDK | 10 | 6 | 2 | 72% |
+| 6.6 Aplicativos e SDK | 10 | 7 | 1 | 75% |
 | 6.7 Segurança e privacidade | 3 | 4 | 10 | 29% |
 | 6.8 Qualidade e confiabilidade | 6 | 8 | 2 | 62% |
 | 6.9 Acessibilidade e internacionalização | 0 | 7 | 7 | 25% |
@@ -463,7 +463,7 @@ Gate: ⬜ não iniciado.
 | ✅ | runtime e biblioteca padrão | `nexo-rt` (formatação sem alocação, `log!`, panic handler) para Rust e a **nexo-libc** para C (string, stdio com `printf` próprio, stdlib, fd, dirent, `sys/stat.h`, `sys/socket.h`, `crt0` com a convenção de argv do Nexo) |
 | 🟡 | CLI de build, run, test, debug e package | `make` cobre build/run/test; `tools/nexo-new` gera um aplicativo funcional; `tools/nexo-pack` empacota `.npk`; `tools/nexo-debug` liga lldb/gdb com símbolos. Falta uma CLI única (`nexo build|run|test|package`) em vez de alvos e scripts separados |
 | ✅ | templates e exemplos | `tools/nexo-new` cria um aplicativo com janela funcional seguindo o contrato de apps, e o repositório traz exemplos reais (`calc`, `greeter`, `shellui`, exemplos em C) |
-| ⬜ | documentação gerada | não há publicação de `cargo doc`/rustdoc; a documentação é escrita à mão em `docs/` |
+| 🟡 | documentação gerada | `make docs` gera a documentação de API navegável de todos os crates, e o **`make lint` constrói-a com `RUSTDOCFLAGS=-D warnings`**: um link quebrado na documentação pública reprova a árvore, como qualquer outro aviso. Ao ligar o gate havia **sete** links quebrados, seis deles pela mesma causa — um `///` na declaração do módulo somado ao `//!` do próprio arquivo faz o rustdoc resolver todos os links no escopo errado. Pende a **publicação** (hospedar o resultado), que só faz sentido com o SDK publicado |
 | ✅ | pacotes e manifests | formato `NEXOPKG1` (`libraries/pkg`) com manifesto, validação completa e instalação transacional (`libraries/inst`), exercitado no NexoFS real |
 | ✅ | capabilities/portals | o portal de arquivos entrega **apenas o conteúdo escolhido** pelo usuário (nunca o fs, nunca os outros nomes), o lançador concede por tempo e revoga fechando o proxy da sessão, e as APIs mediadas (clipboard, arrastar-e-soltar, notificações) exigem posse da entrada |
 | 🟡 | repositório e atualização | repositório local (`/repo/<nome>.npk`) e por rede (o guest baixa por HTTP, grava e instala pelo caminho oficial), com índice gerado e conferido (`tools/nexo-repo`), descoberta de versão nova e atualização A/B do sistema com reversão. Pende a **assinatura**, que depende da decisão de criptografia |

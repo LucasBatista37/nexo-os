@@ -336,6 +336,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado e corrigido (Fase 6, bloco 136 — documentação de API gerada, com gate)
+
+- `make docs` gera a documentação navegável de todos os crates, e o **`make lint` constrói-a com `RUSTDOCFLAGS=-D warnings`**: um link quebrado na documentação pública passa a reprovar a árvore, como qualquer outro aviso. Verificado a reprovar: um link para um item inexistente derruba o lint.
+- Ao ligar o gate havia **sete** links quebrados na documentação pública. Seis eram a mesma causa, e vale saber: um `///` na declaração do módulo (`/// ... pub mod tcp;`) somado ao `//!` dentro do próprio arquivo faz o rustdoc resolver **todos** os links do módulo no escopo do arquivo que o declara — e os que apontam para itens de dentro deixam de resolver. A correção foi tirar a documentação duplicada da declaração, que além disso não dizia nada que o módulo já não dissesse melhor.
+- O sétimo era documentação pública a apontar para um item **privado** (`AllocHeader` no `nexo-heap`) — um link que o leitor da API não pode seguir. Reescrito para mencionar o cabeçalho sem prometer uma página que não existe.
+
 ### Adicionado e corrigido (Fase 1, bloco 135 — afinidade de thread de usuário, e a retratação de um número)
 
 - **`thread_set_affinity` (syscall 47, aditiva)**: uma thread de usuário prende-se a um conjunto de CPUs por máscara, ou solta-se com `0`. Restringe **só quem chama** — um processo limita-se a si mesmo, nunca a outro. Serve à localidade (um driver junto da CPU que recebe a sua interrupção) e à medição. `debug_info 10` diz em que CPU a thread está neste instante; o auto-teste `user_affinity` (142º) prende-se a cada uma das 4 CPUs e confirma 50 vezes em cada, recusa uma máscara sem CPU online e solta-se no fim.

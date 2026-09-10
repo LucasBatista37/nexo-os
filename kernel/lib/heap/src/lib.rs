@@ -1,7 +1,7 @@
 //! Heap do kernel: lista de blocos livres ordenada por endereço, first-fit,
 //! coalescência na liberação e cabeçalho por alocação.
 //!
-//! Cada alocação recebe um [`AllocHeader`] imediatamente antes do ponteiro
+//! Cada alocação recebe um cabeçalho interno (`AllocHeader`, privado) imediatamente antes do ponteiro
 //! devolvido, registrando o bloco real consumido. Isso permite alinhamentos
 //! arbitrários sem perder memória e detecta *double free* com um marcador.
 //!

@@ -655,13 +655,13 @@ pub fn tcp_parse(frame: &[u8], from_ip: Ipv4Addr, dst_port: u16) -> Option<TcpSe
     })
 }
 
-/// Máquina de estados TCP do cliente (testável no host; ver `docs/spec/tcp-states.md`).
+// A documentação do módulo vive no próprio arquivo (`//!`). Um `///` aqui em cima faria o
+// rustdoc resolver TODOS os links do módulo no escopo deste arquivo, e os que apontam para
+// itens de lá dentro passariam a não resolver — foi o que aconteceu até o bloco 136.
 pub mod tcp;
 
-/// IPv6 mínimo: cabeçalho, ICMPv6, NDP (ver `libraries/net/src/ipv6.rs`).
 pub mod ipv6;
 
-/// Política de rede por perfil — firewall do `netd` (ver `libraries/net/src/firewall.rs`).
 pub mod firewall;
 
 #[cfg(test)]

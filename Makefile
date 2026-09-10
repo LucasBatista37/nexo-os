@@ -5,8 +5,9 @@
 #   make ci         -> lint + test + verificação de reprodutibilidade
 #   make prazos     -> compromissos de longa duração (docs/COMPROMISSOS.md)
 #   make unsafe-inventory -> regenera docs/unsafe-inventory.md da árvore
+#   make docs       -> documentação de API navegável em target/doc
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap prazos unsafe-inventory idl idl-check toolchain
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap prazos unsafe-inventory docs idl idl-check toolchain
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 # Margem +900s +1% da duracao: o relogio do guest (TCG) atrasa em relacao a parede sob
@@ -49,6 +50,7 @@ lint:
 	cd services && cargo clippy --workspace --release -- -D warnings
 	tools/nexo-unsafe-audit --check
 	tools/nexo-prazos --auto-teste
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --quiet
 
 fmt:
 	cargo fmt --all
@@ -94,6 +96,13 @@ idl-check: idl
 
 roadmap:
 	tools/roadmap-status
+
+# Documentacao de API navegavel (target/doc). O `make lint` ja constroi as docs com
+# RUSTDOCFLAGS=-D warnings: um link quebrado na documentacao publica reprova a arvore,
+# como qualquer outro aviso. Sete estavam quebrados quando o gate foi ligado.
+docs:
+	cargo doc --no-deps --workspace
+	@echo "[nexo] abra target/doc/nexo_kernel/index.html"
 
 # Inventario de `unsafe` (docs/unsafe-inventory.md) gerado da propria arvore: cada uso e a
 # invariante que o autor afirmou. `make lint` roda --check e falha se o arquivo defasar —
