@@ -3975,7 +3975,7 @@ fn test_user_c_fs() -> TestResult {
 }
 
 /// Corpo comum dos utilitarios POSIX portados (convencao de argv do Nexo): sobe blockdev+fs,
-/// pre-envia UMA mensagem com os argumentos separados por `\0` (argv[0] incluso) no canal que
+/// pre-envia UMA mensagem com os argumentos separados por `\0` (o `argv[0]` incluso) no canal que
 /// vira o handle 1 — o crt0 da nexo-libc le uma unica vez e monta `main(argc, argv)` — e
 /// espera os tres processos sairem 0, conferindo vazamentos de canais e quadros.
 /// Com `stdin`, um terceiro canal vira o handle 2: os bytes vao em DOIS pedacos (prova o

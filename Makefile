@@ -51,6 +51,10 @@ lint:
 	tools/nexo-unsafe-audit --check
 	tools/nexo-prazos --auto-teste
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --quiet
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --lib --target x86_64-unknown-none --quiet
+	cd kernel && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --quiet
+	cd boot/loader && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --quiet
+	cd services && RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --quiet
 
 fmt:
 	cargo fmt --all
@@ -99,7 +103,10 @@ roadmap:
 
 # Documentacao de API navegavel (target/doc). O `make lint` ja constroi as docs com
 # RUSTDOCFLAGS=-D warnings: um link quebrado na documentacao publica reprova a arvore,
-# como qualquer outro aviso. Sete estavam quebrados quando o gate foi ligado.
+# como qualquer outro aviso. Sete estavam quebrados quando o gate foi ligado — e mais
+# tres so apareceram no alvo x86_64-unknown-none, porque vivem em codigo que o host
+# aarch64 compila fora. Por isso o lint documenta TAMBEM esse alvo: o gate tem de ver
+# o mesmo que o CI ve, senao o CI vira o gate — e vermelho.
 docs:
 	cargo doc --no-deps --workspace
 	@echo "[nexo] abra target/doc/nexo_kernel/index.html"

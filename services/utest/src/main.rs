@@ -4,7 +4,7 @@
 //! 2 = chama uma syscall inexistente e sai com o status recebido;
 //! 3 = executa instrução privilegiada (deve morrer por #GP);
 //! 4 = escreve na própria `.rodata` (deve morrer por proteção de escrita);
-//! 5 = servidor de IPC (handle 0 = canal): responde "pong:<msg>", recebe um
+//! 5 = servidor de IPC (handle 0 = canal): responde "pong:`<msg>`", recebe um
 //!     canal transferido e escreve "hi" nele, sai quando o par fecha;
 //! 6 = cliente de IPC (handle 0 = canal): ping/pong, transfere um canal,
 //!     testa direitos reduzidos e handles inválidos;
@@ -261,7 +261,7 @@ fn normal() -> ! {
     nexo_sys::exit(0)
 }
 
-/// Escreve "init: ok pid=<n> syscalls=<m>" sem alocar.
+/// Escreve "init: ok pid=`<n>` syscalls=`<m>`" sem alocar.
 fn fmt_pid(buf: &mut [u8; 48], pid: u64) -> &str {
     let prefix = b"utest: ok pid=";
     let mut n = 0;
@@ -997,7 +997,7 @@ fn term_driver() -> ! {
 
 /// Modo 53: visualizador de imagens e documentos. Escreve um PPM P6 com quadrantes coloridos
 /// no NexoFS real (idempotente entre boots), entrega ao visor uma sessao do compositor e o
-/// canal do fs com "abre <caminho>", confere os quatro quadrantes na saida composta; depois
+/// canal do fs com "abre `<caminho>`", confere os quatro quadrantes na saida composta; depois
 /// escreve um .txt, sobe um SEGUNDO visor (spawn do proprio driver, com o fs duplicado) e
 /// confere os glifos do documento de texto por pixel.
 fn visor_driver() -> ! {
@@ -2185,7 +2185,7 @@ fn update_apply_driver() -> ! {
 /// (/cfg, /lixo aninhado), espelha /home no disco de backup ("quando possivel" — cinto e
 /// suspensorio), pede ao `reset` para limpar o volume preservando /home, e confere: o que era
 /// do usuario esta intacto, o resto sumiu. Handles: 0 = backup, 1 = reset, 2 = fs principal.
-/// Modo 70: AGENDAMENTO do backup. "agenda <s> <dir>" retem a capacidade do fs pela duracao do
+/// Modo 70: AGENDAMENTO do backup. "agenda `<s>` `<dir>`" retem a capacidade do fs pela duracao do
 /// contrato (nao por pedido) e o servico espelha sozinho a cada intervalo; "cancela" devolve o
 /// fs com a contagem de execucoes. Prova: grava v1, agenda a cada 1 s, dorme ~2,5 s, cancela
 /// (>= 2 execucoes), provoca um desastre local e restaura do espelho — o conteudo v1 volta.
@@ -9110,7 +9110,7 @@ fn wm_commit(ch: nexo_sys::Handle, id: u32) {
     }
 }
 
-/// Preenche uma superficie WxH (bytes Rgbx8888 = [r,g,b,0]) com uma cor solida.
+/// Preenche uma superficie WxH (bytes Rgbx8888 = `[r,g,b,0]`) com uma cor solida.
 fn wm_fill(base: u64, w: i32, h: i32, r: u8, g: u8, b: u8) {
     let px = (w * h) as usize;
     for i in 0..px {

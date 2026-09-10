@@ -4,10 +4,10 @@
 //! pai)** e listagens grandes rolam por **páginas** (linha 5 = "+N" avança; "<<" volta à
 //! primeira); nomes maiores que a janela mostram `~` na última coluna (o caminho completo vai
 //! inteiro nas mensagens). Clique num arquivo pede ao orquestrador que o abra
-//! ("abrir <caminho>") — o gerenciador não abre nada sozinho: quem decide o app é quem tem as
+//! ("abrir `<caminho>`") — o gerenciador não abre nada sozinho: quem decide o app é quem tem as
 //! capacidades (o shell).
-//! Handle 0 = canal do orquestrador: "sess", depois "abre <dir>" + canal `nexo.fs`; responde
-//! "pronto"; navegação emite "pasta <dir>"; abertura emite "abrir <caminho>". Pipe fechado = sair.
+//! Handle 0 = canal do orquestrador: "sess", depois "abre `<dir>`" + canal `nexo.fs`; responde
+//! "pronto"; navegação emite "pasta `<dir>`"; abertura emite "abrir `<caminho>`". Pipe fechado = sair.
 #![no_std]
 #![no_main]
 

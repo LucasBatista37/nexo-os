@@ -2,7 +2,7 @@
 //!
 //! O kernel reserva vetores em `USER_VECTOR_BASE..`, conta disparos e acorda
 //! quem espera em [`wait`]; o driver programa o dispositivo com o endereço e
-//! os dados MSI devolvidos por [`alloc`].
+//! os dados MSI devolvidos por [`alloc()`].
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;

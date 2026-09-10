@@ -3,7 +3,7 @@
 //! janela — mostra a lista e espera o **usuário** clicar; só então lê o arquivo e devolve ao app
 //! **apenas o conteúdo**. O app nunca vê o sistema de arquivos, nem o nome dos outros arquivos:
 //! a escolha do usuário é o limite da concessão (o mesmo desenho dos portais de desktop).
-//! Handle 0 = canal do orquestrador: "sess" (sessão wm), "serve <dir>" + canal `nexo.fs`,
+//! Handle 0 = canal do orquestrador: "sess" (sessão wm), "serve `<dir>`" + canal `nexo.fs`,
 //! "cliente" + canal do app; responde "pronto". Pipe fechado = sair.
 #![no_std]
 #![no_main]

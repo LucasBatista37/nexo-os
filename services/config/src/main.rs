@@ -37,7 +37,7 @@ fn tm_rect() -> Rect {
     Rect::new(1, 14, 30, 8)
 }
 /// Escala do sistema: o app NAO tem o privilegio (set_global_scale e do shell); pede ao
-/// orquestrador "escala <num> <den>" e quem tem a sessao bootstrap aplica.
+/// orquestrador "escala `<num>` `<den>`" e quem tem a sessao bootstrap aplica.
 fn es_rect() -> Rect {
     Rect::new(1, 24, 30, 8)
 }

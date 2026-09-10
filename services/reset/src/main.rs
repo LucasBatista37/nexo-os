@@ -4,8 +4,8 @@
 //! os ancestrais dela. O reset do SISTEMA já existe por outro caminho (slots A/B + ambiente de
 //! recuperação); este serviço cuida do volume de dados. "Quando possível": o orquestrador
 //! espelha o diretório preservado no disco de backup ANTES (serviço `backup`) — cinto e
-//! suspensório. Handle 0 = orquestrador: pedido "limpa <base> <keep>" TRAZ o canal do fs e a
-//! resposta "ok <n>" o DEVOLVE (capacidade emprestada, como no editor/backup). `<base>` é o
+//! suspensório. Handle 0 = orquestrador: pedido `limpa <base> <keep>` TRAZ o canal do fs e a
+//! resposta `ok <n>` o DEVOLVE (capacidade emprestada, como no editor/backup). `<base>` é o
 //! raio da explosão (o reset de fábrica usa "/"; um teste usa a própria subárvore) e `<keep>`
 //! a subárvore preservada.
 #![no_std]

@@ -3,7 +3,7 @@
 //! Validar o ponteiro e **depois** copiar não é atômico. Desde que um processo pode ter
 //! várias threads (que compartilham o espaço de endereçamento), outra thread do mesmo
 //! processo pode chamar `memory_unmap` na janela entre a validação e a cópia —
-//! [`crate::process::Space::unmap_user_shared`] limpa as PTEs e ainda faz *shootdown* de TLB
+//! [`crate::process::AddressSpace::unmap_user_shared`] limpa as PTEs e ainda faz *shootdown* de TLB
 //! nas outras CPUs, exatamente para que a mudança valha em todas elas. O kernel tocaria então
 //! uma página ausente e morreria num `#PF` fatal: um pânico de kernel ao alcance de qualquer
 //! processo sem privilégio.

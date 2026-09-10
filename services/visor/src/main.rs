@@ -1,6 +1,6 @@
 //! `visor` — visualizador de imagens (Plano §Fase 6: "criar visualizador de imagens e
 //! documentos básicos"). Recebe do orquestrador uma sessão do compositor e um canal `nexo.fs`
-//! com o caminho a abrir ("abre <caminho>"), lê o arquivo, decodifica com `nexo-img` (PPM P6,
+//! com o caminho a abrir (`abre <caminho>`), lê o arquivo, decodifica com `nexo-img` (PPM P6,
 //! validação hostil sem pânico) e apresenta a imagem numa janela do tamanho exato dela.
 //! **Documentos básicos**: um arquivo que NÃO é PPM é apresentado como texto simples numa grade
 //! de glifos 6×4 (`nexo-textgrid`, a mesma do terminal e do editor) — bytes não imprimíveis

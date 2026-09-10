@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Corrigido (bloco 137 — o gate de documentação tinha de ver o que o CI vê)
+
+- **O bloco 136 foi para `main` com o CI vermelho.** O gate de documentação que ele criou passava na minha máquina e falhava no runner, pela razão mais banal e mais fácil de repetir: o host é aarch64 e o CI é x86_64, então metade do `nexo-arch-x86_64` — tudo o que está atrás de `#[cfg(target_arch = "x86_64")]` — nunca era documentado aqui. Dois links quebrados viviam exatamente lá.
+- Um gate que não vê o que o CI vê não é um gate: é uma forma de descobrir problemas mais tarde e mais caro. O `make lint` passa a construir a documentação dos **quatro** workspaces — host, `x86_64-unknown-none`, kernel, loader e serviços.
+- Com a cobertura completa, apareceram **mais treze** problemas além dos sete do bloco anterior: dois em código só-x86_64 (`CPUID.1:EDX[9]` lido como link), um link para item privado no `trap`, um caminho de tipo errado que **eu escrevi no bloco 121** (`process::Space` em vez de `process::AddressSpace`), `alloc` ambíguo entre função e crate, e dezassete ocorrências de espaços reservados como `<caminho>`, `<dir>`, `<msg>` que o rustdoc lia como **tags HTML abertas** — todos agora entre crases, que é onde deviam estar desde o início.
+- Nenhum destes é grave por si. Juntos são a medida exata do que uma documentação sem verificação acumula em silêncio: vinte links partidos numa árvore onde `missing_docs` é erro desde o primeiro dia.
+
 ### Adicionado e corrigido (Fase 6, bloco 136 — documentação de API gerada, com gate)
 
 - `make docs` gera a documentação navegável de todos os crates, e o **`make lint` constrói-a com `RUSTDOCFLAGS=-D warnings`**: um link quebrado na documentação pública passa a reprovar a árvore, como qualquer outro aviso. Verificado a reprovar: um link para um item inexistente derruba o lint.

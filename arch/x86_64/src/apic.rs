@@ -235,12 +235,12 @@ pub unsafe fn enable_global() {
     }
 }
 
-/// `true` se a CPU anuncia um LAPIC (CPUID.1:EDX[9]).
+/// `true` se a CPU anuncia um LAPIC (bit 9 de `CPUID.1:EDX`).
 pub fn cpu_has_apic() -> bool {
     crate::cpu::cpuid(1, 0).edx & (1 << 9) != 0
 }
 
-/// `true` se a CPU anuncia TSC invariante (CPUID.80000007:EDX[8]).
+/// `true` se a CPU anuncia TSC invariante (bit 8 de `CPUID.80000007:EDX`).
 pub fn tsc_invariant() -> bool {
     crate::cpu::cpuid(0x8000_0000, 0).eax >= 0x8000_0007
         && crate::cpu::cpuid(0x8000_0007, 0).edx & (1 << 8) != 0

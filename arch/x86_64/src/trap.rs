@@ -2,7 +2,7 @@
 //!
 //! Os 256 stubs são gerados em assembly (`.altmacro`/`.rept`). Cada um empilha
 //! um código de erro fictício quando a CPU não fornece um, o número do vetor,
-//! todos os registradores de propósito geral, e chama [`nexo_trap_dispatch`]
+//! todos os registradores de propósito geral, e chama `nexo_trap_dispatch` (privado)
 //! com um ponteiro para o [`TrapFrame`]. O kernel registra o handler com
 //! [`set_handler`].
 

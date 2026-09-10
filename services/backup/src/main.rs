@@ -3,8 +3,8 @@
 //! independentes — na prática, dois DISCOS físicos distintos (o principal virtio-blk e o de
 //! backup AHCI): perder um disco não perde os dados. Cópia pelo protocolo tipado, arquivo a
 //! arquivo e **recursiva** (árvores aninhadas descem inteiras); o serviço só copia, nunca apaga.
-//! Handle 0 = orquestrador: "espelha <dir>" / "restaura <dir>", cada pedido TRAZ o canal do
-//! fs de origem e a resposta "ok <n>" o DEVOLVE (o fs atende um cliente por vez — a
+//! Handle 0 = orquestrador: "espelha `<dir>`" / "restaura `<dir>`", cada pedido TRAZ o canal do
+//! fs de origem e a resposta "ok `<n>`" o DEVOLVE (o fs atende um cliente por vez — a
 //! capacidade é emprestada e volta, como no editor); handle 1 = fs de BACKUP (permanente).
 #![no_std]
 #![no_main]

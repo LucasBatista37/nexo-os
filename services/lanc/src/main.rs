@@ -8,7 +8,7 @@
 //! pelo compositor à janela sob o cursor: a decisão vem do usuário, não do app. Negar significa
 //! que o app nem é executado.
 //! Handle 0 = canal do orquestrador: recebe "sess" (sessão do compositor), depois
-//! "abre <nome>" (o 1º traz o canal `nexo.fs`); responde "pedido" → espera o clique →
+//! "abre `<nome>`" (o 1º traz o canal `nexo.fs`); responde "pedido" → espera o clique →
 //! "permitido"/"negado"; "fecha" encerra o app lançado ("fim"). Pipe fechado = sair.
 #![no_std]
 #![no_main]

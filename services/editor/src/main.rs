@@ -5,7 +5,7 @@
 //! (truncate + write no arquivo real); textos maiores que a janela **rolam** para o cursor
 //! ficar sempre visível. A janela é a prova: a grade é uma função pura da tripla (texto,
 //! cursor, primeira linha visível), repintada a cada edição.
-//! Handle 0 = canal do orquestrador: "sess" (sessão wm), depois "abre <caminho>" + canal
+//! Handle 0 = canal do orquestrador: "sess" (sessão wm), depois "abre `<caminho>`" + canal
 //! `nexo.fs`; responde "pronto"; a cada salvamento emite "salvo"; em "fecha" devolve o canal
 //! do fs ("fs" + handle) e encerra — as capacidades voltam para quem as emprestou.
 #![no_std]
