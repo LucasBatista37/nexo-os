@@ -127,6 +127,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_usercopy_race", test_user_usercopy_race),
     ("user_events", test_user_events),
     ("user_rights", test_user_rights),
+    ("user_rights_fuzz", test_user_rights_fuzz),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1357,6 +1358,20 @@ fn test_user_events() -> TestResult {
 fn test_user_rights() -> TestResult {
     let code = run_utest(85)?;
     check!(code == 0, "rights_matrix saiu com {code}");
+    Ok(())
+}
+
+/// Fuzz dirigido a capabilities: sem o direito exigido, nenhuma operação devolve `Ok`.
+///
+/// A semente vem do TSC e vai ao log — uma reprovação aqui é reproduzível passando-a de volta.
+fn test_user_rights_fuzz() -> TestResult {
+    // bits 0..8 = modo, bits 8.. = parâmetro (a semente), como no fuzz de syscalls.
+    let semente = nexo_arch_x86_64::cpu::rdtsc() | 1;
+    let arg = 86 | (semente << 8);
+    let p = crate::process::spawn_named("utest", arg, alloc::vec::Vec::new())
+        .map_err(alloc::string::String::from)?;
+    let code = crate::process::wait_and_reap(&p);
+    check!(code == 0, "rights_fuzz saiu com {code}");
     Ok(())
 }
 

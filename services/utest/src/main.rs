@@ -129,6 +129,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         83 => usercopy_race(),
         84 => events_test(),
         85 => rights_matrix(),
+        86 => rights_fuzz(param),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5227,6 +5228,90 @@ fn cpu_time_test() -> ! {
 }
 
 static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+// --- Fuzz dirigido a capabilities (bloco 127) ---
+// A matriz do bloco 124 percorre os casos que alguem pensou em escrever. Este sorteia: para
+// cada rodada, um objeto, um SUBCONJUNTO ALEATORIO dos direitos e uma operacao cujo direito
+// exigido esta AUSENTE. A invariante e uma so e vale sempre: sem o direito, a operacao nao
+// pode devolver Ok. Sortear os OUTROS direitos e o que importa — e assim que se pega uma
+// verificacao que le o bit errado e passa quando outro direito calha estar presente.
+//
+// So a direcao negativa e exercitada, de proposito: as operacoes permitidas teriam efeitos
+// colaterais (enviar, mapear) e algumas bloqueariam (esperar um processo). Negar e barato,
+// deterministico e e onde mora a seguranca.
+fn rights_fuzz(semente: u64) -> ! {
+    use nexo_sys::abi::{
+        RIGHT_DUPLICATE, RIGHT_MAP, RIGHT_READ, RIGHT_SIGNAL, RIGHT_TRANSFER, RIGHT_WRITE,
+    };
+    let semente = if semente == 0 {
+        0x243f_6a88_85a3_08d3
+    } else {
+        semente
+    };
+    nexo_rt::log!("utest: fuzz de direitos, semente {:#x}", semente);
+    let mut rng = Rng(semente);
+    let mut buf = [0u8; 32];
+    let mut hs = [0u32; 2];
+
+    // Objetos-base, com todos os direitos; as copias e que perdem direitos.
+    let (canal, par) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(550));
+    let mem = nexo_sys::memory_create(1).unwrap_or_else(|_| nexo_sys::exit(551));
+    let ev = nexo_sys::event_create(false).unwrap_or_else(|_| nexo_sys::exit(552));
+
+    // (objeto, direito exigido pela operacao, direitos possiveis do objeto)
+    const CANAL_TODOS: u32 = RIGHT_READ | RIGHT_WRITE | RIGHT_TRANSFER | RIGHT_DUPLICATE;
+    const MEM_TODOS: u32 = RIGHT_READ | RIGHT_WRITE | RIGHT_MAP | RIGHT_TRANSFER | RIGHT_DUPLICATE;
+    const EV_TODOS: u32 = RIGHT_READ | RIGHT_SIGNAL | RIGHT_TRANSFER | RIGHT_DUPLICATE;
+
+    let rodadas = 4_000u64;
+    let mut exercitadas = 0u64;
+    for _ in 0..rodadas {
+        let escolha = rng.next() % 5;
+        let (base, todos, exigido) = match escolha {
+            0 => (canal, CANAL_TODOS, RIGHT_READ),  // channel_recv
+            1 => (canal, CANAL_TODOS, RIGHT_WRITE), // channel_send
+            2 => (mem, MEM_TODOS, RIGHT_MAP),       // memory_map
+            3 => (ev, EV_TODOS, RIGHT_SIGNAL),      // event_signal
+            _ => (ev, EV_TODOS, RIGHT_READ),        // espera no evento
+        };
+        // Subconjunto aleatorio dos direitos, SEM o exigido — e sem DUPLICATE removido da
+        // origem (a copia so pode pedir o que a origem tem, e a origem tem tudo).
+        let sorteado = (rng.next() as u32) & todos & !exigido;
+        let Ok(h) = nexo_sys::handle_duplicate(base, sorteado) else {
+            nexo_sys::exit(553);
+        };
+        let r = match escolha {
+            0 => nexo_sys::channel_recv(h, &mut buf, &mut hs).err(),
+            1 => Some(nexo_sys::channel_send(h, b"x", &[])),
+            2 => nexo_sys::memory_map(h).err(),
+            3 => Some(nexo_sys::event_signal(h)),
+            _ => nexo_sys::channel_wait_any_timeout(&[h], 0).err(),
+        };
+        // A invariante: sem o direito exigido, a operacao NAO pode ter sucesso. Qualquer erro
+        // serve (Denied e o esperado; BadHandle/InvalidArgs tambem sao recusas) — o que nao
+        // pode e voltar Ok, que aqui aparece como `None` (nenhum erro).
+        if r.is_none() || r == Some(Status::Ok) {
+            nexo_rt::log!(
+                "utest: FALHA direitos {:#x} sem {:#x} permitiram a operacao {}",
+                sorteado,
+                exigido,
+                escolha
+            );
+            nexo_sys::exit(554);
+        }
+        exercitadas += 1;
+        let _ = nexo_sys::handle_close(h);
+    }
+    let _ = nexo_sys::handle_close(ev);
+    let _ = nexo_sys::handle_close(mem);
+    let _ = nexo_sys::handle_close(par);
+    let _ = nexo_sys::handle_close(canal);
+    nexo_rt::log!(
+        "utest: fuzz de direitos ok — {} operacoes sem o direito exigido, todas recusadas",
+        exercitadas
+    );
+    nexo_sys::exit(0)
+}
 
 // --- Matriz direito x operacao (bloco 124) ---
 // Um direito so existe de verdade quando a sua ausencia e recusada. Este teste percorre os

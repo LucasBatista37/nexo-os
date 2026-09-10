@@ -81,6 +81,8 @@ SCENARIOS = {
             r"svcmgr: echo pronto em \d+ ms",
             r"svcmgr: echo-client iniciado \(pid \d+\)",
             r"\[TEST\] user_syscall_fuzz .*ok",
+            r"utest: fuzz de direitos ok — \d+ operacoes sem o direito exigido, todas recusadas",
+            r"\[TEST\] user_rights_fuzz \.\.\. ok",
             r"pci: \d+ funcao\(oes\):",
             r"iommu: (ausente|tabela DMAR presente).*DMA de drivers IRRESTRITO \(caminho inseguro",
             r"pci:   00:\d\d\.\d 1af4:10(01|42) classe 01\.00\.00 .*virtio",

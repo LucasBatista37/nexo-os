@@ -1,6 +1,6 @@
 # Checklist consolidada do projeto — estado e caminho até a 1.0
 
-Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `ba5f9f8`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
+Gerado por `tools/roadmap-status` a partir de `PLANO_MESTRE_SISTEMA_OPERACIONAL.md` em 2026-09-09 (commit `1939d07`). Legenda: ✅ concluído · 🟡 parcial · ⬜ pendente · ⛔ bloqueado. Percentual = (concluídos + ½ parciais) / total.
 
 **Total de itens do plano:** 535 — ✅ 193 · 🟡 58 · ⬜ 284 · ⛔ 0 → **41% do caminho até a 1.0** (ponderado por item, não por esforço: as fases restantes são muito maiores).
 
@@ -109,7 +109,7 @@ Gate: 🟡 quase. 4 processos isolados simultâneos e serviço reiniciado sem re
 | ✅ | criar loader ELF de usuário | `process::spawn_elf` (W^X, USER, pilha com guarda) |
 | ✅ | criar runtime mínimo Rust e ABI C | `sdk/nexo-sys` + `sdk/nexo-rt` (Rust, sem alocação); **ABI C**: `abi/c/nexo.h` (syscalls e handles), `abi/c/proto/*.h` gerados do mesmo IDL (`fs`, `sock`), a **nexo-libc** (`sdk/libc`: string, stdio, stdlib, fd/dirent, sockets, crt0 com a convenção h0..h3 — ADR-0017) e o toolchain empacotado (`make toolchain`, `nexo-cc`) |
 | ✅ | criar shell de diagnóstico no espaço de usuário | `services/shell` sobre a console VirtIO e o VFS; cenário `shell` interativo |
-| 🟡 | testar isolamento e negação de capabilities | isolamento de memória/instruções e negação por direitos (`Denied`) testados, agora **sistematicamente**: `user_rights` (bloco 124) percorre a matriz direito × operação de canais, memória, eventos e processos, exigindo negação sem o direito **e** sucesso com ele, mais a recusa de escalada numa cópia. Fuzzing dirigido a capabilities (sortear direitos e conferir a invariante) pendente |
+| 🟡 | testar isolamento e negação de capabilities | isolamento de memória/instruções e negação por direitos (`Denied`) testados, agora **sistematicamente**: `user_rights` (bloco 124) percorre a matriz direito × operação de canais, memória, eventos e processos, exigindo negação sem o direito **e** sucesso com ele, mais a recusa de escalada numa cópia. E **fuzzing dirigido a capabilities** (bloco 127): a cada rodada, um objeto, um **subconjunto aleatório** dos direitos e uma operação cujo direito exigido está ausente — 4 000 rodadas por boot, semente do TSC registrada no log para reprodução. A invariante é uma só: sem o direito, a operação não pode devolver `Ok`. Sortear os **outros** direitos é o que importa, porque é assim que se apanha uma verificação que lê o bit errado e passa quando outro direito calha estar presente. Só a direção negativa é exercitada (negar é barato, determinístico e é onde mora a segurança); a positiva fica com a matriz do bloco 124. Verificado a reprovar: removendo a checagem de `RIGHT_SIGNAL` no kernel, o fuzzer acusa nomeando direitos e operação |
 | ✅ | fuzzar decodificador de IPC e syscalls | fuzz-lite determinístico dos parsers e dos decodificadores NXIP no host; fuzz de syscalls aleatório com sementes registradas, agendado toda semana no CI (`make fuzz`, workflow `fuzz`); cobertura guiada (cargo-fuzz) pendente |
 | ✅ | publicar release `0.2-userspace` | publicada em 2026-09-01 (tag assinada), gate F2 atendido; `docs/releases/0.2-userspace.md` |
 

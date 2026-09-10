@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 2, bloco 127 — fuzzing dirigido a capabilities)
+
+- A matriz do bloco 124 percorre os casos que alguém pensou em escrever; este **sorteia**. A cada rodada: um objeto (canal, memória, evento), um **subconjunto aleatório** dos seus direitos e uma operação cujo direito exigido está **ausente**. 4 000 rodadas por boot, semente vinda do TSC e registrada no log — uma reprovação é reproduzível.
+- A invariante é uma só e vale sempre: **sem o direito, a operação não pode devolver `Ok`**. Sortear os *outros* direitos é o que importa — é assim que se apanha uma verificação que lê o bit errado e passa quando outro direito calha estar presente.
+- Só a direção negativa é exercitada, de propósito: as operações permitidas teriam efeitos colaterais (enviar, mapear) e algumas bloqueariam (esperar um processo). Negar é barato, determinístico, e é onde mora a segurança; a direção positiva fica com a matriz do bloco anterior.
+- Verificado a reprovar: removendo a checagem de `RIGHT_SIGNAL` no kernel, o fuzzer acusa em 4 000 rodadas nomeando os direitos sorteados e a operação — e a matriz do 124 acusa junto. Auto-teste `user_rights_fuzz` (136º).
+
 ### Adicionado (Fase 8, bloco 126 — SMEP e SMAP)
 
 - **O kernel deixou de poder executar ou tocar memória de usuário por engano.** `CR4.SMEP` e `CR4.SMAP` ligados na BSP e em cada AP (cada CPU tem o seu CR4). Com SMEP, executar uma página de usuário em ring 0 é falta de página — a classe de exploração em que um atacante põe o código em memória própria e desvia o kernel para lá. Com SMAP, o kernel só lê ou escreve memória de usuário dentro de uma janela explícita.
