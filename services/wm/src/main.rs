@@ -82,6 +82,8 @@ struct Attention {
     reduce_motion: bool,
     /// Tema do sistema (0 = escuro, 1 = claro): lido em `prefs`; apps repintam pelo Theme.
     theme: u8,
+    /// Idioma da interface (0 = pt-BR, 1 = en-US); os apps resolvem rótulos com ele.
+    idioma: u8,
     /// Escala global padrão do sistema (num, den): janelas exibidas em buf×num/den; uma
     /// escala por janela (`set_scale`) sobrepõe. Apps leem o par em `prefs` (o "DPI").
     scale: (u32, u32),
@@ -416,6 +418,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         dnd: false,
         reduce_motion: false,
         theme: 0,
+        idioma: 0,
         scale: (1, 1),
         auto_tile: false,
         log: [([0; 64], 0); 8],
@@ -1179,12 +1182,24 @@ fn serve(
             let m = wm::SetThemeResponse {}.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
         }
+        Request::SetIdioma(rq) => {
+            // Mesma regra do tema: trocar o idioma do sistema a partir de uma janela sem foco
+            // seria uma forma barata de confundir quem está a usar.
+            if !input_owner(surfaces, focused, grabbed, owner) {
+                reply_err(ch, wm::SetIdiomaRequest::METHOD_ID, E_NO_INPUT_OWNER, out);
+                return;
+            }
+            attention.idioma = (rq.idioma != 0) as u8;
+            let m = wm::SetIdiomaResponse {}.encode_msg(out).unwrap_or(0);
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+        }
         Request::Prefs(_) => {
             let resp = wm::PrefsResponse {
                 reduce_motion: attention.reduce_motion as u8,
                 scale_num: attention.scale.0,
                 scale_den: attention.scale.1,
                 theme: attention.theme,
+                idioma: attention.idioma,
             };
             let m = resp.encode_msg(out).unwrap_or(0);
             let _ = nexo_sys::channel_send(ch, &out[..m], &[]);

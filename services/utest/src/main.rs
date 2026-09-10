@@ -134,6 +134,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         88 => handle_limit(),
         89 => bench(),
         90 => affinity_test(),
+        91 => idioma_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -6161,6 +6162,115 @@ fn shmem_producer() -> ! {
 /// Modo 19: cliente do compositor `wm` (handle 0 = canal `nexo.wm`). Cria duas superficies
 /// sobrepostas com cores distintas em memoria compartilhada, faz commit e le a saida composta
 /// para conferir a ordem-Z — prova de composicao fim a fim entre processos.
+/// Modo 91: a preferencia de idioma do sistema (bloco 139).
+///
+/// Confere as duas metades: com a posse da entrada, trocar o idioma funciona e o `prefs`
+/// devolve o valor novo; sem a posse, e recusado. E confere que o catalogo responde de facto
+/// noutro idioma — um `set_idioma` que muda um numero mas nao muda rotulo nenhum nao serve.
+fn idioma_test() -> ! {
+    use nexo_i18n::{Idioma, texto};
+    let ch: nexo_sys::Handle = 0;
+    let mut out = [0u8; 256];
+    let mut buf = [0u8; 256];
+    let mut hs = [0u32; 1];
+
+    // Uma superficie com foco da a posse da entrada a esta sessao.
+    let (a, a_base) = wm_create(ch, 0, 0, 8, 8, 0);
+    wm_fill(a_base, 8, 8, 10, 10, 10);
+    wm_commit(ch, a);
+
+    let le_idioma = |out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 1]| -> u8 {
+        let m = nexo_proto::wm::PrefsRequest {}
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(620));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(621);
+        }
+        match nexo_sys::channel_recv(ch, buf, hs) {
+            Ok((n, _)) => {
+                nexo_proto::wm::decode_prefs_response(&buf[..n])
+                    .unwrap_or_else(|_| nexo_sys::exit(622))
+                    .idioma
+            }
+            _ => nexo_sys::exit(623),
+        }
+    };
+    let poe_idioma = |v: u8, out: &mut [u8; 256], buf: &mut [u8; 256], hs: &mut [u32; 1]| -> bool {
+        let m = nexo_proto::wm::SetIdiomaRequest { idioma: v }
+            .encode_msg(out)
+            .unwrap_or_else(|_| nexo_sys::exit(624));
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            nexo_sys::exit(625);
+        }
+        matches!(nexo_sys::channel_recv(ch, buf, hs),
+            Ok((n, _)) if nexo_proto::wm::decode_set_idioma_response(&buf[..n]).is_ok())
+    };
+
+    // Padrao do sistema: portugues.
+    if le_idioma(&mut out, &mut buf, &mut hs) != 0 {
+        nexo_sys::exit(626);
+    }
+    // Com a posse da entrada, trocar funciona e o prefs reflete.
+    if !poe_idioma(1, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(627);
+    }
+    if le_idioma(&mut out, &mut buf, &mut hs) != 1 {
+        nexo_sys::exit(628);
+    }
+    // O catalogo responde noutro idioma — e isto que a preferencia serve para mudar.
+    if texto(Idioma::EnUs, "greeter.senha") == texto(Idioma::PtBr, "greeter.senha") {
+        nexo_sys::exit(629);
+    }
+    // A OUTRA METADE: uma sessao SEM superficie nao tem a posse da entrada, e trocar o idioma
+    // do sistema inteiro a partir dela tem de ser recusado. Sem esta metade, "exige a posse"
+    // seria so uma frase no comentario do IDL.
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(632));
+    let m = nexo_proto::wm::OpenRequest { chan: theirs }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(633));
+    if nexo_sys::channel_send(ch, &out[..m], &[theirs]) != Status::Ok {
+        nexo_sys::exit(634);
+    }
+    match nexo_sys::channel_recv(ch, &mut buf, &mut hs) {
+        Ok((n, _)) if nexo_proto::wm::decode_open_response(&buf[..n]).is_ok() => {}
+        _ => nexo_sys::exit(635),
+    }
+    let m = nexo_proto::wm::SetIdiomaRequest { idioma: 1 }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| nexo_sys::exit(636));
+    if nexo_sys::channel_send(mine, &out[..m], &[]) != Status::Ok {
+        nexo_sys::exit(637);
+    }
+    match nexo_sys::channel_recv(mine, &mut buf, &mut hs) {
+        // Tem de vir erro remoto, nao uma resposta de sucesso.
+        Ok((n, _)) => {
+            if nexo_proto::wm::decode_set_idioma_response(&buf[..n]).is_ok() {
+                nexo_sys::exit(638);
+            }
+        }
+        _ => nexo_sys::exit(639),
+    }
+    // E o idioma nao mudou por causa da tentativa recusada.
+    if le_idioma(&mut out, &mut buf, &mut hs) != 1 {
+        nexo_sys::exit(640);
+    }
+    let _ = nexo_sys::handle_close(mine);
+
+    // Volta ao padrao para nao contaminar o resto do boot.
+    if !poe_idioma(0, &mut out, &mut buf, &mut hs) {
+        nexo_sys::exit(630);
+    }
+    if le_idioma(&mut out, &mut buf, &mut hs) != 0 {
+        nexo_sys::exit(631);
+    }
+    nexo_rt::log!(
+        "utest: idioma ok — preferencia vai e volta, sessao sem foco recusada, catalogo responde ({} / {})",
+        texto(Idioma::PtBr, "greeter.senha"),
+        texto(Idioma::EnUs, "greeter.senha")
+    );
+    nexo_sys::exit(0)
+}
+
 fn wm_client() -> ! {
     let ch: nexo_sys::Handle = 0;
     // A: vermelha em (0,0) 8x8, z=0

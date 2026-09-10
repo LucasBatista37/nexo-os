@@ -17,6 +17,7 @@ nexo-wm.workspace = true
 nexo-font.workspace = true
 nexo-cal.workspace = true
 nexo-ui.workspace = true
+nexo-i18n.workspace = true
 nexo-pkg.workspace = true
 nexo-inst.workspace = true
 

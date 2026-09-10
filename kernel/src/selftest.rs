@@ -134,6 +134,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_handle_limit", test_user_handle_limit),
     ("user_bench", test_user_bench),
     ("user_affinity", test_user_affinity),
+    ("user_idioma", test_user_idioma),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1520,6 +1521,31 @@ fn test_user_bench() -> TestResult {
 fn test_user_affinity() -> TestResult {
     let code = run_utest(90)?;
     check!(code == 0, "affinity saiu com {code}");
+    Ok(())
+}
+
+/// Preferência de idioma do sistema (bloco 139): vai, volta e o catálogo responde.
+fn test_user_idioma() -> TestResult {
+    use crate::ipc::{ChannelEnd, Handle, Object, Rights};
+    let ends0 = crate::ipc::live_channel_ends();
+    let (a, b) = ChannelEnd::create_pair();
+    let hserver = alloc::vec![Handle {
+        object: Object::Channel(a),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let hclient = alloc::vec![Handle {
+        object: Object::Channel(b),
+        rights: Rights(nexo_syscall_abi::RIGHTS_CHANNEL_DEFAULT),
+    }];
+    let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
+    let client = crate::process::spawn_named("utest", 91, hclient).map_err(String::from)?;
+    let cc = crate::process::wait_and_reap(&client);
+    let wc = crate::process::wait_and_reap(&wm);
+    drop((wm, client));
+    check!(cc == 0, "cliente saiu com {cc}");
+    check!(wc == 0, "wm saiu com {wc}");
+    let ends = crate::ipc::live_channel_ends();
+    check!(ends == ends0, "canais vazaram: {ends0} -> {ends}");
     Ok(())
 }
 

@@ -7,7 +7,7 @@
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
 # 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
-protocol wm 1.21
+protocol wm 1.22
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -370,6 +370,7 @@ method 37 prefs {
         scale_num: u32,
         scale_den: u32,
         theme: u8,
+        idioma: u8,
     }
 }
 
@@ -471,4 +472,16 @@ event 11 key {
     surface: u32,
     code: u32,
     value: u32,
+}
+
+# Idioma da interface (0 = pt-BR, 1 = en-US): preferencia lida em `prefs`; os aplicativos
+# resolvem os seus rotulos pelo catalogo `nexo-i18n` com esse idioma. Mudar exige a posse da
+# entrada (erro 6), como set_theme e set_dnd — trocar o idioma do sistema inteiro a partir de
+# uma janela sem foco seria uma forma barata de confundir quem esta a usar.
+method 45 set_idioma {
+    request {
+        idioma: u8,
+    }
+    response {
+    }
 }

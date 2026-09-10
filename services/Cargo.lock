@@ -402,6 +402,7 @@ dependencies = [
  "nexo-cal",
  "nexo-font",
  "nexo-gfx",
+ "nexo-i18n",
  "nexo-inst",
  "nexo-net",
  "nexo-netstack",

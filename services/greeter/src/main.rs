@@ -18,9 +18,6 @@ use nexo_sys::abi::Status;
 use nexo_ui::{Label, Theme};
 
 const PIPE: Handle = 0;
-/// Idioma da interface. Constante por enquanto — ver a nota no desenho do rótulo.
-const IDIOMA: Idioma = Idioma::PtBr;
-
 /// Senha demo: "nexo" em códigos evdev (n, e, x, o) + Enter.
 const PASSWORD: [u32; 4] = [49, 18, 45, 24];
 const KEY_ENTER: u32 = 28;
@@ -85,6 +82,27 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let id = cs.id;
     let base = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| fail(38, "map superficie"));
 
+    // Idioma da interface: preferência do sistema, lida do compositor (`nexo.wm` v1.22). É a
+    // mesma via do tema — quem decide é o sistema, não cada aplicativo.
+    let idioma = {
+        let m = wm::PrefsRequest {}
+            .encode_msg(&mut out)
+            .unwrap_or_else(|_| fail(41, "enc prefs"));
+        let (n, _) = rpc(sess, &out[..m], &[], &mut buf);
+        match wm::decode_prefs_response(&buf[..n]) {
+            Ok(p) => {
+                if p.idioma == 1 {
+                    Idioma::EnUs
+                } else {
+                    Idioma::PtBr
+                }
+            }
+            // Sem preferência legível, o sistema fala português — nunca fica sem rótulo.
+            Err(_) => Idioma::PtBr,
+        }
+    };
+    log!("greeter: idioma da interface: {}", idioma.codigo());
+
     // Pinta a tela de bloqueio (tema escuro + rótulo) com o toolkit.
     let theme = Theme::dark();
     {
@@ -97,7 +115,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
         // Primeiro rótulo do sistema que vem do catálogo em vez do código-fonte. O idioma
         // ainda é fixo aqui: escolher e persistir a preferência é o passo seguinte, e depende
         // de onde ela vai morar (prefs do compositor).
-        Label::new(texto(IDIOMA, "greeter.senha")).draw(&mut s, 12, 20, &theme);
+        Label::new(texto(idioma, "greeter.senha")).draw(&mut s, 12, 20, &theme);
     }
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)

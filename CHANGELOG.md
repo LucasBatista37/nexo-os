@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Adicionado (Fase 6, bloco 139 — o idioma passou a ser escolhível)
+
+- O bloco anterior deu ao sistema um catálogo de mensagens, mas o idioma era uma constante no serviço — um mecanismo que ninguém consegue exercitar é meia funcionalidade. Agora a preferência mora onde moram as outras: `nexo.wm` **v1.22** ganhou `idioma` no `prefs` e o método `set_idioma`.
+- **Exige a posse da entrada**, como `set_theme` e `set_dnd`: trocar o idioma do sistema inteiro a partir de uma janela sem foco seria uma forma barata de confundir quem está a usar.
+- O `greeter` lê o idioma do compositor e resolve os seus rótulos com ele; sem preferência legível, fala português — nunca fica sem rótulo.
+- Auto-teste `user_idioma` (143º) exige as **duas metades**: com a posse da entrada a preferência vai e volta e o `prefs` reflete; **sem** ela, o pedido é recusado e o idioma não muda. E confere que o catálogo responde de facto noutro idioma (*Senha* / *Password*) — um `set_idioma` que muda um número sem mudar rótulo nenhum não serviria de nada.
+
 ### Adicionado (Fase 6, bloco 138 — mecanismo de localização)
 
 - O sistema é escrito em português e as suas mensagens estavam **no código**, o que impede traduzir sem reescrever. `libraries/i18n` (`nexo-i18n`) é o mecanismo que faltava: um catálogo de chaves com uma tradução por idioma (pt-BR, en-US), consultado em tempo de execução, `no_std` e sem alocação.
