@@ -194,6 +194,31 @@ pub fn handle_duplicate(h: Handle, rights: u32) -> Result<Handle, Status> {
     if st.is_ok() { Ok(v as Handle) } else { Err(st) }
 }
 
+/// Cria um objeto de evento: `auto = true` faz a espera **consumir** o sinal (uma thread por
+/// sinalização); `false` mantém o sinal até [`event_reset`].
+///
+/// Espera-se por ele com [`channel_wait_any`]/[`channel_wait_any_timeout`], misturado com
+/// canais — o índice devolvido é a posição no vetor de handles.
+pub fn event_create(auto: bool) -> Result<Handle, Status> {
+    // SAFETY: sem ponteiros.
+    let (st, v) = unsafe { raw(abi::SYS_EVENT_CREATE, u64::from(auto), 0, 0) };
+    if st.is_ok() { Ok(v as Handle) } else { Err(st) }
+}
+
+/// Sinaliza um evento: acorda quem espera (todos no modo manual, um no automático).
+///
+/// Exige `RIGHT_SIGNAL` no handle — uma cópia reduzida a `RIGHT_READ` devolve `Denied`.
+pub fn event_signal(h: Handle) -> Status {
+    // SAFETY: sem ponteiros.
+    unsafe { raw(abi::SYS_EVENT_SIGNAL, h as u64, 0, 0).0 }
+}
+
+/// Apaga o sinal de um evento manual. Exige `RIGHT_SIGNAL`.
+pub fn event_reset(h: Handle) -> Status {
+    // SAFETY: sem ponteiros.
+    unsafe { raw(abi::SYS_EVENT_RESET, h as u64, 0, 0).0 }
+}
+
 /// Direitos e tipo de um handle: `(rights, kind)`.
 pub fn handle_info(h: Handle) -> Result<(u32, u32), Status> {
     // SAFETY: sem ponteiros.

@@ -331,6 +331,33 @@ fn sys_channel_wait_any_timeout(p: &process::Process, f: &TrapFrame) -> (Status,
     wait_any_impl(p, f, Some(deadline))
 }
 
+/// O que uma espera múltipla pode observar: canais e eventos.
+///
+/// A syscall continua se chamando `channel_wait_any` (a ABI é aditiva: números e campos novos,
+/// nunca renomeações), mas desde o bloco 122 ela é a espera múltipla geral do sistema.
+enum Esperavel {
+    Canal(Arc<ChannelEnd>),
+    Evento(Arc<crate::ipc::Event>),
+}
+
+impl Esperavel {
+    /// `true` se já está pronto. Num evento **automático** o sinal é consumido aqui — por isso
+    /// quem chama tem de devolver imediatamente ao receber `true`, sob pena de perder o sinal.
+    fn tomar_se_pronto(&self) -> bool {
+        match self {
+            Esperavel::Canal(c) => c.readable(),
+            Esperavel::Evento(e) => e.tomar(),
+        }
+    }
+
+    fn register_waiter(&self, t: crate::sched::ThreadId) {
+        match self {
+            Esperavel::Canal(c) => c.register_waiter(t),
+            Esperavel::Evento(e) => e.register_waiter(t),
+        }
+    }
+}
+
 fn wait_any_impl(p: &process::Process, f: &TrapFrame, deadline: Option<u64>) -> (Status, u64) {
     let (ptr, n) = (f.rdi, f.rsi as usize);
     if n == 0 || n > nexo_syscall_abi::WAIT_ANY_MAX {
@@ -340,7 +367,7 @@ fn wait_any_impl(p: &process::Process, f: &TrapFrame, deadline: Option<u64>) -> 
         Ok(b) => b,
         Err(e) => return (e, 0),
     };
-    let mut ends: Vec<Arc<ChannelEnd>> = Vec::with_capacity(n);
+    let mut ends: Vec<Esperavel> = Vec::with_capacity(n);
     {
         let table = p.handles.lock();
         for i in 0..n {
@@ -358,7 +385,16 @@ fn wait_any_impl(p: &process::Process, f: &TrapFrame, deadline: Option<u64>) -> 
                     if !rights.contains(RIGHT_READ) {
                         return (Status::Denied, 0);
                     }
-                    ends.push(end);
+                    ends.push(Esperavel::Canal(end));
+                }
+                Ok(Handle {
+                    object: Object::Event(ev),
+                    rights,
+                }) => {
+                    if !rights.contains(RIGHT_READ) {
+                        return (Status::Denied, 0);
+                    }
+                    ends.push(Esperavel::Evento(ev));
                 }
                 Ok(_) => return (Status::InvalidArgs, 0),
                 Err(e) => return (e, 0),
@@ -371,7 +407,7 @@ fn wait_any_impl(p: &process::Process, f: &TrapFrame, deadline: Option<u64>) -> 
     };
     loop {
         for (i, end) in ends.iter().enumerate() {
-            if end.readable() {
+            if end.tomar_se_pronto() {
                 return (Status::Ok, i as u64);
             }
         }
@@ -379,10 +415,10 @@ fn wait_any_impl(p: &process::Process, f: &TrapFrame, deadline: Option<u64>) -> 
             end.register_waiter(me);
         }
         // Re-checa depois de registrar: se ficou pronto nesse meio-tempo, o waiter obsoleto
-        // sera drenado no proximo send/close do canal.
+        // sera drenado no proximo send/close do canal (ou na proxima sinalizacao do evento).
         let mut ready = None;
         for (i, end) in ends.iter().enumerate() {
-            if end.readable() {
+            if end.tomar_se_pronto() {
                 ready = Some(i);
                 break;
             }
@@ -1140,6 +1176,42 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
             Ok(_) => (Status::InvalidArgs, 0),
             Err(e) => (e, 0),
         },
+        SYS_EVENT_CREATE => {
+            let ev = crate::ipc::Event::new(f.rdi != 0);
+            let h = Handle {
+                object: Object::Event(ev),
+                rights: Rights(RIGHTS_EVENT_DEFAULT),
+            };
+            let mut table = p.handles.lock();
+            match table.insert(h) {
+                Ok(i) => (Status::Ok, i as u64),
+                Err(e) => (e, 0),
+            }
+        }
+        SYS_EVENT_SIGNAL | SYS_EVENT_RESET => {
+            let h = p.handles.lock().get(f.rdi as u32);
+            match h {
+                Ok(Handle {
+                    object: Object::Event(ev),
+                    rights,
+                }) => {
+                    // O direito SINALIZAR ganha, aqui, o primeiro objeto que o exerce: um
+                    // handle reduzido a RIGHT_READ espera o evento e não pode movê-lo.
+                    if !rights.contains(RIGHT_SIGNAL) {
+                        (Status::Denied, 0)
+                    } else {
+                        if n == SYS_EVENT_SIGNAL {
+                            ev.sinalizar();
+                        } else {
+                            ev.resetar();
+                        }
+                        (Status::Ok, 0)
+                    }
+                }
+                Ok(_) => (Status::InvalidArgs, 0),
+                Err(e) => (e, 0),
+            }
+        }
         _ => {
             kdebug!("syscall desconhecida {} do pid {}", n, p.pid);
             (Status::NotSupported, 0)

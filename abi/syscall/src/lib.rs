@@ -164,8 +164,23 @@ pub const JOB_CPU_WINDOW_NS: u64 = 1_000_000_000;
 /// quantos couberam. Aditivo (2026-09-09).
 pub const SYS_PROCESS_LIST: u64 = 43;
 
+/// Cria um **objeto de evento**: `rdi` = 1 para automático (a espera consome o sinal, uma
+/// thread por sinalização) ou 0 para manual (fica sinalizado até [`SYS_EVENT_RESET`]).
+/// → handle ([`KIND_EVENT`], [`RIGHTS_EVENT_DEFAULT`]). Espera-se por ele com
+/// [`SYS_CHANNEL_WAIT_ANY`]/[`SYS_CHANNEL_WAIT_ANY_TIMEOUT`], misturado com canais.
+/// Aditivo (2026-09-09).
+pub const SYS_EVENT_CREATE: u64 = 44;
+
+/// Sinaliza um evento (`rdi` = handle): acorda quem espera — todos no modo manual, um no
+/// automático. Exige [`RIGHT_SIGNAL`] no handle; sem ele, `Denied`. Aditivo (2026-09-09).
+pub const SYS_EVENT_SIGNAL: u64 = 45;
+
+/// Apaga o sinal de um evento manual (`rdi` = handle). Exige [`RIGHT_SIGNAL`] — quem só
+/// espera não pode desfazer o sinal dos outros. Aditivo (2026-09-09).
+pub const SYS_EVENT_RESET: u64 = 46;
+
 /// Maior número válido nesta versão.
-pub const SYS_MAX: u64 = 43;
+pub const SYS_MAX: u64 = 46;
 /// Tamanho máximo de um ELF aceito por [`SYS_PROCESS_SPAWN_MEM`] (2 MiB).
 pub const SPAWN_MEM_MAX: u64 = 2 * 1024 * 1024;
 /// Máximo de páginas por objeto de memória (1 MiB).
@@ -181,6 +196,13 @@ pub const KIND_DEBUG: u32 = 5;
 pub const KIND_JOB: u32 = 6;
 /// Thread de usuário do próprio processo (`SYS_THREAD_*`).
 pub const KIND_THREAD: u32 = 7;
+/// Evento: sinal binário esperável (`SYS_EVENT_*`).
+pub const KIND_EVENT: u32 = 8;
+/// Direitos padrão de um evento: esperar (READ), sinalizar/resetar (SIGNAL), passar adiante.
+///
+/// Reduzir para só `RIGHT_READ` numa cópia (`handle_duplicate`) entrega a espera sem entregar
+/// o poder de sinalizar — é o uso concreto do direito SINALIZAR.
+pub const RIGHTS_EVENT_DEFAULT: u32 = RIGHT_READ | RIGHT_SIGNAL | RIGHT_TRANSFER | RIGHT_DUPLICATE;
 /// Direitos padrão de um handle de depuração.
 pub const RIGHTS_DEBUG_DEFAULT: u32 = RIGHT_READ | RIGHT_TRANSFER | RIGHT_DUPLICATE;
 /// Direitos padrão de um objeto de memória.
@@ -498,6 +520,9 @@ pub const fn syscall_name(n: u64) -> &'static str {
         SYS_THREAD_JOIN => "thread_join",
         SYS_JOB_SET_CPU_LIMIT => "job_set_cpu_limit",
         SYS_PROCESS_LIST => "process_list",
+        SYS_EVENT_CREATE => "event_create",
+        SYS_EVENT_SIGNAL => "event_signal",
+        SYS_EVENT_RESET => "event_reset",
         _ => "?",
     }
 }

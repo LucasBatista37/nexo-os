@@ -49,6 +49,87 @@ pub enum Object {
     Thread(crate::sched::ThreadId),
     /// Capability de depuração (trace de syscalls); sem estado — o valor é possuí-la.
     Debug,
+    /// Evento: sinal binário esperável (o objeto que exerce o direito SINALIZAR).
+    Event(Arc<Event>),
+}
+
+/// Evento: um sinal binário que threads esperam e outra sinaliza.
+///
+/// É o primeiro objeto do sistema a exercer o direito **SINALIZAR**: quem tem o handle com
+/// `RIGHT_SIGNAL` pode acordar quem espera; quem tem só `RIGHT_READ` pode esperar e nada mais.
+/// Até aqui o direito existia na ABI sem nenhum objeto que o usasse — direito sem objeto é
+/// letra morta, e letra morta não se testa.
+///
+/// Dois modos, os dois clássicos:
+/// - **manual** (`auto = false`): uma vez sinalizado, continua sinalizado até `event_reset`;
+///   toda thread que esperar passa direto. É o "isto já aconteceu" (serviço pronto, fase
+///   concluída) — vários interessados, um fato só.
+/// - **automático** (`auto = true`): a espera **consome** o sinal, e só uma thread passa por
+///   sinalização. É o "há trabalho para alguém" (uma unidade de trabalho, um trabalhador).
+pub struct Event {
+    inner: IrqLock<EventInner>,
+    auto: bool,
+}
+
+struct EventInner {
+    sinalizado: bool,
+    waiters: Vec<crate::sched::ThreadId>,
+}
+
+impl Event {
+    /// Cria um evento não sinalizado.
+    pub fn new(auto: bool) -> Arc<Event> {
+        Arc::new(Event {
+            inner: IrqLock::new(EventInner {
+                sinalizado: false,
+                waiters: Vec::new(),
+            }),
+            auto,
+        })
+    }
+
+    /// Sinaliza e acorda quem espera (todos no modo manual, um no automático).
+    ///
+    /// Acordar *um* no modo automático não basta para garantir que só um passe: a thread
+    /// acordada ainda disputa o sinal com quem chegar depois. Quem garante é o consumo sob o
+    /// mesmo lock em [`Event::tomar`] — o unpark é só um empurrão.
+    pub fn sinalizar(&self) {
+        let acordar = {
+            let mut g = self.inner.lock();
+            g.sinalizado = true;
+            if self.auto {
+                g.waiters.pop().into_iter().collect::<Vec<_>>()
+            } else {
+                core::mem::take(&mut g.waiters)
+            }
+        };
+        for t in acordar {
+            crate::sched::unpark(t);
+        }
+    }
+
+    /// Apaga o sinal (só faz sentido no modo manual; no automático o consumo já apaga).
+    pub fn resetar(&self) {
+        self.inner.lock().sinalizado = false;
+    }
+
+    /// Tenta passar pelo evento: `true` se estava sinalizado. No modo automático o sinal é
+    /// consumido aqui, sob o lock — é o que faz uma sinalização acordar exatamente uma espera.
+    pub fn tomar(&self) -> bool {
+        let mut g = self.inner.lock();
+        if !g.sinalizado {
+            return false;
+        }
+        if self.auto {
+            g.sinalizado = false;
+        }
+        true
+    }
+
+    /// Registra a thread para ser acordada na próxima sinalização.
+    pub fn register_waiter(&self, t: crate::sched::ThreadId) {
+        self.inner.lock().waiters.push(t);
+    }
 }
 
 /// Objeto de memória compartilhável: possui os quadros físicos e os libera quando ninguém mais
@@ -126,6 +207,7 @@ impl Object {
             Object::Job(_) => KIND_JOB,
             Object::Thread(_) => KIND_THREAD,
             Object::Debug => KIND_DEBUG,
+            Object::Event(_) => KIND_EVENT,
         }
     }
 }

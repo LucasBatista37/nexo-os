@@ -127,6 +127,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         81 => quota_girador(),
         82 => process_list_test(),
         83 => usercopy_race(),
+        84 => events_test(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -5225,6 +5226,106 @@ fn cpu_time_test() -> ! {
 }
 
 static THREAD_SOMA: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+// --- Objetos de evento e o direito SINALIZAR (bloco 122) ---
+static EVENTO_H: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+extern "C" fn evento_sinalizador(_arg: u64) -> ! {
+    use core::sync::atomic::Ordering::Relaxed;
+    nexo_sys::sleep_ns(20_000_000); // 20 ms: a outra thread ja esta bloqueada na espera
+    let _ = nexo_sys::event_signal(EVENTO_H.load(Relaxed) as nexo_sys::Handle);
+    nexo_sys::thread_exit();
+}
+
+fn events_test() -> ! {
+    use core::sync::atomic::Ordering::Relaxed;
+    // 1. Evento manual: sem sinal, a espera com prazo estoura.
+    let ev = nexo_sys::event_create(false).unwrap_or_else(|_| nexo_sys::exit(480));
+    if nexo_sys::channel_wait_any_timeout(&[ev], 20_000_000) != Err(Status::TimedOut) {
+        nexo_sys::exit(481);
+    }
+    // 2. Outra thread sinaliza: a espera acorda no evento (indice 0), sem sondagem.
+    EVENTO_H.store(ev as u64, Relaxed);
+    let t = nexo_sys::thread_create(evento_sinalizador, 0).unwrap_or_else(|_| nexo_sys::exit(482));
+    let t0 = nexo_sys::time_now();
+    if nexo_sys::channel_wait_any_timeout(&[ev], 2_000_000_000) != Ok(0) {
+        nexo_sys::exit(483);
+    }
+    if nexo_sys::time_now() - t0 < 10_000_000 {
+        nexo_sys::exit(484); // acordou cedo demais: nao esperou de verdade
+    }
+    if nexo_sys::thread_join(t) != Status::Ok {
+        nexo_sys::exit(485);
+    }
+    // 3. Manual continua sinalizado: a proxima espera passa direto. Reset volta a bloquear.
+    if nexo_sys::channel_wait_any_timeout(&[ev], 20_000_000) != Ok(0) {
+        nexo_sys::exit(486);
+    }
+    if nexo_sys::event_reset(ev) != Status::Ok {
+        nexo_sys::exit(487);
+    }
+    if nexo_sys::channel_wait_any_timeout(&[ev], 20_000_000) != Err(Status::TimedOut) {
+        nexo_sys::exit(488);
+    }
+    // 4. Automatico: uma sinalizacao serve UMA espera; a segunda estoura.
+    let au = nexo_sys::event_create(true).unwrap_or_else(|_| nexo_sys::exit(489));
+    if nexo_sys::event_signal(au) != Status::Ok {
+        nexo_sys::exit(490);
+    }
+    if nexo_sys::channel_wait_any_timeout(&[au], 20_000_000) != Ok(0) {
+        nexo_sys::exit(491);
+    }
+    if nexo_sys::channel_wait_any_timeout(&[au], 20_000_000) != Err(Status::TimedOut) {
+        nexo_sys::exit(492);
+    }
+    // 5. Espera MISTA: canal e evento no mesmo vetor; o sinal acorda no indice certo.
+    let (a, b) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(493));
+    if nexo_sys::event_signal(au) != Status::Ok {
+        nexo_sys::exit(494);
+    }
+    if nexo_sys::channel_wait_any_timeout(&[a, au], 20_000_000) != Ok(1) {
+        nexo_sys::exit(495);
+    }
+    // e o canal continua funcionando na mesma espera
+    if nexo_sys::channel_send(b, b"oi", &[]) != Status::Ok {
+        nexo_sys::exit(496);
+    }
+    if nexo_sys::channel_wait_any_timeout(&[a, au], 20_000_000) != Ok(0) {
+        nexo_sys::exit(497);
+    }
+    // 6. O DIREITO: uma copia sem RIGHT_SIGNAL espera, mas nao sinaliza nem resseta.
+    let so_ler = nexo_sys::handle_duplicate(ev, nexo_sys::abi::RIGHT_READ)
+        .unwrap_or_else(|_| nexo_sys::exit(498));
+    if nexo_sys::event_signal(so_ler) != Status::Denied {
+        nexo_sys::exit(499);
+    }
+    if nexo_sys::event_reset(so_ler) != Status::Denied {
+        nexo_sys::exit(500);
+    }
+    if nexo_sys::channel_wait_any_timeout(&[so_ler], 10_000_000) != Err(Status::TimedOut) {
+        nexo_sys::exit(501); // esperar continua permitido
+    }
+    // 7. Tipos trocados: sinalizar um canal nao e coisa que se faca.
+    if nexo_sys::event_signal(a) != Status::InvalidArgs {
+        nexo_sys::exit(502);
+    }
+    let (kind_ok, _) = match nexo_sys::handle_info(ev) {
+        Ok((r, k)) => (k == nexo_sys::abi::KIND_EVENT, r),
+        Err(_) => nexo_sys::exit(503),
+    };
+    if !kind_ok {
+        nexo_sys::exit(504);
+    }
+    let _ = nexo_sys::handle_close(so_ler);
+    let _ = nexo_sys::handle_close(au);
+    let _ = nexo_sys::handle_close(ev);
+    let _ = nexo_sys::handle_close(a);
+    let _ = nexo_sys::handle_close(b);
+    nexo_sys::log(
+        "utest: eventos ok — manual/automatico, espera mista com canal, SINALIZAR negado a copia so-leitura",
+    );
+    nexo_sys::exit(0)
+}
 
 // --- Corrida de desmapeamento durante uma copia usuario->kernel (bloco 121) ---
 // Uma thread desmapeia a ultima pagina do buffer enquanto a outra esta dentro de uma syscall

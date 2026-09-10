@@ -122,6 +122,7 @@ const TESTS: &[(&str, TestFn)] = &[
     ("user_cpu_quota", test_user_cpu_quota),
     ("user_process_list", test_user_process_list),
     ("user_usercopy_race", test_user_usercopy_race),
+    ("user_events", test_user_events),
     ("user_shmem", test_user_shmem),
     ("user_wm", test_user_wm),
     ("user_wm_multi", test_user_wm_multi),
@@ -1235,6 +1236,13 @@ fn test_usercopy_fixup() -> TestResult {
 fn test_user_usercopy_race() -> TestResult {
     let code = run_utest(83)?;
     check!(code == 0, "usercopy_race saiu com {code}");
+    Ok(())
+}
+
+/// Objetos de evento e o direito SINALIZAR (bloco 122).
+fn test_user_events() -> TestResult {
+    let code = run_utest(84)?;
+    check!(code == 0, "events saiu com {code}");
     Ok(())
 }
 

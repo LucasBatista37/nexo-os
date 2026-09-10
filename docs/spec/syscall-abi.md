@@ -6,8 +6,9 @@
 novos (o próximo é 33); structs de ABI só crescem por campos com padrão zero no fim; protocolos
 IPC seguem o ipc-compat §3. Qualquer quebra exige subir `ABI_VERSION` (consultável por
 `SYS_ABI_VERSION`; hoje = 1) e registro no CHANGELOG. A promoção a "estável" vem com o uso por
-terceiros (gate F6) e o marco `0.9-beta` (ADR-0006). A v1 congela o conjunto atual: 33 syscalls
-(0–32), handles com direitos que só diminuem, canais NXIP, memória compartilhada e os dois spawns.
+terceiros (gate F6) e o marco `0.9-beta` (ADR-0006). A v1 congela o conjunto atual: 47 syscalls
+(0–46), handles com direitos que só diminuem, canais NXIP, memória compartilhada, os dois spawns,
+jobs, threads de usuário e objetos de evento.
 
 ## 1. Convenção (x86_64)
 
@@ -59,7 +60,7 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 31 | `fb_info` | ponteiro → escreve o `FbInfo` (40 bytes: base física, tamanho, largura/altura/stride, formato, bpp) do framebuffer de boot. Só **informação**: o mapeamento continua gated pela concessão do dispositivo de vídeo (`mmio_map` — o framebuffer é um BAR) | `NotSupported` (sem framebuffer), `InvalidArgs` |
 | 32 | `process_spawn_mem` | ELF na memória do chamador (ptr, tamanho ≤ 2 MiB), argumento e handles transferidos como no `process_spawn` → handle do processo. É como aplicativos **instalados** (fora do initrd) executam; mesmas validações (faixa, W^X) e isolamento | `TooBig`, `BadAddress`, `Denied`, `InvalidArgs` (ELF inválido) |
 | 33 | `trace` | 0 desliga / 1 liga (`rsi` = handle de depuração, kind 5) / 2 lê (`rsi`/`rdx` = ptr/cap em entradas de 16 B; `r10` = handle de depuração) / 3 total (livre) | 2: copiadas; 3: total | `Denied` sem a capability; `InvalidArgs` |
-| 34 | `channel_wait_any_timeout` | ptr (array de handles u32), n (1..=16), prazo em ns (0 = só sonda) → índice do primeiro canal pronto; `TimedOut` (12) ao esgotar o prazo (granularidade do tique de 10 ms) | `BadHandle`, `Denied`, `InvalidArgs`, `BadAddress`, `TimedOut` |
+| 34 | `channel_wait_any_timeout` | ptr (array de handles u32 — canais **e eventos**), n (1..=16), prazo em ns (0 = só sonda) → índice do primeiro pronto; `TimedOut` (12) ao esgotar o prazo (granularidade do tique de 10 ms) | `BadHandle`, `Denied`, `InvalidArgs`, `BadAddress`, `TimedOut` |
 | 35 | `set_priority` | 0 (normal) / 1 (baixa, segundo plano): prioridade da thread chamadora — "nice", não fronteira de segurança; a fila prefere as normais e uma normal pronta preempta uma de baixa no tique seguinte; processos criados herdam | ok | `InvalidArgs` fora de 0/1 |
 | 36 | `job_create` | — → handle de job (`KIND_JOB` = 6; direitos `READ\|WRITE\|TRANSFER\|DUPLICATE\|ADMIN`) | `NoMemory`/`TooBig` (tabela cheia) |
 | 37 | `job_attach` | job (`ADMIN`), processo (`READ`) → anexa; os processos que o membro criar herdam o job | `BadHandle`, `Denied`, `InvalidArgs` (não é job/processo) |
@@ -68,9 +69,12 @@ Seletores: código do usuário `0x2b`, dados `0x23` (`STAR[63:48] = 0x18`); cód
 | 40 | `thread_exit` | — → termina a thread; a última viva termina o processo com 0 | — (nunca retorna) |
 | 41 | `thread_join` | h (thread deste processo) → espera terminar | `BadHandle`, `Denied`, `InvalidArgs` (não é thread daqui / é a própria) — bloqueia |
 | 42 | `job_set_cpu_limit` | job (`ADMIN`), ns por janela de 1 s (0 = sem limite) → define a quota de CPU do job; passando do orçamento as threads dos membros deixam de ser escalonadas até a janela seguinte (o excedente é cobrado dela) | `BadHandle`, `Denied`, `InvalidArgs` (não é job) |
+| 44 | `event_create` | auto (1 = a espera consome o sinal, uma thread por sinalização; 0 = manual, fica sinalizado até `event_reset`) → handle de evento (`KIND_EVENT` = 8; `READ\|SIGNAL\|TRANSFER\|DUPLICATE`) | `NoMemory` |
+| 45 | `event_signal` | handle de evento (`SIGNAL`) → acorda quem espera: todos no modo manual, um no automático | `BadHandle`, `Denied` (sem `SIGNAL`), `InvalidArgs` (não é evento) |
+| 46 | `event_reset` | handle de evento (`SIGNAL`) → apaga o sinal (modo manual; no automático o consumo já apaga) | `BadHandle`, `Denied` (sem `SIGNAL`), `InvalidArgs` |
 | 43 | `process_list` | ptr, capacidade (1..=256 em `ProcInfo` de 64 B), handle de depuração → quantos processos vivos couberam ({pid, cpu_ns, syscalls, handles, threads, nome}) | `Denied` (sem a capability), `InvalidArgs`, `BadAddress` |
 | 27 | `irq_channel` | dev (`SIGNAL`), vetor (de um `irq_alloc` da mesma concessão) → handle de canal (`READ`): 1 byte por disparo, coalescido se já houver aviso na fila; combina com `channel_wait_any` | `BadHandle`, `Denied` (sem `SIGNAL` ou vetor de outra concessão), `InvalidArgs`, `NoMemory` |
-| 26 | `channel_wait_any` | ptr (array de handles u32), n (1..=16) → índice do primeiro canal com mensagem ou par fechado (bloqueia; acordado pelo `send`/fecho do par, com tique de cobertura de 10 ms) | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs` (não-canal, n fora da faixa), `BadAddress` |
+| 26 | `channel_wait_any` | ptr (array de handles u32 — canais **e eventos**; o nome ficou por a ABI ser aditiva, mas desde o bloco 122 é a espera múltipla geral), n (1..=16) → índice do primeiro canal com mensagem ou par fechado, ou do primeiro evento sinalizado (num evento automático a espera **consome** o sinal) (bloqueia; acordado pelo `send`/fecho do par, com tique de cobertura de 10 ms) | `BadHandle`, `Denied` (sem `READ`), `InvalidArgs` (não-canal, n fora da faixa), `BadAddress` |
 | 24 | `device_open` | dev (raiz, `ADMIN`), bdf | handle de concessão restrita à função `bdf` com `RIGHTS_DEVICE_DEFAULT` (sem `ADMIN`) | `BadHandle`, `Denied` (sem `ADMIN` ou `bdf` fora do escopo), `NotFound` (função não enumerada), `NoMemory` (tabela cheia) |
 
 Números desconhecidos devolvem `NotSupported` (3) sem efeitos. `channel_recv` bloqueia a thread até haver mensagem ou o par fechar.
@@ -105,7 +109,7 @@ Todo ponteiro de usuário é validado antes do acesso: faixa `[ptr, ptr+len)` ab
 - Espaço de endereçamento por processo (PML4 própria; metade do kernel compartilhada), carregado de um ELF64 estático (`ET_EXEC`, endereços do arquivo) **ou PIE** (`ET_DYN`: base aleatória numa janela de 1 TiB acima de 256 MiB, relocações `R_X86_64_RELATIVE` da tabela `DT_RELA` aplicadas pelo kernel; outros tipos são recusados) com segmentos W^X; pilha de 256 KiB com topo **aleatório** (ASLR: alinhado a página, numa janela de 1 GiB abaixo de `0x0000_7fff_fff0_0000`; chega em `RSP`) e região de mapeamentos (`memory_map`/MMIO/DMA) começando num deslocamento aleatório de até 4 GiB acima de `USER_DEVICE_REGION`; o código do ELF é fixo (sem PIE).
 - Uma thread por processo; `RDI` na entrada carrega um argumento inteiro.
 - Falha em modo usuário (`#PF`, `#GP`, `#UD`…) encerra apenas o processo com código `-1` e motivo registrado no log; o kernel continua.
-- Handles com direitos, canais com transferência de handles e processos como objetos (spawn por nome do initrd, wait, info) existem (§3.1–3.2, syscalls 14–16); espera múltipla de canais (`channel_wait_any`, 26; com prazo, `channel_wait_any_timeout`, 34 — o timer de usuário simples) e memória compartilhada (`memory_create`/`memory_map`/`memory_unmap`, 28/29/30) existem; jobs/domínios e objetos de evento genéricos vêm nos próximos blocos.
+- Handles com direitos, canais com transferência de handles e processos como objetos (spawn por nome do initrd, wait, info) existem (§3.1–3.2, syscalls 14–16); espera múltipla de canais (`channel_wait_any`, 26; com prazo, `channel_wait_any_timeout`, 34 — o timer de usuário simples) e memória compartilhada (`memory_create`/`memory_map`/`memory_unmap`, 28/29/30) existem; **objetos de evento** genéricos existem (`event_create`/`event_signal`/`event_reset`, 44–46; manuais e automáticos, esperados na mesma `channel_wait_any` dos canais) e são o primeiro objeto a exercer o direito SINALIZAR; jobs existem (36–38). Falta o isolamento por domínios.
 - Programas: o initrd (`kernel/lib/initrd`, formato `NEXOIRD1`, gerado por `tools/mkinitrd.py`) contém `init`, `svcmgr`, `echo`, `echo-client`, `utest`, `blockdev` (driver VirtIO-block em modo usuário) e `fs` (servidor NexoFS v0, ADR-0016).
 - Pilha de usuário: 256 KiB (era 64 KiB; serviços com buffers de bloco na pilha estouravam). `init` inicia `svcmgr`; `svcmgr` supervisiona `echo` (reinício até 3 vezes) e atende pedidos de conexão de `echo-client` entregando um canal por pedido.
 
