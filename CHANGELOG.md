@@ -336,6 +336,13 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Alterado (Fase 1, bloco 130 — o inventário de `unsafe` passou a ser gerado)
+
+- `docs/unsafe-inventory.md` era escrito à mão e dizia **355** ocorrências, contadas em 2026-08-30. A árvore tinha **474**. Ficara 119 usos atrás sem que ninguém reparasse — e um inventário que envelhece é pior que nenhum, porque dá a impressão de que se sabe o que há na árvore.
+- Agora é **gerado da própria árvore** (`make unsafe-inventory`): cada ocorrência com ficheiro, linha, forma (`bloco`/`fn`/`impl`/`extern`) e a invariante que o autor afirmou no `SAFETY:`, agrupadas por crate. O preâmbulo — a parte que uma máquina não sabe escrever — vive no gerador, como as estimativas do `roadmap-status`.
+- `make lint` passa a rodar `tools/nexo-unsafe-audit --check` e **recusa a árvore se o arquivo defasar**, do mesmo modo que `make idl-check` recusa protocolos gerados desatualizados. Verificado a reprovar: uma linha a mais no arquivo faz o lint falhar pedindo a regeneração.
+- Fecha o item "documentação de todas as invariantes `unsafe`" do Plano §6.1. O gate que **exige** a justificativa e o inventário que a **publica** são as duas metades da mesma política (ADR-0001).
+
 ### Adicionado (Fase 1, bloco 129 — linha de base de desempenho)
 
 - **O projeto não tinha número nenhum.** Agora tem quatro, medidos a cada boot e registrados com o marcador `[BENCH]`: troca de contexto entre duas threads presas à **mesma** CPU (~800 ns), syscall nula do espaço de usuário (~322 ns), IPC sem escalonamento (~4,1 µs) e IPC ida-e-volta com escalonamento (~42,8 µs).

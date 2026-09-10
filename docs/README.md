@@ -8,7 +8,7 @@
 | `toolchain.md` | versões fixadas e setup |
 | `testing.md` | camadas de teste e protocolo serial |
 | `bench.md` | linha de base de desempenho (troca de contexto, syscall, IPC) e o que ela não é |
-| `unsafe-inventory.md` | classes de `unsafe` por crate |
+| `unsafe-inventory.md` | **gerado**: as 474 ocorrências de `unsafe` com ficheiro, linha e a invariante afirmada (`make unsafe-inventory`) |
 | `board.md` | board da Fase 0 / 90 dias com evidências |
 | `CHECKLIST_STATUS.md` | estado dos gates e decisões pendentes |
 | `COMPROMISSOS.md` | compromissos que fecham por tempo de relógio (stress de dias, agendamentos, incidentes em vigia), conferidos por `make prazos` |

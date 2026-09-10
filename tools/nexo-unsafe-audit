@@ -6,8 +6,10 @@ Cobertos: blocos `unsafe {`, `unsafe fn`, `unsafe impl`, `unsafe extern`. Isento
 `#[unsafe(...)]` da edição 2024 (ex.: `no_mangle`), `unsafe_op_in_unsafe_fn`,
 `forbid(unsafe_code)` e menções em comentários/strings de documentação.
 
-Uso: tools/nexo-unsafe-audit          # audita a árvore toda; sai 1 se houver violação
-     tools/nexo-unsafe-audit --list   # também lista todos os usos justificados (inventário)
+Uso: tools/nexo-unsafe-audit              # audita a árvore toda; sai 1 se houver violação
+     tools/nexo-unsafe-audit --list       # lista todos os usos justificados
+     tools/nexo-unsafe-audit --inventario # (re)gera docs/unsafe-inventory.md
+     tools/nexo-unsafe-audit --check      # falha se o inventário estiver defasado
 """
 
 import re
@@ -21,7 +23,7 @@ ISENTO = re.compile(r"#\[unsafe\(|unsafe_op_in_unsafe_fn|forbid\(unsafe_code\)|d
 JANELA = 8  # linhas acima onde o SAFETY: pode estar (atributos no meio são pulados)
 
 
-def audita(caminho: Path, listar: bool):
+def audita(caminho: Path, listar: bool, coletar=None):
     violacoes = []
     usos = 0
     linhas = caminho.read_text(encoding="utf-8").splitlines()
@@ -31,37 +33,137 @@ def audita(caminho: Path, listar: bool):
             continue
         usos += 1
         ok = "SAFETY" in linha
+        justificativa = linha.split("SAFETY:", 1)[-1].strip() if ok else ""
         for k in range(1, JANELA + 1):
             if ok or i - k < 0:
                 break
             acima = linhas[i - k].strip()
             if "SAFETY" in acima or ("safety" in acima.lower() and acima.startswith("//")):
                 ok = True
+                justificativa = justifica_de(linhas, i - k)
             elif acima.endswith("="):
                 continue  # cabeça de `let ... =` cujo valor é o próprio bloco unsafe
             elif not (acima.startswith("//") or acima.startswith("#[") or acima.startswith("#![")):
                 break  # linha de código no meio: a justificativa não cobre este uso
         if not ok:
             violacoes.append((i + 1, linha.strip()[:90]))
-        elif listar:
-            print(f"  ok  {caminho.relative_to(ROOT)}:{i + 1}")
+        else:
+            if listar:
+                print(f"  ok  {caminho.relative_to(ROOT)}:{i + 1}")
+            if coletar is not None:
+                coletar.append((caminho, i + 1, forma_de(codigo), justificativa))
     return usos, violacoes
+
+
+def justifica_de(linhas, i):
+    """Junta o comentário `SAFETY:` que começa na linha `i` com as suas continuações."""
+    texto = linhas[i].strip().lstrip("/").strip()
+    texto = texto.split("SAFETY:", 1)[-1].strip() if "SAFETY:" in texto else texto
+    k = i + 1
+    while k < len(linhas):
+        seguinte = linhas[k].strip()
+        if not seguinte.startswith("//") or "SAFETY:" in seguinte:
+            break
+        texto += " " + seguinte.lstrip("/").strip()
+        k += 1
+    return " ".join(texto.split())
+
+
+def forma_de(codigo: str) -> str:
+    """`bloco`, `fn`, `impl` ou `extern` — a forma do uso, para agrupar no inventário."""
+    m = USO.search(codigo)
+    if not m:
+        return "bloco"
+    return {"{": "bloco", "fn": "fn", "impl": "impl", "extern": "extern"}[m.group(1).strip()]
+
+
+def crate_de(caminho: Path) -> str:
+    """Nome do crate a que o arquivo pertence (o diretório com Cargo.toml mais próximo)."""
+    d = caminho.parent
+    while d != ROOT:
+        if (d / "Cargo.toml").is_file():
+            for linha in (d / "Cargo.toml").read_text(encoding="utf-8").splitlines():
+                if linha.startswith("name"):
+                    return linha.split("=", 1)[1].strip().strip('"')
+            return d.name
+        d = d.parent
+    return "?"
+
+
+# Preâmbulo do inventário gerado: a parte que uma máquina não sabe escrever. Editar AQUI.
+PREAMBULO = """# Inventário de `unsafe`
+
+**Gerado por `tools/nexo-unsafe-audit --inventario` (`make unsafe-inventory`). Não editar à
+mão** — o preâmbulo vive no próprio gerador. Uma versão anterior deste arquivo era escrita à
+mão e ficou defasada em 119 usos antes de alguém reparar; um inventário que envelhece é pior
+que nenhum, porque dá a impressão de que se sabe o que há na árvore.
+
+Regra (ADR-0001): **todo** uso de `unsafe` tem uma justificativa `SAFETY:` adjacente, e
+`make lint` recusa código que a esqueça. Este arquivo é o resultado: cada uso da árvore, o
+ficheiro e linha onde vive, e a invariante que o autor afirmou. É a resposta ao item "documentar
+todas as invariantes `unsafe`" do Plano §6.1 — e, por ser gerado, continua a ser a resposta
+amanhã.
+
+Como ler: uma justificativa que não diga *por que a invariante vale* é uma dívida, não uma
+justificativa. Revisar este arquivo a cada release é a forma barata de as encontrar.
+"""
+
+
+def inventario(usos, total):
+    """Texto do inventário: contagem por crate e, dentro dele, cada uso com a sua invariante."""
+    por_crate = {}
+    for caminho, linha, forma, justificativa in usos:
+        por_crate.setdefault(crate_de(caminho), []).append(
+            (caminho.relative_to(ROOT), linha, forma, justificativa)
+        )
+    L = [PREAMBULO, "", f"**{total} usos de `unsafe`, {len(usos)} com justificativa registrada.**", ""]
+    L.append("| Crate | Usos |")
+    L.append("| --- | ---: |")
+    for crate in sorted(por_crate, key=lambda c: (-len(por_crate[c]), c)):
+        L.append(f"| `{crate}` | {len(por_crate[crate])} |")
+    L.append("")
+    L.append("Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_code)`.")
+    L.append("")
+    for crate in sorted(por_crate, key=lambda c: (-len(por_crate[c]), c)):
+        L.append(f"## `{crate}` — {len(por_crate[crate])} usos")
+        L.append("")
+        L.append("| Local | Forma | Invariante afirmada |")
+        L.append("| --- | --- | --- |")
+        for rel, linha, forma, just in sorted(por_crate[crate]):
+            texto = (just or "—").replace("|", "\\|")
+            L.append(f"| `{rel}:{linha}` | {forma} | {texto} |")
+        L.append("")
+    return "\n".join(L) + "\n"
 
 
 def main() -> int:
     listar = "--list" in sys.argv
+    gerar = "--inventario" in sys.argv
+    checar = "--check" in sys.argv
+    coletados = [] if (gerar or checar) else None
     total, ruins = 0, 0
     for d in DIRS:
         for arq in sorted((ROOT / d).rglob("*.rs")):
             if "target" in arq.parts or "generated" in arq.parts:
                 continue
-            usos, violacoes = audita(arq, listar)
+            usos, violacoes = audita(arq, listar, coletados)
             total += usos
             for ln, txt in violacoes:
                 ruins += 1
                 print(f"SEM SAFETY: {arq.relative_to(ROOT)}:{ln}: {txt}")
     print(f"nexo-unsafe-audit: {total} uso(s) de unsafe, {ruins} sem justificativa")
-    return 1 if ruins else 0
+    if ruins:
+        return 1
+    if gerar or checar:
+        destino = ROOT / "docs" / "unsafe-inventory.md"
+        texto = inventario(coletados, total)
+        if gerar:
+            destino.write_text(texto, encoding="utf-8")
+            print(f"nexo-unsafe-audit: {destino.relative_to(ROOT)} com {len(coletados)} entradas")
+        elif texto != destino.read_text(encoding="utf-8"):
+            print("erro: docs/unsafe-inventory.md defasado; rode 'make unsafe-inventory'")
+            return 1
+    return 0
 
 
 if __name__ == "__main__":

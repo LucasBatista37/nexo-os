@@ -4,8 +4,9 @@
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
 #   make prazos     -> compromissos de longa duração (docs/COMPROMISSOS.md)
+#   make unsafe-inventory -> regenera docs/unsafe-inventory.md da árvore
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap prazos idl idl-check toolchain
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci check-toolchain reproducible clean stress fuzz netcap roadmap prazos unsafe-inventory idl idl-check toolchain
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 # Margem +900s +1% da duracao: o relogio do guest (TCG) atrasa em relacao a parede sob
@@ -46,7 +47,7 @@ lint:
 	cd kernel && cargo clippy --release -- -D warnings
 	cd boot/loader && cargo clippy --release -- -D warnings
 	cd services && cargo clippy --workspace --release -- -D warnings
-	tools/nexo-unsafe-audit
+	tools/nexo-unsafe-audit --check
 	tools/nexo-prazos --auto-teste
 
 fmt:
@@ -93,6 +94,12 @@ idl-check: idl
 
 roadmap:
 	tools/roadmap-status
+
+# Inventario de `unsafe` (docs/unsafe-inventory.md) gerado da propria arvore: cada uso e a
+# invariante que o autor afirmou. `make lint` roda --check e falha se o arquivo defasar —
+# a versao escrita a mao ficou 119 usos atras antes de alguem reparar.
+unsafe-inventory:
+	tools/nexo-unsafe-audit --inventario
 
 # Compromissos que fecham por tempo de relogio (uma execucao de dias, um agendamento
 # semanal, um incidente a espera de reincidencia): nao aparecem em checklist nenhuma e
