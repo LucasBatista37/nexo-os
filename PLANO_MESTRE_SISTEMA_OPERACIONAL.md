@@ -747,60 +747,71 @@ host real no cenário `net`; o que falta é ou **decisão adiada** (TLS e o que 
 
 ### 6.5 Desktop e experiência
 
-- [ ] linguagem visual original;
-- [ ] tokens de cor, tipografia, espaçamento e movimento;
-- [ ] compositor;
-- [ ] janelas flutuantes e mosaico;
-- [ ] Contextos persistentes;
-- [ ] Central de Ações;
-- [ ] Faixa de Atividades;
-- [ ] login e bloqueio;
-- [ ] notificações;
-- [ ] multi-monitor;
-- [ ] escala e alta densidade;
-- [ ] clipboard e drag-and-drop seguros;
-- [ ] temas e personalização;
-- [ ] atalhos consistentes;
-- [ ] onboarding e recuperação de erro;
-- [ ] testes de usabilidade desktop e notebook.
+Estado desta frente: o esqueleto do desktop existe e é testado de ponta a ponta (compositor,
+shell, login, notificações, Contextos), com uma diferença que importa — as primitivas
+delicadas (entrada, clipboard, arrastar-e-soltar, escolha de arquivo) são **mediadas** e têm
+teste de negação, não só de uso. O que falta é largura: mais widgets, mais painéis, mais
+telas — e o que só se resolve com pessoas de fora (usabilidade).
+
+- [-] linguagem visual original — *existe um tema com tokens próprios (`nexo-ui::Theme`) e um desenho consistente entre compositor, shell, login e aplicativos, mas não uma linguagem visual documentada (princípios, grelha, iconografia)*;
+- [-] tokens de cor, tipografia, espaçamento e movimento — *cores em três variantes (claro, escuro, alto contraste) e a preferência de **movimento reduzido** honrada pelos aplicativos; tipografia é uma fonte bitmap 8×8 e o espaçamento é constante nos widgets. Faltam tokens de tipografia, espaçamento e raio de verdade*;
+- [x] compositor — *`services/wm`: superfícies com buffer próprio, ordem em z, foco, recorte, redimensionamento, escala global e composição para o framebuffer; sessão por cliente com handles, e a saída conferida **por pixel** nos auto-testes*;
+- [x] janelas flutuantes e mosaico — *as duas: janelas flutuantes com posição e z próprios, e **mosaico contínuo** (`auto_tile`) que se refaz sozinho ao criar, fechar ou desconectar uma janela*;
+- [-] Contextos persistentes — *4 Contextos como grupos de janelas: só o ativo é composto e recebe entrada, a troca preserva o estado das ocultas, o foco vai para a janela de maior z, a captura de entrada sobrevive à troca e os avisos de Contexto inativo esperam sem interromper. "Persistentes" (sobreviver a reinício) pende de armazenamento de sessão*;
+- [-] Central de Ações — *registro de avisos com histórico por Contexto, silêncio (não-perturbe) e limpeza — mediado pelo compositor, que atribui cada aviso ao Contexto da janela de topo da sessão publicante (a sessão não escolhe). Falta a superfície visual completa*;
+- [x] Faixa de Atividades — *`services/shellui`: barra no rodapé com uma célula por janela, título vindo do compositor, foco por clique e atalho global; testada por pixel*;
+- [-] login e bloqueio — *`services/greeter` em tela cheia **captura** a entrada (a senha não pode ser roubada por outra janela nem o foco desviado por clique), senha errada mantém o bloqueio, a certa devolve a entrada à sessão. Pendem credencial de verdade (depende do modelo de usuários), re-bloqueio por inatividade e gestão de estado da sessão*;
+- [x] notificações — *publicação mediada pelo compositor, banner, não-perturbe, histórico e atribuição por Contexto, com avisos de Contexto inativo a esperarem a troca; verificadas nos auto-testes do compositor*;
+- [ ] multi-monitor — *o compositor trabalha com um display; não há enumeração nem arranjo de monitores*;
+- [-] escala e alta densidade — *escala global é privilégio do shell (pedido mediado ao orquestrador) e o painel de Configurações a exerce, com a saída composta conferida a 1/2. Faltam escala por monitor e ativos em alta densidade*;
+- [x] clipboard e drag-and-drop seguros — *as duas primitivas exigem **posse da entrada**: o clipboard guarda histórico e só quem tem o foco lê/escreve; o arrastar-e-soltar entrega por *grant* apenas à janela sob o cursor. É a mediação a trabalhar a favor do aplicativo, e há teste de negação*;
+- [-] temas e personalização — *três variantes de tema com troca **em runtime** (`set_theme`, a janela repinta na hora, conferido por pixel nos dois sentidos) e preferências de movimento e não-perturbe. Faltam persistência da escolha e personalização além do tema*;
+- [-] atalhos consistentes — *atalhos globais no compositor (Meta+Tab cicla janelas, troca de Contexto) e navegação por Tab entre widgets com anel de foco visível. "Consistentes" pende do shell completo (menus e diálogos operáveis sem mouse)*;
+- [ ] onboarding e recuperação de erro — *não existe: nem primeira execução guiada, nem fluxo de recuperação apresentado ao usuário*;
+- [ ] testes de usabilidade desktop e notebook — *dependem de usuários externos e de hardware real (Fase 7); nada feito*.
 
 ### 6.6 Aplicativos e SDK
 
-- [ ] ABI C;
-- [ ] SDK Rust;
-- [ ] toolkit UI;
-- [ ] runtime e biblioteca padrão;
-- [ ] CLI de build, run, test, debug e package;
-- [ ] templates e exemplos;
-- [ ] documentação gerada;
-- [ ] pacotes e manifests;
-- [ ] capabilities/portals;
-- [ ] repositório e atualização;
-- [ ] terminal;
-- [ ] arquivos;
-- [ ] configurações;
-- [ ] monitor do sistema;
-- [ ] editor;
-- [ ] visualizadores;
-- [ ] motor web portado;
-- [ ] compatibilidade POSIX progressiva.
+Estado desta frente: um aplicativo do Nexo pode ser escrito, compilado, empacotado, instalado,
+lançado com permissão do usuário e atualizado — e há oito aplicativos próprios a prová-lo. O
+que falta é o que só o uso por terceiros resolve (estabilizar e publicar a ABI) e o que é
+grande por natureza (motor web).
+
+- [x] ABI C — *`abi/c/nexo.h` (syscalls e handles) mais os cabeçalhos de protocolo gerados do mesmo IDL, com toolchain C/C++ empacotado (`make toolchain`) e programas em C reais a correr (utilitários POSIX, `fetch` HTTP)*;
+- [-] SDK Rust — *existe e está documentado (`sdk/nexo-sys`, `sdk/nexo-rt`, `sdk/nexo-net`, `docs/sdk.md`); "publicar" de verdade (crates versionados fora do repositório) pende da estabilização da ABI v1*;
+- [-] toolkit UI — *`libraries/ui`: tokens de tema, `Label`, `Button` com estados e hit-test, `VStack` e navegação por foco, sobre `nexo-gfx`. Faltam campos de texto, listas, menus e um sistema de layout completo*;
+- [x] runtime e biblioteca padrão — *`nexo-rt` (formatação sem alocação, `log!`, panic handler) para Rust e a **nexo-libc** para C (string, stdio com `printf` próprio, stdlib, fd, dirent, `sys/stat.h`, `sys/socket.h`, `crt0` com a convenção de argv do Nexo)*;
+- [-] CLI de build, run, test, debug e package — *`make` cobre build/run/test; `tools/nexo-new` gera um aplicativo funcional; `tools/nexo-pack` empacota `.npk`; `tools/nexo-debug` liga lldb/gdb com símbolos. Falta uma CLI única (`nexo build|run|test|package`) em vez de alvos e scripts separados*;
+- [x] templates e exemplos — *`tools/nexo-new` cria um aplicativo com janela funcional seguindo o contrato de apps, e o repositório traz exemplos reais (`calc`, `greeter`, `shellui`, exemplos em C)*;
+- [ ] documentação gerada — *não há publicação de `cargo doc`/rustdoc; a documentação é escrita à mão em `docs/`*;
+- [x] pacotes e manifests — *formato `NEXOPKG1` (`libraries/pkg`) com manifesto, validação completa e instalação transacional (`libraries/inst`), exercitado no NexoFS real*;
+- [x] capabilities/portals — *o portal de arquivos entrega **apenas o conteúdo escolhido** pelo usuário (nunca o fs, nunca os outros nomes), o lançador concede por tempo e revoga fechando o proxy da sessão, e as APIs mediadas (clipboard, arrastar-e-soltar, notificações) exigem posse da entrada*;
+- [-] repositório e atualização — *repositório local (`/repo/<nome>.npk`) e por rede (o guest baixa por HTTP, grava e instala pelo caminho oficial), com índice gerado e conferido (`tools/nexo-repo`), descoberta de versão nova e atualização A/B do sistema com reversão. Pende a **assinatura**, que depende da decisão de criptografia*;
+- [x] terminal — *`services/term`: terminal gráfico sobre a grelha de texto, com o shell de diagnóstico do outro lado*;
+- [x] arquivos — *`services/arquivos`: navegador de arquivos sobre o `nexo.fs`, com o portal a mediar a escolha para outros aplicativos*;
+- [x] configurações — *`services/config`: toggles reais (movimento reduzido, não-perturbe), troca de tema em runtime e painel de escala, todos com efeito verificado de fora*;
+- [x] monitor do sistema — *`services/monitor`: CPUs, memória, processos e, com a capability de depuração, o processo mais pesado com a sua percentagem*;
+- [x] editor — *`services/editor`: edição de texto sobre o `nexo.fs`, com empréstimo de capacidade do fs por pedido*;
+- [-] visualizadores — *`services/visor` mostra imagens (`libraries/img`); faltam outros formatos e outros tipos de documento*;
+- [ ] motor web portado — *não iniciado; a decisão registrada é portar um motor existente com sandbox, se os recursos permitirem*;
+- [-] compatibilidade POSIX progressiva — *onze utilitários (`wc`, `cat`, `ls`, `cp`, `rm`, `mv`, `echo`, `head`, `mkdir`, `grep` com regex mínima, `sort`) e um mini `sh` com pipelines, redireções e aspas, tudo em C sobre a nexo-libc e a correr dentro do shell de diagnóstico. Pendem variáveis no `sh` e a integração com uma libc completa*.
 
 ### 6.7 Segurança e privacidade
 
 - [x] threat model atualizado — *v1 (2026-09-07) em SECURITY.md: ativos, vetores, mitigações e lacunas do sistema com modo usuário, capabilities, rede, disco, compositor mediado, consentimento/revogação e atualizações A/B; o v0 só cobria o kernel em ring 0*;
-- [ ] privilégio mínimo;
-- [ ] isolamento de drivers e serviços;
+- [x] privilégio mínimo — *nada no sistema tem mais do que precisa: cada driver recebe uma concessão limitada ao seu BDF; cada serviço recebe só os handles do seu trabalho; um aplicativo recebe uma sessão de janelas e nada mais, e o que quiser além disso passa por mediação (portal de arquivos, clipboard, notificações). Os direitos de um handle **só diminuem**, e a matriz direito × operação mais o fuzzing dirigido a capabilities (blocos 124 e 127) exigem que a ausência de cada direito seja recusada*;
+- [-] isolamento de drivers e serviços — *todos são processos em ring 3 com espaço próprio, sem instruções privilegiadas e sem acesso a memória alheia (SMEP/SMAP no kernel desde o bloco 126); a queda de um driver não abala kernel nem clientes, e os recursos voltam (`user_block_crash`). O buraco conhecido é o **DMA sem IOMMU**: um driver comprometido programa o dispositivo para escrever em qualquer lugar*;
 - [x] W^X, NX, ASLR e guard pages — *W^X, NX e guard pages ativos; **ASLR completo** por processo: pilha (janela de 1 GiB, 18 bits), mapeamentos (4 GiB, 20 bits) e **código** — os programas Rust são PIE (`ET_DYN`) carregados numa base aleatória (1 TiB, 28 bits) com as relocações `R_X86_64_RELATIVE` aplicadas pelo kernel; `rdrand` ou xorshift semeado pelo TSC — auto-teste `user_aslr` (blocos 100 e 102). Programas C do toolchain continuam `ET_EXEC` em endereço fixo*;
-- [ ] IOMMU;
-- [ ] consentimento de câmera/microfone/rede/arquivos;
-- [ ] indicadores de privacidade resistentes a falsificação;
+- [-] IOMMU — *abstração criada (`kernel/src/iommu.rs`), tabela DMAR detectada, modo `Passthrough` **explícito** e aviso `IRRESTRITO (caminho inseguro)` no boot conferido por marcador de teste — a insegurança é declarada, não silenciosa (ADR-0015). A tradução VT-d/AMD-Vi, que é o que de facto conteria um driver comprometido, pende*;
+- [-] consentimento de câmera/microfone/rede/arquivos — *arquivos: o **portal** entrega só o conteúdo que o usuário escolheu; rede: cada sessão do `netd` tem um perfil que autoriza destino/porta/protocolo pacote a pacote; lançamento de aplicativo: o usuário permite, nega ou **permite por tempo** — e ao expirar o cordão é cortado e o aplicativo encerra. Câmera e microfone pendem de haver dispositivos*;
+- [ ] indicadores de privacidade resistentes a falsificação — *não existem; o desenho previsto (indicador desenhado pelo compositor, fora do alcance do aplicativo) só faz sentido quando houver câmera e microfone*;
 - [ ] cofre de credenciais;
 - [ ] criptografia de disco;
 - [ ] Secure/Measured Boot;
 - [ ] pacotes e updates assinados;
 - [ ] proteção contra rollback;
 - [ ] rotação e revogação de chaves;
-- [-] fuzzing e sanitizers onde aplicável — *fuzz-lite nos testes de host; sanitizers/cargo-fuzz pendentes*;
+- [-] fuzzing e sanitizers onde aplicável — *fuzz-lite determinístico dos parsers no host, fuzz de syscalls com sementes aleatórias registradas (20 000 por rodada no boot e `make fuzz` semanal no CI), fuzz da máquina de estados TCP e **fuzzing dirigido a capabilities** (bloco 127: sorteia direitos e exige que a ausência seja recusada). Pendem cobertura guiada (cargo-fuzz) e sanitizers*;
 - [ ] SBOM e análise de dependências;
 - [ ] política de vulnerabilidades;
 - [ ] auditoria externa.
@@ -810,36 +821,41 @@ host real no cenário `net`; o que falta é ou **decisão adiada** (TLS e o que 
 - [x] build reproduzível;
 - [x] testes unitários no host;
 - [x] testes kernel/QEMU;
-- [ ] testes de integração de serviços;
-- [ ] testes end-to-end de boot/login/app/update;
-- [ ] property tests;
+- [x] testes de integração de serviços — *os auto-testes de usuário sobem **vários serviços de verdade** e verificam a conversa entre eles: `user_devmgr` (gerenciador + drivers + fs), `user_greeter` (compositor + login + driver de entrada), `user_backup` (dois discos físicos e o fs emprestado), `user_launcher` (lançador, consentimento e revogação). Não são simulações: são os mesmos binários do boot*;
+- [-] testes end-to-end de boot/login/app/update — *o cenário `boot` percorre a cadeia inteira até o desktop, `user_greeter` faz o login, `user_install`/`user_launcher` instalam e lançam um aplicativo, e a atualização A/B é exercitada com **reversão** e verificação de slot (`tools/test-ab`, `test-update`, `test-rollback`, `test-recovery`). Falta um único cenário que encadeie tudo do zero num disco vazio*;
+- [-] property tests — *há invariantes verificadas sobre entradas geradas (fuzz-lite mantém propriedades dos parsers; a máquina de estados TCP é submetida a sequências aleatórias com invariantes; o fuzzing de capabilities afirma "sem o direito, nunca `Ok`"), mas sem uma biblioteca de propriedades com *shrinking*, que é o que torna uma falha legível*;
 - [-] fuzzing — *fuzz-lite determinístico + fuzz de syscalls semanal no CI (`make fuzz`); cobertura guiada e fuzz de rede/FS reais pendentes*;
-- [ ] fault injection;
-- [ ] testes de corte de energia;
-- [-] testes SMP e race conditions — *stress multi-CPU básico; regressão `threads_join_spurious_wake` (despertar espúrio no `join`, bloco 94)*;
-- [ ] testes de longa duração;
+- [-] fault injection — *falhas injetadas de propósito e verificadas: driver que cai no meio de um pedido (`user_block_crash`), corte de energia em **cada** escrita do sistema de arquivos (host) e a meio de uma escrita real (cenário `powercut`), erro de E/S no volume (bloco 119), imagens corrompidas, e o `echo` que cai para exercitar o reinício. Falta injeção sistemática (falhar a n-ésima alocação, a n-ésima mensagem) em vez de pontos escolhidos à mão*;
+- [x] testes de corte de energia — *corte em cada escrita no host, com verificação de que o volume fica numa versão permitida e sem vazamento; e o cenário `powercut`, que mata o QEMU a meio de uma escrita real e confere a recuperação no boot seguinte*;
+- [-] testes SMP e race conditions — *stress multi-CPU contínuo (4 CPUs, threads de lock/atômicos/heap/sleep/spawn-join/map-unmap com invariantes verificadas a cada segundo) e regressões dedicadas às corridas já encontradas: `threads_join_spurious_wake` (bloco 94) e `user_usercopy_race` (bloco 121, duas threads a disputar um buffer dentro de uma syscall). Falta análise sistemática — os modelos de memória e as ferramentas de detecção de corrida não existem para `no_std` aqui*;
+- [-] testes de longa duração — *24 h **feitas** com zero erros (2026-09-01); a rodada de 7 dias chegou a 5,84 dias com zero erros antes de ser interrompida de fora, e a rodada completa corre desde 2026-09-09 com veredito em **2026-09-16** — rastreada em `docs/COMPROMISSOS.md` e conferida por `make prazos`, que verifica o processo vivo e o contador de erros do log*;
 - [ ] matriz de hardware;
-- [ ] performance regression gates;
-- [ ] crash dumps e símbolos;
+- [-] performance regression gates — *a linha de base existe e é medida a cada boot (`docs/bench.md`: troca de contexto, syscall, IPC com e sem escalonamento), com os marcadores `[BENCH]` exigidos no cenário `boot` — um benchmark que deixa de correr em silêncio não é linha de base. Não há **gate**: os números não são comparados automaticamente com os da execução anterior, porque sob TCG a variação do host engoliria o sinal. Um gate honesto pede hardware*;
+- [x] crash dumps e símbolos — *pânico com backtrace **simbolizado** e dump gravado em setores reservados do disco por um caminho de emergência que não aloca nem trava (BARs mapeados e páginas de DMA pré-alocadas no boot); extração e limpeza por `tools/nexo-disk crashdump`, com o cenário `panic` a validar o conteúdo no CI*;
 - [ ] métricas respeitando privacidade;
-- [ ] processo de triagem e regressão.
+- [-] processo de triagem e regressão — *toda falha encontrada vira **teste de regressão** com nome próprio (a lista está no CHANGELOG bloco a bloco), incidentes sem causa raiz ficam documentados em `docs/incidents/` com o que se sabe e o que fazer na próxima ocorrência, e compromissos de vigia entram em `docs/COMPROMISSOS.md`. Falta o processo formal — SLA, severidade, dono, prazo — que só faz sentido com mais de uma pessoa*.
 
 ### 6.9 Acessibilidade e internacionalização
 
-- [ ] toda ação essencial acessível por teclado;
-- [ ] árvore semântica de acessibilidade;
-- [ ] leitor de tela;
-- [ ] ampliação e escala;
-- [ ] alto contraste;
-- [ ] redução de movimento;
-- [ ] legendas e indicadores visuais para áudio;
-- [ ] tamanhos de texto ajustáveis;
-- [ ] métodos de entrada;
-- [ ] Unicode completo nas camadas fundamentais;
-- [ ] localização pt-BR e en-US;
-- [ ] formatos de data, hora, número e moeda;
+Estado desta frente: existem as **fundações** (eventos semânticos, alto contraste, movimento
+reduzido, navegação por teclado dentro do aplicativo) e falta tudo o que depende de um shell
+completo, de texto de verdade e de pessoas para testar. Nada aqui pode ser marcado como pronto
+sem usuários reais — e isso está na Fase 9, não aqui.
+
+- [-] toda ação essencial acessível por teclado — *entre janelas: Meta+Tab cicla o foco; dentro do aplicativo: `nexo-ui::Nav` cicla widgets com Tab/Shift+Tab e `draw_focus_ring` torna o foco visível. "Toda ação essencial" pende do shell completo (menus e diálogos)*;
+- [-] árvore semântica de acessibilidade — *o compositor emite **eventos semânticos** num canal que um leitor de tela assina (`a11y_subscribe`): foco mudou com o título da janela, aviso publicado, Contexto trocado. É um fluxo de eventos, não ainda uma **árvore** com o conteúdo dos widgets*;
+- [-] leitor de tela — *a arquitetura existe e é exercitada: `user_wm_a11y` faz o papel do leitor e confere o fluxo de eventos. Pendem a síntese de voz ou braille, o texto dos widgets e um modelo de permissão para tecnologia assistiva*;
+- [-] ampliação e escala — *escala global existe (privilégio do shell, exercida pelo painel de Configurações e conferida por pixel). Falta ampliação como recurso de acessibilidade (lupa, escala por monitor, texto independente da interface)*;
+- [-] alto contraste — *variante de tema com preto e branco puros e acento saturado (`nexo-ui::Theme`), pintada só a partir dos tokens; falta a troca por preferência do usuário persistida e a garantia de contraste em todas as superfícies*;
+- [-] redução de movimento — *preferência real, honrada pelos aplicativos e verificada de fora (o painel de Configurações liga e o efeito é observável). Falta cobrir todas as animações do sistema — que hoje são poucas*;
+- [ ] legendas e indicadores visuais para áudio — *não há áudio; o item nasce com a Fase 7*;
+- [ ] tamanhos de texto ajustáveis — *a fonte é bitmap 8×8 com escala inteira; não há tamanho de texto ajustável independente da escala global*;
+- [ ] métodos de entrada — *só teclado e ponteiro diretos; nada de composição, IME ou entrada alternativa*;
+- [ ] Unicode completo nas camadas fundamentais — *a fonte cobre a faixa ASCII com glifo de fallback fora dela; texto e fontes vetoriais pendem*;
+- [ ] localização pt-BR e en-US — *o sistema é escrito em português, mas **sem** mecanismo de localização: as strings estão no código*;
+- [-] formatos de data, hora, número e moeda — *datas civis e fusos horários existem (`nexo-cal`: conversão epoch↔civil com deslocamento em minutos, testada nos dois sentidos à meia-noite). Faltam formatos por localidade, e número e moeda inteiramente*;
 - [ ] layouts da direita para a esquerda em fase posterior;
-- [ ] testes com pessoas e tecnologias assistivas.
+- [ ] testes com pessoas e tecnologias assistivas — *dependem de usuários externos (Fase 9); nada feito*.
 
 ### 6.10 Distribuição e operação
 

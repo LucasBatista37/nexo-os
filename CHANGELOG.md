@@ -336,6 +336,14 @@ Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Versões s
 ### Documentação (bloco 107 — stress de 7 dias, resultado parcial)
 - A rodada de 7 dias iniciada em 2026-09-01 chegou a **5,84 dias (505 031 s) com zero erros** — 723 M trocas de contexto, 53,7 M processos criados — e foi interrompida **de fora** em 2026-09-07 15:42 (o QEMU morreu com a limpeza do ambiente da sessão; sem pânico nem `FAIL` no guest). Relatório `docs/progress/2026-09-07-stress-7d-parcial.md`; log preservado fora do git. A rodada completa foi relançada, desacoplada da sessão, com o kernel atual.
 
+### Alterado (bloco 132 — as cinco frentes permanentes restantes auditadas contra o código)
+
+- Continuação do bloco anterior, agora para desktop (§6.5), aplicativos e SDK (§6.6), segurança e privacidade (§6.7), qualidade e confiabilidade (§6.8) e acessibilidade e internacionalização (§6.9): 73 itens verificados **no código**, um a um, e reescritos com a evidência e com o que falta.
+- O que a auditoria mostrou que estava por assinalar apesar de existir e ser testado: compositor, mosaico, Faixa de Atividades, notificações, clipboard e arrastar-e-soltar mediados; ABI C, runtime e libc, pacotes e manifests, portais, terminal, arquivos, configurações, monitor e editor; privilégio mínimo; testes de integração de serviços, corte de energia e crash dumps com símbolos.
+- E o que a auditoria deixou **nomeado** como ausente, que é o valor maior: não há multi-monitor, onboarding, documentação gerada, motor web, indicadores de privacidade, tamanhos de texto ajustáveis, métodos de entrada, Unicode além de ASCII nem mecanismo de localização — as strings estão no código, embora o sistema seja escrito em português. E não há **gate** de regressão de desempenho: a linha de base existe, mas sob TCG a variação do host engoliria o sinal; um gate honesto pede hardware.
+- Três frentes ganharam um parágrafo de estado à cabeça, dizendo em uma frase o que está feito, o que falta e **por que** falta — decisão adiada, hardware ausente ou trabalho por fazer são coisas diferentes e o leitor precisa distingui-las.
+- O `ROADMAP_STATUS` passou de 45% para 51%. Como no bloco anterior: nada de novo ficou pronto; o documento parou de mentir para menos.
+
 ### Alterado (bloco 131 — as frentes permanentes de drivers, armazenamento e rede auditadas contra o código)
 
 - As checklists das frentes permanentes (Plano §6) estavam quase todas **por marcar**, embora muito do que listam esteja feito há meses: §6.2 Drivers tinha 16 itens em branco com cinco drivers VirtIO, NVMe e AHCI a funcionar; §6.3 Armazenamento tinha o NexoFS, o VFS com namespaces e os testes de corte de energia todos por assinalar; §6.4 Rede tinha 14 em branco com a pilha inteira exercitada contra o host real.
