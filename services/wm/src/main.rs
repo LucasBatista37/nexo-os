@@ -298,8 +298,11 @@ fn recompose(
         {
             let fb_bytes = (fb.stride as u64) * (fb.h as u64) * 4;
             let fb_pixels = as_slice_mut(fb.base, fb_bytes);
+            // A saída lógica (OUT_W×OUT_H) esticada à tela inteira: até ao bloco 151 era
+            // copiada 1:1 para o canto — um selo de 64×48 numa tela de 1280×800 — e o
+            // ponteiro absoluto (mapeado na saída) não coincidia com o que se via.
             if let Some(mut screen) = Surface::new(fb_pixels, fb.w, fb.h, fb.stride, fb.format) {
-                screen.blit(&out, Rect::new(0, 0, OUT_W, OUT_H), 0, 0);
+                screen.stretch_from(&out);
             }
         }
     }

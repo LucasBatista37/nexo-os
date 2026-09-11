@@ -3236,24 +3236,38 @@ fn test_user_wm_present() -> TestResult {
     let hclient = alloc::vec![channel_handle(b)];
     // O compositor passa a ser o dono do framebuffer durante o teste (log só na serial).
     crate::klog::disable_console();
-    let run = || -> Result<(i64, i64, bool), String> {
+    let run = || -> Result<(i64, i64, bool, bool), String> {
         let wm = crate::process::spawn_named("wm", 0, hserver).map_err(String::from)?;
         let client = crate::process::spawn_named("utest", 29, hclient).map_err(String::from)?;
-        // Espera o magenta (255,0,255 — mesmos bytes em RGBX e BGRX) no pixel (8,8) da tela.
-        let px_addr = fb.base + (8 * fb.stride as u64 + 8) * 4;
-        let p = virt::phys_to_virt(nexo_mm::PhysAddr::new(px_addr)).as_ptr::<u8>();
-        let mut seen = false;
-        for _ in 0..400 {
-            // SAFETY: px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre.
-            let (b0, b1, b2) = unsafe {
+        // Espera o magenta (255,0,255 — mesmos bytes em RGBX e BGRX) na tela. A saída
+        // lógica é 64×48 esticada à tela inteira (bloco 151): o pixel lógico (lx, ly) ocupa
+        // o bloco da tela que começa em (lx·w/64, ly·h/48); lemos o meio de cada bloco.
+        let pixel = |lx: u64, ly: u64| -> *const u8 {
+            let x = lx * fb.width as u64 / 64 + fb.width as u64 / 128;
+            let y = ly * fb.height as u64 / 48 + fb.height as u64 / 96;
+            let px_addr = fb.base + (y * fb.stride as u64 + x) * 4;
+            virt::phys_to_virt(nexo_mm::PhysAddr::new(px_addr)).as_ptr::<u8>()
+        };
+        let le = |p: *const u8| -> (u8, u8, u8) {
+            // SAFETY: o endereço vem de `pixel`, dentro do framebuffer (validado contra o
+            // BAR); a physmap o cobre.
+            unsafe {
                 (
                     p.read_volatile(),
                     p.add(1).read_volatile(),
                     p.add(2).read_volatile(),
                 )
-            };
-            if (b0, b1, b2) == (255, 0, 255) {
+            }
+        };
+        let (p0, p15, p40) = (pixel(0, 0), pixel(15, 15), pixel(40, 40));
+        let mut seen = false;
+        let mut esticado = false;
+        for _ in 0..400 {
+            if le(p0) == (255, 0, 255) {
                 seen = true;
+                // a janela magenta é 16×16 em (0,0): o pixel lógico (15,15) tem de estar
+                // magenta na tela (estiramento) e o (40,40), fora dela, não
+                esticado = le(p15) == (255, 0, 255) && le(p40) != (255, 0, 255);
                 break;
             }
             sched::sleep_ms(10);
@@ -3261,13 +3275,17 @@ fn test_user_wm_present() -> TestResult {
         let cc = crate::process::wait_and_reap(&client);
         let wc = crate::process::wait_and_reap(&wm);
         drop((wm, client));
-        Ok((cc, wc, seen))
+        Ok((cc, wc, seen, esticado))
     };
     let result = run();
     crate::klog::enable_console();
-    let (cc, wc, seen) = result?;
+    let (cc, wc, seen, esticado) = result?;
     let frames = settled_free_frames(frames0, 8);
     check!(seen, "o magenta composto nao apareceu no framebuffer");
+    check!(
+        esticado,
+        "a saida nao foi esticada a tela inteira (pixel logico (15,15) ou (40,40) errado)"
+    );
     check!(cc == 0, "cliente saiu com {cc}");
     check!(wc == 0, "wm saiu com {wc}");
     let ends = crate::ipc::live_channel_ends();

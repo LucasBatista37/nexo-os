@@ -497,7 +497,7 @@ Os anos representam ordem e esforço relativo, não datas rígidas. Algumas fren
 
 **Resultado:** desktop gráfico funcional em QEMU, com estilo próprio e acessibilidade básica.
 
-- [-] obter framebuffer UEFI e modos de vídeo — *loader captura o framebuffer via GOP (`FramebufferInfo` no BootInfo v2), kernel desenha o console sobre ele, e o layout é exposto ao userspace pela syscall `fb_info` (31) — o mapeamento é gated pela concessão do dispositivo de vídeo (o framebuffer é um BAR, `mmio_map`); enumeração e troca de modos de vídeo pendentes*;
+- [-] obter framebuffer UEFI e modos de vídeo — *loader captura o framebuffer via GOP (`FramebufferInfo` no BootInfo v2), kernel desenha o console sobre ele, e o layout é exposto ao userspace pela syscall `fb_info` (31) — o mapeamento é gated pela concessão do dispositivo de vídeo (o framebuffer é um BAR, `mmio_map`); enumeração e troca de modos de vídeo pendentes. O compositor apresenta a saída lógica (64×48) **esticada à tela inteira** (bloco 151); modos de vídeo e uma saída lógica maior pendem*;
 - [-] criar renderer 2D por software — *`libraries/gfx` (`nexo-gfx`): superfícies, retângulos, blit e clipping; auto-teste `gfx` no boot; primitivas geométricas ricas pendentes*;
 - [-] implementar cores, composição alfa, clipping e transformações — *cores RGBA, composição alfa src-over e clipping retangular em `nexo-gfx` (testes de host); transformações (escala/rotação) pendentes*;
 - [-] implementar rasterização de texto e fallback de fontes — *`nexo-gfx::text` desenha strings com a fonte bitmap 8×8 (escala, cor, fundo, quebra de linha) e cai no glifo de fallback para caracteres fora da faixa; testes de host e no auto-teste `gfx`; fontes vetoriais/hinting e Unicode amplo pendentes*;

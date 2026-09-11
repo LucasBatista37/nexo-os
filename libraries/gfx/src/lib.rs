@@ -262,6 +262,35 @@ impl<'a> Surface<'a> {
             }
         }
     }
+
+    /// Estica `src` inteira sobre esta superfície inteira (vizinho mais próximo, opaco,
+    /// ignora o recorte). É a apresentação de uma saída lógica pequena numa tela grande:
+    /// o pixel de destino `(x, y)` mostra o de origem `(x·sw/dw, y·sh/dh)`, de modo que a
+    /// tela toda corresponde à saída toda — e um ponteiro absoluto mapeado na saída cai
+    /// exatamente onde o usuário clicou. Linhas de destino que mapeiam na mesma linha de
+    /// origem são copiadas da linha anterior (só `sh` linhas são convertidas pixel a pixel).
+    pub fn stretch_from(&mut self, src: &Surface<'_>) {
+        let (dw, dh) = (self.width, self.height);
+        let (sw, sh) = (src.width, src.height);
+        let mut prev_sy = -1;
+        for y in 0..dh {
+            let sy = ((y as i64 * sh as i64) / dh as i64) as i32;
+            let o = self.offset(0, y);
+            if sy == prev_sy {
+                let po = self.offset(0, y - 1);
+                let n = (dw * 4) as usize;
+                self.pixels.copy_within(po..po + n, o);
+                continue;
+            }
+            prev_sy = sy;
+            for x in 0..dw {
+                let sx = ((x as i64 * sw as i64) / dw as i64) as i32;
+                let px = self.encode(src.get(sx, sy));
+                let ox = o + (x * 4) as usize;
+                self.pixels[ox..ox + 4].copy_from_slice(&px);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -285,6 +314,39 @@ mod tests {
         assert_eq!(s.get(1, 1), Color::rgb(200, 100, 50));
         assert_eq!(s.get(2, 2), Color::rgb(200, 100, 50));
         assert_eq!(s.get(3, 3), Color::rgb(10, 20, 30));
+    }
+
+    #[test]
+    fn stretch_maps_whole_source_to_whole_destination() {
+        // origem 2x2 (quadrantes de cores) esticada para 6x4: cada quadrante vira 3x2
+        let mut sb = surface(2, 2);
+        let mut src = Surface::new(&mut sb, 2, 2, 2, PixelFormat::Rgbx8888).unwrap();
+        src.put(0, 0, Color::rgb(255, 0, 0));
+        src.put(1, 0, Color::rgb(0, 255, 0));
+        src.put(0, 1, Color::rgb(0, 0, 255));
+        src.put(1, 1, Color::rgb(255, 255, 0));
+        let mut db = surface(6, 4);
+        let mut dst = Surface::new(&mut db, 6, 4, 6, PixelFormat::Bgrx8888).unwrap();
+        dst.stretch_from(&src);
+        for y in 0..4 {
+            for x in 0..6 {
+                let want = match (x < 3, y < 2) {
+                    (true, true) => Color::rgb(255, 0, 0),
+                    (false, true) => Color::rgb(0, 255, 0),
+                    (true, false) => Color::rgb(0, 0, 255),
+                    (false, false) => Color::rgb(255, 255, 0),
+                };
+                assert_eq!(dst.get(x, y), want, "pixel ({x},{y})");
+            }
+        }
+        // razao nao inteira (2x2 -> 5x3): o ultimo pixel ainda e o ultimo da origem
+        let mut db2 = surface(5, 3);
+        let mut dst2 = Surface::new(&mut db2, 5, 3, 5, PixelFormat::Rgbx8888).unwrap();
+        dst2.stretch_from(&src);
+        assert_eq!(dst2.get(0, 0), Color::rgb(255, 0, 0));
+        assert_eq!(dst2.get(4, 2), Color::rgb(255, 255, 0));
+        assert_eq!(dst2.get(2, 1), Color::rgb(255, 0, 0)); // 2*2/5=0, 1*2/3=0
+        assert_eq!(dst2.get(3, 2), Color::rgb(255, 255, 0)); // 3*2/5=1, 2*2/3=1
     }
 
     #[test]
