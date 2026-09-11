@@ -4,7 +4,7 @@
 Cada cenario gera uma imagem com boot.cfg proprio, roda com timeout e verifica:
   * codigo de saida do QEMU (isa-debug-exit): 33 = sucesso, 35 = falha esperada;
   * marcadores obrigatorios na serial; ausencia de marcadores proibidos.
-Uso: tools/test-qemu [--scenario nome] [--timeout 120] [--no-build]
+Uso: tools/test-qemu [--scenario nome] [--timeout 180] [--no-build]
 """
 import argparse
 import re
@@ -929,6 +929,29 @@ def run_gdb_scenario(timeout: float) -> bool:
     return ok
 
 
+# Margem entre o tempo que o convidado levou ate "boot completo" e o timeout do cenario.
+# A suite de selftests cresceu de 40 para 145 testes com o timeout local parado em 120 s;
+# no host de desenvolvimento, sob carga de um stress concorrente, o boot chegou a 117 s e o
+# segundo boot do powercut estourou — sem que nada tivesse avisado nas rodadas anteriores,
+# em que passou por 3 s. Timeout fixo para uma suite que cresce e a mesma armadilha da
+# margem do stress no Makefile: aqui se mede e se avisa antes de estourar.
+MARGENS = []
+MARGEM_MINIMA = 0.25
+
+
+def registra_margem(name: str, run_no: int, text: str, timeout: float) -> None:
+    m = re.search(r"NEXO: boot completo \((\d+) ms\)", text)
+    if not m:
+        return
+    gasto = int(m.group(1)) / 1000.0
+    margem = 1.0 - gasto / timeout
+    MARGENS.append((name, run_no, gasto, margem))
+    if margem < MARGEM_MINIMA:
+        log(f"AVISO: '{name}' execucao {run_no} chegou a 'boot completo' em {gasto:.0f} s de "
+            f"{timeout:.0f} s (margem {margem:.0%} < {MARGEM_MINIMA:.0%}); sob carga isto vira "
+            f"timeout — aumente --timeout ou reduza a carga do host")
+
+
 def run_scenario(name: str, timeout: float) -> bool:
     if name == "shell":
         return run_shell_scenario(timeout)
@@ -965,6 +988,7 @@ def run_scenario(name: str, timeout: float) -> bool:
             cmd += ["--kill-on", kill_on, "--kill-delay-ms", str(sc.get("kill_delay_ms", 0))]
         rc = call_qemu(cmd, allow_retry=kill_on is None, log_path=run_log)
         text = run_log.read_bytes().decode("utf-8", errors="replace")
+        registra_margem(name, run_no, text, timeout)
         expected_rc = sc.get(f"exit_code_run{run_no}", sc["exit_code"])
         if rc != expected_rc:
             log(f"FALHA: codigo de saida {rc}, esperado {expected_rc}")
@@ -1015,7 +1039,9 @@ def run_scenario(name: str, timeout: float) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scenario", choices=sorted(list(SCENARIOS) + ["shell", "input", "net", "gdb"]), default=None)
-    ap.add_argument("--timeout", type=float, default=120.0)
+    # 180 s: o mesmo que o CI (.github/workflows/ci.yml) — o padrao local ficou em 120 s
+    # enquanto a suite triplicava, e so se percebeu quando estourou sob carga.
+    ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("--no-build", action="store_true", help="nao recompila loader/kernel")
     a = ap.parse_args()
     if not a.no_build:
@@ -1023,6 +1049,10 @@ def main() -> int:
     names = [a.scenario] if a.scenario else list(SCENARIOS) + ["shell", "input", "net", "gdb"]
     results = {n: run_scenario(n, a.timeout) for n in names}
     log("resumo: " + ", ".join(f"{n}={'PASS' if ok else 'FAIL'}" for n, ok in results.items()))
+    if MARGENS:
+        pior = min(MARGENS, key=lambda x: x[3])
+        log(f"margem de timeout: pior foi '{pior[0]}' execucao {pior[1]} com boot completo em "
+            f"{pior[2]:.0f} s de {a.timeout:.0f} s ({pior[3]:.0%})")
     return 0 if all(results.values()) else 1
 
 

@@ -5,10 +5,11 @@
 #   make ci         -> lint + test + verificação de reprodutibilidade
 #   make validar    -> bateria por bloco (lint + imagem + cenários), para no 1º erro
 #   make prazos     -> compromissos de longa duração (docs/COMPROMISSOS.md)
+#   make stress-desacoplado -> stress longo fora do alcance da limpeza da sessão (tools/nexo-desacoplar)
 #   make unsafe-inventory -> regenera docs/unsafe-inventory.md da árvore
 #   make docs       -> documentação de API navegável em target/doc
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci validar check-toolchain reproducible clean stress fuzz netcap roadmap prazos unsafe-inventory docs idl idl-check toolchain
+.PHONY: all image run run-debug test test-host test-qemu lint fmt ci validar check-toolchain reproducible clean stress stress-desacoplado fuzz netcap roadmap prazos unsafe-inventory docs idl idl-check toolchain
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 # Margem +900s +1% da duracao: o relogio do guest (TCG) atrasa em relacao a parede sob
@@ -82,6 +83,14 @@ stress: image
 	mkdir -p build/logs
 	NEXO_SMP=$(SMP) tools/run-qemu --test --image build/nexo-stress-long.img --disk build/nexo-stresslong-data.img --timeout $$(( $(DURATION) + 900 + $(DURATION) / 100 )) --log build/logs/stress-long.log; \
 	rc=$$?; if [ $$rc -eq 33 ]; then echo "[nexo] stress de $(DURATION)s: PASS"; else echo "[nexo] stress: FALHA (codigo $$rc)"; exit 1; fi
+
+# Stress de dias lancado em sessao propria e adotado pelo init. Existe porque duas rodadas
+# de 7 dias (5,84 e 1,95 dias, zero erros) morreram de SIGTERM no instante em que a sessao
+# que as lancou com `nohup ... &` terminou. O auto-teste mata um grupo lancador de verdade
+# antes de arriscar uma semana. Depois de lancar, registre pid/inicio/log em docs/COMPROMISSOS.md.
+stress-desacoplado: image
+	tools/nexo-desacoplar --auto-teste
+	tools/nexo-desacoplar --saida build/logs/stress-$(DURATION)s-$$(date +%Y%m%d-%H%M%S).out -- make stress DURATION=$(DURATION) SMP=$(SMP)
 
 # Fuzz de syscalls com sementes aleatorias (derivadas do TSC, registradas no log) por
 # DURATION segundos; usado pelo workflow semanal .github/workflows/fuzz.yml.

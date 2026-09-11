@@ -42,18 +42,28 @@ Campos desconhecidos são ignorados; campos ausentes desligam a verificação co
 ## stress-7d
 
 - estado: aberto
-- o-que: stress de 7 dias (604800 s, SMP=4) com o kernel dos blocos 105-119
-- inicio: 2026-09-09 10:17:20
-- vence: 2026-09-16 10:17:20
+- o-que: stress de 7 dias (604800 s, SMP=4) com o kernel do bloco 146 — terceira rodada
+- inicio: 2026-09-11 09:19:32
+- vence: 2026-09-18 09:19:32
 - maquina: MacBook-Air-de-Lucas.local
 - processo: nexo-stress-long.img
-- log: build/logs/stress-7d-run2.out
+- pid: 54007 (QEMU; make lançador 53341, grupo 53340, ppid 1)
+- log: build/logs/stress-604800s-20260911-091909.out
 - progresso: \[STRESS\] t=(\d+)s
 - saude: erros=(\d+)
 - veredito: [STRESS] PASS duracao=604800s
-- acao: escrever docs/progress/2026-09-16-stress-7d.md com o veredito e os contadores finais, marcar o item de stress do Plano §6.1 como [x], rodar make roadmap e registrar no CHANGELOG
-- cuidado: NUNCA matar este processo — a rodada anterior morreu de fora aos 5,84 dias e zerou uma semana de execução; ele foi lançado desacoplado (nohup) justamente por isso
-- ref: PLANO_MESTRE_SISTEMA_OPERACIONAL.md §6.1 "stress de 24h e posteriormente 7 dias"; docs/progress/2026-09-07-stress-7d-parcial.md
+- acao: escrever docs/progress/<data>-stress-7d.md com o veredito e os contadores finais, marcar o item de stress do Plano §6.1 como [x], rodar make roadmap e registrar no CHANGELOG
+- cuidado: NUNCA matar este processo. As duas rodadas anteriores morreram de SIGTERM ao fim da sessão que as lançou (5,84 e 1,95 dias, zero erros): `nohup` + `disown` NÃO protege. Esta foi lançada por `make stress-desacoplado` (sessão própria + adotado pelo init, auto-teste passou); se morrer de novo, o mecanismo da limpeza é outro e precisa ser identificado antes de relançar
+- ref: PLANO_MESTRE_SISTEMA_OPERACIONAL.md §6.1 "stress de 24h e posteriormente 7 dias"; docs/progress/2026-09-11-stress-7d-parcial-2.md
+
+## stress-7d-run2
+
+- estado: fechado
+- o-que: stress de 7 dias, segunda rodada (kernel dos blocos 105-119), lançada com nohup
+- inicio: 2026-09-09 10:17:20
+- vence: 2026-09-16 10:17:20
+- acao: morta de fora em 2026-09-11 09:05:16 aos 168 542 s (1,95 dias) com zero erros; log preservado em build/logs/stress-7d-parcial-2026-09-11.log
+- ref: docs/progress/2026-09-11-stress-7d-parcial-2.md
 
 ## fuzz-semanal
 

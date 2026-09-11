@@ -21,7 +21,7 @@
 | Sistema de arquivos (host) | `cargo test -p nexofs` | ciclo de arquivos, arquivos grandes (bloco indireto), 100 entradas, disco cheio, corte de energia em cada escrita (incl. escritas rasgadas) com verificação de versões permitidas e de ausência de vazamento, 400 imagens corrompidas sem pânico |
 | Queda de driver | teste `user_block_crash` | `blockdev` morre no 2º pedido; cliente recebe `PeerClosed`, kernel segue, quadros/canais/vetor de IRQ liberados |
 | Cenários de falha | `tools/test-qemu --scenario panic|fault|overflow` | panic com backtrace simbolizado; `#PF` fatal com CR2/RIP/backtrace; estouro de pilha → `#DF` em IST1 |
-| Stress (SMP) | `tools/test-qemu --scenario stress` (15 s no CI) · `make stress DURATION=86400 SMP=4` (gate F1) | threads de lock/atomics/heap/sleep/spawn-join/map-unmap em todas as CPUs; a cada segundo `[STRESS] t=…` com invariantes (contador com lock exato, heap e quadros sem vazamento, ≥ 2 CPUs); fim com `[STRESS] PASS` |
+| Stress (SMP) | `tools/test-qemu --scenario stress` (15 s no CI) · `make stress DURATION=86400 SMP=4` (gate F1) · **rodadas de dias: `make stress-desacoplado`** (sessão própria + adotado pelo init via `tools/nexo-desacoplar`, com auto-teste que mata um grupo lançador de verdade — duas rodadas de 7 dias morreram de SIGTERM ao fim da sessão que as lançou com `nohup`; registrar pid/início/log em `docs/COMPROMISSOS.md`) | threads de lock/atomics/heap/sleep/spawn-join/map-unmap em todas as CPUs; a cada segundo `[STRESS] t=…` com invariantes (contador com lock exato, heap e quadros sem vazamento, ≥ 2 CPUs); fim com `[STRESS] PASS` |
 | Fuzz-lite (host) | `cargo test --workspace` (testes `fuzz_lite_*`) | mutação determinística de entradas válidas nos parsers de ELF, initrd, ACPI, símbolos e ABI de boot: nunca podem entrar em pânico |
 | Fuzz de syscalls (kernel) | teste `user_syscall_fuzz` (`utest` modo 7) | 20 000 syscalls aleatórias de um processo de usuário; o processo sobrevive e o kernel não vaza quadros nem canais |
 | Fuzzing contínuo | `make fuzz DURATION=1800` · workflow `fuzz` (semanal/cron + manual) | rodadas de 20 000 syscalls com sementes aleatórias do TSC (logadas para reprodução) até esgotar o tempo, checando vazamentos por rodada; host: todos os testes `*fuzz*` |
@@ -35,7 +35,7 @@
 
 - Sucesso: `[RESULT] PASS n/n` e `NEXO: boot completo`, QEMU sai com **33** (`isa-debug-exit`, valor `0x10`).
 - Falha: qualquer `FAIL`, `KERNEL PANIC` ou `EXCEPTION` no cenário `boot`; código **35** nos cenários de falha esperada.
-- Timeout (`--timeout`, padrão 120 s) → código 124.
+- Timeout (`--timeout`, padrão 180 s, igual ao CI) → código 124. O `test-qemu` mede `boot completo (N ms)` contra o timeout de cada execução e **avisa quando a margem fica abaixo de 25 %**; o resumo final diz qual foi a pior. Existe porque a suíte cresceu de 40 para 145 testes com o padrão local parado em 120 s, e só se soube quando o segundo boot do `powercut` estourou sob a carga de um stress concorrente (bloco 147) — timeout fixo para uma suíte que cresce é a mesma armadilha da margem do stress.
 - Marcadores estruturados: `[TEST] nome ... ok|FAIL: motivo`, `[MEMORY] …`, `[HEAP] …`, `[TIME] …`.
 
 ## Escrevendo um teste de kernel

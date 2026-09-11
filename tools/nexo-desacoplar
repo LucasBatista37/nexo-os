@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""nexo-desacoplar — lança um comando longo fora do alcance da limpeza da sessão.
+
+Duas rodadas do stress de 7 dias morreram "de fora": aos 5,84 dias (2026-09-07) e aos 1,95
+dias (2026-09-11), ambas no instante em que a sessão que as lançou terminou, ambas com
+`Terminated: 15` e zero erros no guest. Foram lançadas com `nohup ... &` e `disown`, o que
+só ignora SIGHUP e tira o processo da tabela de jobs do shell — não o tira do grupo de
+processos nem da árvore de descendentes, e é por um desses dois caminhos que a limpeza do
+ambiente entrega o SIGTERM.
+
+Este lançador fecha os dois caminhos de uma vez:
+
+  1. `setsid()` — sessão e grupo de processos novos: um `kill` ao grupo do lançador não chega;
+  2. fork duplo — o pai sai de imediato e o neto é adotado pelo init (launchd/pid 1): quem
+     percorre a árvore de descendentes do lançador também não o encontra.
+
+A saída vai para o arquivo indicado e a entrada vem de /dev/null. O pid impresso é o do
+neto (o `make`); o QEMU é filho dele, na mesma sessão nova.
+
+Uso: tools/nexo-desacoplar --saida <arquivo> -- <comando...>
+     tools/nexo-desacoplar --saida build/logs/stress-7d-run3.out -- make stress DURATION=604800 SMP=4
+     tools/nexo-desacoplar --auto-teste     # lança um `sleep`, mata o grupo do lançador e confere
+
+O `--auto-teste` existe porque a promessa "sobrevive ao fim da sessão" só se prova matando o
+lançador — e é melhor prová-la com um `sleep` de 30 s do que descobrir na terceira rodada.
+"""
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def lancar(saida: Path, comando: list[str]) -> int:
+    """Fork duplo + setsid; devolve o pid do neto (o processo do comando)."""
+    saida.parent.mkdir(parents=True, exist_ok=True)
+    # Canal para o neto comunicar o proprio pid ao lancador (o pai morre no meio).
+    r, w = os.pipe()
+    if os.fork() > 0:
+        os.close(w)
+        pid = int(os.read(r, 32).decode() or "0")
+        os.close(r)
+        return pid
+    # filho: sessao nova, depois fork de novo para o neto ser adotado pelo init.
+    os.setsid()
+    if os.fork() > 0:
+        os._exit(0)
+    # neto
+    os.close(r)
+    os.write(w, str(os.getpid()).encode())
+    os.close(w)
+    fd = os.open(saida, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    nulo = os.open("/dev/null", os.O_RDONLY)
+    os.dup2(nulo, 0)
+    os.dup2(fd, 1)
+    os.dup2(fd, 2)
+    os.chdir(ROOT)
+    try:
+        os.execvp(comando[0], comando)
+    except OSError as e:
+        os.write(2, f"[desacoplar] exec falhou: {e}\n".encode())
+        os._exit(127)
+    return 0  # inatingivel
+
+
+def auto_teste() -> int:
+    """Lança um `sleep` por um lançador intermediário, mata o grupo do intermediário e
+    confere que o `sleep` continua vivo — o mesmo golpe que matou as duas rodadas."""
+    saida = ROOT / "build" / "logs" / "desacoplar-auto-teste.out"
+    # O intermediario e um shell que lanca o `sleep` e depois fica a dormir, para o grupo
+    # dele ainda existir quando for morto (e o papel da "sessao" que morre). Corre numa
+    # sessao propria para que matar o grupo dele nao atinja este processo nem o chamador.
+    inter = subprocess.Popen(
+        ["sh", "-c", f'"{sys.executable}" "{__file__}" --saida "{saida}" -- sleep 30; sleep 60'],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    linha = (inter.stdout.readline() if inter.stdout else "") or ""
+    if not linha.startswith("[desacoplar] pid="):
+        inter.kill()
+        print(f"[desacoplar] auto-teste: lançador não devolveu pid ({linha!r})", flush=True)
+        return 1
+    pid = int(linha.split("=", 1)[1].split()[0])
+    # Golpe: SIGTERM ao grupo inteiro do intermediario — o que a limpeza de sessao faz.
+    os.killpg(inter.pid, signal.SIGTERM)
+    try:
+        inter.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        inter.kill()
+    time.sleep(1)
+    vivo = _vivo(pid)
+    ppid = _ppid(pid)
+    pgid = _ps(pid, "pgid")
+    try:
+        os.kill(pid, signal.SIGTERM)  # limpeza do proprio teste
+    except ProcessLookupError:
+        pass
+    # Tres provas: o intermediario morreu e o lancado nao; esta noutro grupo; ppid 1.
+    if inter.returncode != 0 and vivo and ppid == 1 and pgid not in (inter.pid, os.getpgrp()):
+        print(f"[desacoplar] auto-teste OK: o grupo {inter.pid} morreu (rc={inter.returncode}) e "
+              f"o pid {pid} sobreviveu no grupo {pgid} com ppid 1", flush=True)
+        return 0
+    print(f"[desacoplar] auto-teste FALHOU: inter_rc={inter.returncode} vivo={vivo} ppid={ppid} "
+          f"pgid={pgid} (esperado intermediario morto, lancado vivo, ppid 1, grupo proprio)",
+          flush=True)
+    return 1
+
+
+def _vivo(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def _ppid(pid: int) -> int:
+    return _ps(pid, "ppid")
+
+
+def _ps(pid: int, campo: str) -> int:
+    r = subprocess.run(["ps", "-o", f"{campo}=", "-p", str(pid)], capture_output=True, text=True)
+    return int(r.stdout.strip() or "-1")
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if argv == ["--auto-teste"]:
+        return auto_teste()
+    if len(argv) < 4 or argv[0] != "--saida" or argv[2] != "--":
+        print(__doc__)
+        return 2
+    saida = (ROOT / argv[1]) if not Path(argv[1]).is_absolute() else Path(argv[1])
+    comando = argv[3:]
+    pid = lancar(saida, comando)
+    if pid <= 0:
+        print("[desacoplar] falhou ao lançar")
+        return 1
+    time.sleep(0.5)
+    if not _vivo(pid):
+        print(f"[desacoplar] pid={pid} morreu logo após o exec — veja {saida}", flush=True)
+        return 1
+    inicio = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[desacoplar] pid={pid} ppid={_ppid(pid)} pgid={_ps(pid, 'pgid')} inicio={inicio} "
+          f"saida={saida}", flush=True)
+    print(f"[desacoplar] comando: {' '.join(comando)}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
