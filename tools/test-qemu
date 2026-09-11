@@ -626,6 +626,13 @@ def run_net_scenario(timeout: float) -> bool:
     import socket
     import threading
 
+    # Os auxiliares do host (servidores TCP/UDP/HTTP e o conector) vivem ate `parar`, e nao
+    # ate um prazo proprio: com prazo igual ao timeout do QEMU, uma primeira tentativa perdida
+    # num travamento do OVMF (falha de infraestrutura, repetida por call_qemu) esgotava o prazo
+    # de todos eles, e na segunda tentativa o guest esperava por uma conexao que ninguem
+    # faria — 2 x 180 s de silencio (visto em 2026-09-11).
+    parar = threading.Event()
+
     # servidor TCP no host: le ate \n e responde "nexo-tcp-ok" (o guest chega nele por 10.0.2.2)
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -635,10 +642,12 @@ def run_net_scenario(timeout: float) -> bool:
 
     def serve():
         # atende quantas conexoes chegarem (fase 1: TCP cru; fase 2: netd)
-        srv.settimeout(timeout)
-        while True:
+        srv.settimeout(1.0)
+        while not parar.is_set():
             try:
                 conn, _ = srv.accept()
+            except socket.timeout:
+                continue
             except OSError:
                 return
             try:
@@ -667,10 +676,12 @@ def run_net_scenario(timeout: float) -> bool:
     udp_port = usrv.getsockname()[1]
 
     def userve():
-        usrv.settimeout(timeout)
-        while True:
+        usrv.settimeout(1.0)
+        while not parar.is_set():
             try:
                 data, addr = usrv.recvfrom(2048)
+            except socket.timeout:
+                continue
             except OSError:
                 return
             if data:
@@ -688,13 +699,20 @@ def run_net_scenario(timeout: float) -> bool:
     fwd_port = probe.getsockname()[1]
     probe.close()
 
+    esperados = [b"nexo-listen-ok", b"nexo-accept-ok"]
+
+    def rearma():
+        # nova tentativa do QEMU: o guest volta a esperar as duas conexoes
+        esperados[:] = [b"nexo-listen-ok", b"nexo-accept-ok"]
+
     def connector():
         # duas conexoes de entrada: a 1a atende o teste cru do nexo.sock (resposta
         # "nexo-listen-ok"); a 2a, o servidor POSIX bind/listen/accept + poll do utest
         # ("nexo-accept-ok" — e o CLOSE daqui dispara o POLLHUP que o teste confere).
-        esperados = [b"nexo-listen-ok", b"nexo-accept-ok"]
-        deadline = time.time() + timeout
-        while esperados and time.time() < deadline:
+        while not parar.is_set():
+            if not esperados:
+                time.sleep(0.5)
+                continue
             try:
                 c = socket.create_connection(("127.0.0.1", fwd_port), timeout=3)
             except OSError:
@@ -747,10 +765,12 @@ def run_net_scenario(timeout: float) -> bool:
     idx_bytes = (repo_dir / "indice.txt").read_bytes()
 
     def hserve():
-        hsrv.settimeout(timeout)
-        while True:
+        hsrv.settimeout(1.0)
+        while not parar.is_set():
             try:
                 conn, _ = hsrv.accept()
+            except socket.timeout:
+                continue
             except OSError:
                 return
             try:
@@ -782,7 +802,8 @@ def run_net_scenario(timeout: float) -> bool:
     rc = call_qemu([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
                     "--disk", BUILD / "nexo-net-data.img", "--net", "--net-hostfwd", str(fwd_port),
                     "--net-dump", BUILD / "logs" / "net.pcap",
-                    "--timeout", str(timeout), "--log", logfile], log_path=logfile)
+                    "--timeout", str(timeout), "--log", logfile], log_path=logfile, on_retry=rearma)
+    parar.set()
     text = logfile.read_bytes().decode("utf-8", errors="replace")
     ok = True
     if rc != 33:
@@ -831,6 +852,9 @@ def run_net_scenario(timeout: float) -> bool:
             r"utest: posix servidor ok — bind/listen/accept e poll \(dados e HUP\) via BSD",
             r"utest: posix udp ok — poll e select viram o datagrama antes do recvfrom",
                 r"utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados",
+                r"utest: ping negado ok — sessao sem ICMP recebeu erro 7",
+                r"utest: diag ok — 10\.0\.2\.2 em \d+ us \(ttl \d+\), 192\.0\.2\.1 esgotou em \d+ ms; stats: rx \d+ tx \d+",
+                r"\[NET\] fase 5 \(diagnostico\) terminou com 0",
                 r"utest: http ok — GET /nexo\.txt devolveu 200 e o corpo esperado \(\d+ bytes\)",
                 r"utest: atualizacao em rede ok — app-net (instalado v\d+ \(versao 1\.0, \d+ bytes por HTTP em \d+ ms\)|ja na versao 1\.0 \(v\d+\); nada a fazer)",
                 r"\[NET\] fase 3 \(repo em rede\) terminou com 0",
@@ -870,15 +894,20 @@ def infra_failure(rc: int, log_path=None) -> bool:
     return False
 
 
-def call_qemu(cmd, allow_retry=True, retries=2, log_path=None):
+def call_qemu(cmd, allow_retry=True, retries=2, log_path=None, on_retry=None):
     """subprocess.call com nova tentativa quando o QEMU morre por sinal do host. O disco do
     cenario pode ficar com escritas parciais da tentativa abortada — equivalente a um corte de
-    energia, que o sistema precisa aguentar de qualquer forma (e o powercut prova)."""
+    energia, que o sistema precisa aguentar de qualquer forma (e o powercut prova).
+
+    `on_retry` e chamado antes de cada nova tentativa: o cenario `net` usa-o para rearmar os
+    auxiliares do host (o guest recomeca do zero; quem o atende tambem precisa)."""
     rc = subprocess.call(cmd)
     for attempt in range(retries):
         if not allow_retry or not infra_failure(rc, log_path):
             return rc
         log(f"falha de infraestrutura do QEMU (rc={rc}); nova tentativa ({attempt + 2}/{retries + 1})")
+        if on_retry is not None:
+            on_retry()
         rc = subprocess.call(cmd)
     return rc
 

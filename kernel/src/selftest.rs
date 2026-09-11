@@ -2641,8 +2641,39 @@ pub fn net_test_mode() {
     // mesmo IDL) faz um GET no host e imprime o corpo — sockets BSD em C de ponta a ponta.
     if crate::initrd::find("fetch-c").is_none() {
         kinfo!("[NET] fase 4 pulada: fetch-c ausente do initrd (host sem clang)");
-        return;
+    } else {
+        net_fase4(bdf, http_port);
     }
+
+    // Fase 5, e a ULTIMA de proposito: diagnostico (nexo.sock v1.1) — ping ao gateway, ping
+    // a um destino que nao responde (prazo esgotado) e estatisticas. Um ICMP encaminhado pelo
+    // slirp abre um socket ICMP no host que vive ~3 s, e enquanto vive as novas conexoes TCP
+    // do guest nao completam (visto no macOS em 2026-09-11: 6 SYN sem SYN-ACK, DHCP respondido
+    // normalmente). Depois desta fase nao ha mais TCP, e o artefacto nao custa nada.
+    let (na5, nb5) = ChannelEnd::create_pair();
+    let (sa5, sb5) = ChannelEnd::create_pair();
+    let g5 = Handle {
+        object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+        rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+    };
+    let _drv5 = crate::process::spawn_named("netdev", 0, alloc::vec![g5, channel_handle(na5)])
+        .expect("netdev 5");
+    let _netd5 = crate::process::spawn_named(
+        "netd",
+        0,
+        alloc::vec![channel_handle(nb5), channel_handle(sa5)],
+    )
+    .expect("netd 5");
+    let client5 = crate::process::spawn_named("utest", 94, alloc::vec![channel_handle(sb5)])
+        .expect("utest 94");
+    kinfo!("[NET] fase 5: diagnostico (ping, prazo esgotado, stats)");
+    let code = crate::process::wait_and_reap(&client5);
+    kinfo!("[NET] fase 5 (diagnostico) terminou com {code}");
+}
+
+/// Fase 4 do `net-test`: um programa C (fetch) faz um GET no host via a nexo-libc.
+fn net_fase4(bdf: u16, http_port: u64) {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
     let (na4, nb4) = ChannelEnd::create_pair();
     let (sa4, sb4) = ChannelEnd::create_pair();
     let g4 = Handle {

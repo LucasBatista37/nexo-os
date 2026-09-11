@@ -153,12 +153,12 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/selftest.rs:682` | bloco | encerra o canal 0. |
 | `kernel/src/selftest.rs:1226` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
 | `kernel/src/selftest.rs:1342` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
-| `kernel/src/selftest.rs:3151` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
-| `kernel/src/selftest.rs:4799` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4847` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4910` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4979` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5499` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
+| `kernel/src/selftest.rs:3182` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
+| `kernel/src/selftest.rs:4830` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4878` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4941` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5010` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5530` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
 | `kernel/src/stress.rs:142` | bloco | página recém-mapeada RW e exclusiva desta thread. |
 | `kernel/src/symbols.rs:20` | bloco | páginas do tipo KernelFile, reservadas e imutáveis. |
 | `kernel/src/sync.rs:53` | bloco | estavam habilitadas antes. |
@@ -444,29 +444,29 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/utest/src/main.rs:36` | bloco | número inválido; o kernel responde com NotSupported. |
 | `services/utest/src/main.rs:42` | bloco | `cli` em ring 3 gera #GP; o kernel deve encerrar este processo. |
 | `services/utest/src/main.rs:48` | bloco | deliberadamente inválido: página somente leitura. |
-| `services/utest/src/main.rs:257` | bloco | o kernel valida o intervalo antes de ler. |
-| `services/utest/src/main.rs:385` | bloco | o kernel deve validar tudo; e o objetivo do teste. |
-| `services/utest/src/main.rs:1801` | bloco | unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha). |
-| `services/utest/src/main.rs:2074` | bloco | leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:2662` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:2665` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:2812` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:2822` | bloco | utest tem uma unica thread; buffers estaticos evitam estourar a pilha. |
-| `services/utest/src/main.rs:3004` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
-| `services/utest/src/main.rs:3015` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
-| `services/utest/src/main.rs:3063` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
-| `services/utest/src/main.rs:3449` | bloco | regiao recem-mapeada por memory_map (USER\|RW) com pelo menos TAM bytes. |
-| `services/utest/src/main.rs:4712` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
-| `services/utest/src/main.rs:4714` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
-| `services/utest/src/main.rs:6171` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
-| `services/utest/src/main.rs:6430` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:6442` | bloco | leitura da mesma pagina mapeada. |
-| `services/utest/src/main.rs:9149` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9524` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9539` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
-| `services/utest/src/main.rs:9556` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:9583` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
-| `services/utest/src/main.rs:9591` | bloco | mesma pagina compartilhada. |
+| `services/utest/src/main.rs:258` | bloco | o kernel valida o intervalo antes de ler. |
+| `services/utest/src/main.rs:386` | bloco | o kernel deve validar tudo; e o objetivo do teste. |
+| `services/utest/src/main.rs:1802` | bloco | unico acesso, processo de uma so thread; buffer estatico (64 KiB nao cabem na pilha). |
+| `services/utest/src/main.rs:2075` | bloco | leitura dentro do buffer f1 da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:2663` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:2666` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:2813` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:2823` | bloco | utest tem uma unica thread; buffers estaticos evitam estourar a pilha. |
+| `services/utest/src/main.rs:3005` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado. |
+| `services/utest/src/main.rs:3016` | bloco | utest tem uma unica thread; os buffers estaticos evitam estourar a pilha. |
+| `services/utest/src/main.rs:3064` | bloco | base .. base+elf_len esta dentro do MemoryObject mapeado (USER\|RW). |
+| `services/utest/src/main.rs:3450` | bloco | regiao recem-mapeada por memory_map (USER\|RW) com pelo menos TAM bytes. |
+| `services/utest/src/main.rs:4816` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
+| `services/utest/src/main.rs:4818` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
+| `services/utest/src/main.rs:6295` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
+| `services/utest/src/main.rs:6554` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:6566` | bloco | leitura da mesma pagina mapeada. |
+| `services/utest/src/main.rs:9273` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9648` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9663` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
+| `services/utest/src/main.rs:9680` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:9707` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
+| `services/utest/src/main.rs:9715` | bloco | mesma pagina compartilhada. |
 
 ## `nexo-loader` — 15 usos
 
@@ -686,7 +686,7 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
-| `services/netd/src/main.rs:89` | bloco | processo com uma única thread; nenhuma reentrância. |
+| `services/netd/src/main.rs:115` | bloco | processo com uma única thread; nenhuma reentrância. |
 
 ## `nexo-portal` — 1 usos
 

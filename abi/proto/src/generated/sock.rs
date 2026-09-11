@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.sock` v1.0 — **gerado por `tools/idlgen` de `idl/sock.idl`; nao editar**.
+//! Protocolo tipado `nexo.sock` v1.1 — **gerado por `tools/idlgen` de `idl/sock.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x60281105;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 0;
+pub const VERSION_MINOR: u16 = 1;
 
 /// `nexo.sock.info` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1912,6 +1912,359 @@ impl OpenResponse {
     }
 }
 
+/// `nexo.sock.ping` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PingRequest {
+    /// Bytes de `dst_ip` (ate 4).
+    pub dst_ip: [u8; 4],
+    /// Tamanho valido de `dst_ip`.
+    pub dst_ip_len: u32,
+    /// Campo `seq`.
+    pub seq: u16,
+    /// Campo `timeout_ms`.
+    pub timeout_ms: u32,
+}
+
+impl PingRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 13;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Fatia valida de `dst_ip`.
+    pub fn dst_ip(&self) -> &[u8] {
+        &self.dst_ip[..(self.dst_ip_len as usize).min(4)]
+    }
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        let n = self.dst_ip_len as usize;
+        if n > 4 {
+            return Err(ProtoError::TooBig);
+        }
+        if o + 4 + n > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&(n as u32).to_le_bytes());
+        out[o + 4..o + 4 + n].copy_from_slice(&self.dst_ip[..n]);
+        o += 4 + n;
+        if o + 2 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 2].copy_from_slice(&self.seq.to_le_bytes());
+        o += 2;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.timeout_ms.to_le_bytes());
+        o += 4;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        let mut dst_ip = [0u8; 4];
+        let dst_ip_len: u32;
+        {
+            if o + 4 > b.len() {
+                return Err(ProtoError::Short);
+            }
+            let l = u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as usize;
+            if l > 4 {
+                return Err(ProtoError::TooBig);
+            }
+            if o + 4 + l > b.len() {
+                return Err(ProtoError::Short);
+            }
+            dst_ip[..l].copy_from_slice(&b[o + 4..o + 4 + l]);
+            dst_ip_len = l as u32;
+            o += 4 + l;
+        }
+        if o + 2 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let seq = u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
+        o += 2;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let timeout_ms = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let _ = o;
+        Ok(PingRequest {
+            dst_ip,
+            dst_ip_len,
+            seq,
+            timeout_ms,
+        })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.sock.ping` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PingResponse {
+    /// Campo `rtt_us`.
+    pub rtt_us: u32,
+    /// Campo `ttl`.
+    pub ttl: u8,
+}
+
+impl PingResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 13;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.rtt_us.to_le_bytes());
+        o += 4;
+        if o + 1 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 1].copy_from_slice(&self.ttl.to_le_bytes());
+        o += 1;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let rtt_us = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 1 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let ttl = u8::from_le_bytes(b[o..o + 1].try_into().unwrap());
+        o += 1;
+        let _ = o;
+        Ok(PingResponse { rtt_us, ttl })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.sock.stats` — pedido.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatsRequest {}
+
+impl StatsRequest {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 14;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, _out: &mut [u8]) -> Result<usize, ProtoError> {
+        Ok(0)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(_b: &[u8]) -> Result<Self, ProtoError> {
+        Ok(StatsRequest {})
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: 0,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
+/// `nexo.sock.stats` — resposta.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatsResponse {
+    /// Campo `rx_frames`.
+    pub rx_frames: u32,
+    /// Campo `tx_frames`.
+    pub tx_frames: u32,
+    /// Campo `udp_dropped`.
+    pub udp_dropped: u32,
+    /// Campo `udp_socks`.
+    pub udp_socks: u32,
+    /// Campo `tcp_conns`.
+    pub tcp_conns: u32,
+    /// Campo `dns_entries`.
+    pub dns_entries: u32,
+    /// Campo `pings_sent`.
+    pub pings_sent: u32,
+    /// Campo `pings_replied`.
+    pub pings_replied: u32,
+}
+
+impl StatsResponse {
+    /// Numero do metodo.
+    pub const METHOD_ID: u32 = 14;
+    /// Handles que esta mensagem carrega no vetor de handles da mensagem.
+    pub const HANDLE_COUNT: usize = 0;
+    /// Codifica o payload; devolve o tamanho.
+    pub fn encode_payload(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.rx_frames.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.tx_frames.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.udp_dropped.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.udp_socks.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.tcp_conns.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.dns_entries.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.pings_sent.to_le_bytes());
+        o += 4;
+        if o + 4 > out.len() {
+            return Err(ProtoError::Short);
+        }
+        out[o..o + 4].copy_from_slice(&self.pings_replied.to_le_bytes());
+        o += 4;
+        Ok(o)
+    }
+    /// Decodifica o payload (bytes extras ao final sao ignorados; campos com padrao
+    /// ausentes assumem o padrao — ipc-compat §3).
+    pub fn decode_payload(b: &[u8]) -> Result<Self, ProtoError> {
+        let mut o = 0usize;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let rx_frames = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let tx_frames = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let udp_dropped = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let udp_socks = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let tcp_conns = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let dns_entries = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let pings_sent = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        if o + 4 > b.len() {
+            return Err(ProtoError::Short);
+        }
+        let pings_replied = u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+        o += 4;
+        let _ = o;
+        Ok(StatsResponse {
+            rx_frames,
+            tx_frames,
+            udp_dropped,
+            udp_socks,
+            tcp_conns,
+            dns_entries,
+            pings_sent,
+            pings_replied,
+        })
+    }
+    /// Codifica a mensagem completa (cabecalho NXIP + payload).
+    pub fn encode_msg(&self, out: &mut [u8]) -> Result<usize, ProtoError> {
+        if out.len() < HEADER_LEN {
+            return Err(ProtoError::Short);
+        }
+        let plen = self.encode_payload(&mut out[HEADER_LEN..])?;
+        let h = Header {
+            protocol_id: PROTOCOL_ID,
+            version_major: VERSION_MAJOR,
+            version_minor: VERSION_MINOR,
+            method_id: Self::METHOD_ID,
+            flags: FLAG_RESPONSE,
+            payload_len: plen as u32,
+        };
+        h.encode(out)?;
+        Ok(HEADER_LEN + plen)
+    }
+}
+
 /// Pedido decodificado.
 #[derive(Clone, Debug, PartialEq, Eq)]
 // Sem alocador no espaço de usuário: variantes grandes (buffers embutidos) são inerentes.
@@ -1941,6 +2294,10 @@ pub enum Request {
     TcpClose(TcpCloseRequest),
     /// `open`.
     Open(OpenRequest),
+    /// `ping`.
+    Ping(PingRequest),
+    /// `stats`.
+    Stats(StatsRequest),
 }
 
 /// Decodifica um pedido injetando os handles recebidos (ordem de declaracao por metodo).
@@ -2008,6 +2365,16 @@ pub fn decode_request_with_handles(msg: &[u8], hs: &[u32]) -> Result<Request, Pr
             }
             rq.chan = hs[0];
         }
+        Request::Ping(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
+        Request::Stats(_) => {
+            if !hs.is_empty() {
+                return Err(ProtoError::Length);
+            }
+        }
     }
     Ok(r)
 }
@@ -2038,6 +2405,8 @@ pub fn decode_request(msg: &[u8]) -> Result<Request, ProtoError> {
         10 => Ok(Request::TcpAvail(TcpAvailRequest::decode_payload(p)?)),
         8 => Ok(Request::TcpClose(TcpCloseRequest::decode_payload(p)?)),
         11 => Ok(Request::Open(OpenRequest::decode_payload(p)?)),
+        13 => Ok(Request::Ping(PingRequest::decode_payload(p)?)),
+        14 => Ok(Request::Stats(StatsRequest::decode_payload(p)?)),
         _ => Err(ProtoError::Method),
     }
 }
@@ -2364,6 +2733,60 @@ pub fn decode_open_response(msg: &[u8]) -> Result<OpenResponse, ProtoError> {
         return Err(ProtoError::Flags);
     }
     OpenResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `ping` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_ping_response(msg: &[u8]) -> Result<PingResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 13 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    PingResponse::decode_payload(p)
+}
+
+/// Decodifica a resposta de `stats` (erro remoto vira `ProtoError::Remote`).
+pub fn decode_stats_response(msg: &[u8]) -> Result<StatsResponse, ProtoError> {
+    let h = Header::decode(msg)?;
+    if h.protocol_id != PROTOCOL_ID {
+        return Err(ProtoError::Protocol);
+    }
+    if h.version_major != VERSION_MAJOR {
+        return Err(ProtoError::Version);
+    }
+    if h.method_id != 14 {
+        return Err(ProtoError::Method);
+    }
+    let p = &msg[HEADER_LEN..HEADER_LEN + h.payload_len as usize];
+    if h.flags & FLAG_ERROR != 0 {
+        let code = if p.len() >= 4 {
+            u32::from_le_bytes([p[0], p[1], p[2], p[3]])
+        } else {
+            0
+        };
+        return Err(ProtoError::Remote(code));
+    }
+    if h.flags != FLAG_RESPONSE {
+        return Err(ProtoError::Flags);
+    }
+    StatsResponse::decode_payload(p)
 }
 
 /// Codifica uma resposta de erro para o metodo `method_id`.

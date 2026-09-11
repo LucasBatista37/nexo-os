@@ -1,7 +1,7 @@
 # nexo.sock — API de sockets nativa do servico de rede residente (services/netd).
 # Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = tempo esgotado,
 # 4 = conexao fechada/reiniciada, 5 = nome nao resolvido, 6 = nao conectado.
-protocol sock 1.0
+protocol sock 1.1
 
 # Configuracao de rede corrente (obtida por DHCP no arranque do netd).
 method 1 info {
@@ -131,7 +131,8 @@ method 8 tcp_close {
 # Abre uma sessao adicional com um PERFIL de rede (firewall): o handle `chan` (ponta de um canal
 # criado pelo cliente) passa a ser atendido como novo cliente, restrito a uma regra de destino
 # (`rule_*`: sub-rede/porta/protocolo) e as permissoes `allow_dns`/`allow_listen`. O pai, ja
-# privilegiado, restringe o filho; modelo negar-por-padrao. rule_protos: bit0 TCP, bit1 UDP.
+# privilegiado, restringe o filho; modelo negar-por-padrao. rule_protos: bit0 TCP, bit1 UDP,
+# bit2 ICMP (ping; v1.1).
 method 11 open {
     request {
         chan: handle,
@@ -144,5 +145,40 @@ method 11 open {
         rule_protos: u8,
     }
     response {
+    }
+}
+
+# v1.1 — diagnostico de dentro do sistema.
+
+# Ping: um ICMP echo request a `dst_ip` e espera pelo reply ate `timeout_ms`. Passa pelo
+# firewall da sessao (bit2 ICMP da regra; erro 7 se negado). Erro 3 = sem resposta no prazo.
+# `rtt_us` e medido no netd (entre a entrega ao driver e a chegada do reply), nao no cliente.
+method 13 ping {
+    request {
+        dst_ip: bytes<4>,
+        seq: u16,
+        timeout_ms: u32,
+    }
+    response {
+        rtt_us: u32,
+        ttl: u8,
+    }
+}
+
+# Estatisticas do netd desde o arranque: quadros recebidos/enviados pelo driver, datagramas
+# UDP descartados por fila cheia, sockets UDP e conexoes TCP em uso, entradas no cache DNS,
+# pings enviados e respondidos. Contadores globais (nao por socket): sao o que existe.
+method 14 stats {
+    request {
+    }
+    response {
+        rx_frames: u32,
+        tx_frames: u32,
+        udp_dropped: u32,
+        udp_socks: u32,
+        tcp_conns: u32,
+        dns_entries: u32,
+        pings_sent: u32,
+        pings_replied: u32,
     }
 }

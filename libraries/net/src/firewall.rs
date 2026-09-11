@@ -15,7 +15,7 @@ pub struct Rule {
     pub port_lo: u16,
     /// Maior porta permitida (inclusive).
     pub port_hi: u16,
-    /// Protocolos: bit 0 = TCP, bit 1 = UDP.
+    /// Protocolos: bit 0 = TCP, bit 1 = UDP, bit 2 = ICMP (ping; sem porta).
     pub protos: u8,
 }
 
@@ -23,6 +23,8 @@ pub struct Rule {
 pub const PROTO_TCP: u8 = 1;
 /// Protocolo UDP na máscara de `Rule::protos`.
 pub const PROTO_UDP: u8 = 2;
+/// ICMP (ping) na máscara de `Rule::protos`: só o endereço conta, não há porta.
+pub const PROTO_ICMP: u8 = 4;
 /// Máximo de regras por perfil.
 pub const MAX_RULES: usize = 8;
 
@@ -31,6 +33,11 @@ impl Rule {
         if self.protos & proto == 0 || port < self.port_lo || port > self.port_hi {
             return false;
         }
+        self.matches_addr(ip)
+    }
+
+    /// O endereço cai na sub-rede da regra? (ICMP não tem porta: é só isto.)
+    fn matches_addr(&self, ip: [u8; 4]) -> bool {
         if self.prefix == 0 {
             return true;
         }
@@ -95,7 +102,7 @@ impl Profile {
             prefix: 0,
             port_lo: 0,
             port_hi: u16::MAX,
-            protos: PROTO_TCP | PROTO_UDP,
+            protos: PROTO_TCP | PROTO_UDP | PROTO_ICMP,
         };
         p.count = 1;
         p.allow_dns = true;
@@ -120,23 +127,28 @@ impl Profile {
                 return Ok(());
             }
         }
-        // distingue "protocolo" de "sem regra" para um diagnóstico melhor
-        let any_addr = self.rules[..self.count].iter().any(|r| {
-            r.prefix == 0 || {
-                let bits = r.prefix.min(32) as u32;
-                let mask = if bits == 32 {
-                    u32::MAX
-                } else {
-                    !((1u32 << (32 - bits)) - 1)
-                };
-                (u32::from_be_bytes(ip) & mask) == (u32::from_be_bytes(r.base) & mask)
-            }
-        });
-        Err(if any_addr {
+        Err(self.deny_for(ip))
+    }
+
+    /// Ping (ICMP echo) para `ip` é permitido? Não há porta: basta uma regra cuja sub-rede
+    /// contenha o endereço e cujo `protos` tenha o bit ICMP.
+    pub fn allows_icmp(&self, ip: [u8; 4]) -> Result<(), Deny> {
+        if self.rules[..self.count]
+            .iter()
+            .any(|r| r.protos & PROTO_ICMP != 0 && r.matches_addr(ip))
+        {
+            return Ok(());
+        }
+        Err(self.deny_for(ip))
+    }
+
+    /// Distingue "protocolo errado" de "sem regra para o endereço", para um diagnóstico melhor.
+    fn deny_for(&self, ip: [u8; 4]) -> Deny {
+        if self.rules[..self.count].iter().any(|r| r.matches_addr(ip)) {
             Deny::Protocol
         } else {
             Deny::NoRule
-        })
+        }
     }
 
     /// Resolução de nomes é permitida?
@@ -228,6 +240,40 @@ mod tests {
         });
         assert!(q.allows([1, 1, 1, 1], 8080, PROTO_TCP).is_ok());
         assert_eq!(q.allows([1, 1, 1, 1], 80, PROTO_TCP), Err(Deny::Protocol));
+    }
+
+    #[test]
+    fn icmp_ignores_ports_but_not_addresses() {
+        // Regra TCP-only: ping negado como "protocolo" (o endereço casa).
+        let mut p = Profile::deny_all();
+        p.add_rule(Rule {
+            base: [10, 0, 2, 2],
+            prefix: 32,
+            port_lo: 80,
+            port_hi: 80,
+            protos: PROTO_TCP,
+        });
+        assert_eq!(p.allows_icmp([10, 0, 2, 2]), Err(Deny::Protocol));
+        assert_eq!(p.allows_icmp([10, 0, 2, 3]), Err(Deny::NoRule));
+        // Regra com ICMP e faixa de portas vazia (0..0): a porta não conta para ping.
+        let mut q = Profile::deny_all();
+        q.add_rule(Rule {
+            base: [10, 0, 2, 0],
+            prefix: 24,
+            port_lo: 0,
+            port_hi: 0,
+            protos: PROTO_ICMP,
+        });
+        assert!(q.allows_icmp([10, 0, 2, 99]).is_ok());
+        assert_eq!(q.allows_icmp([10, 0, 3, 1]), Err(Deny::NoRule));
+        // ...e ICMP na regra não abre TCP/UDP.
+        assert_eq!(q.allows([10, 0, 2, 2], 0, PROTO_TCP), Err(Deny::Protocol));
+        // O perfil aberto inclui ping; o fechado não.
+        assert!(Profile::unrestricted().allows_icmp([1, 1, 1, 1]).is_ok());
+        assert_eq!(
+            Profile::deny_all().allows_icmp([1, 1, 1, 1]),
+            Err(Deny::NoRule)
+        );
     }
 
     #[test]

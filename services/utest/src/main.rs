@@ -137,6 +137,7 @@ pub extern "C" fn _start(mode: u64) -> ! {
         91 => idioma_test(),
         92 => fs_map_test(),
         93 => prefs_persist_test(),
+        94 => net_diag(),
         _ => nexo_sys::exit(203),
     }
 }
@@ -4233,6 +4234,109 @@ fn net_client(tcp_port: u16) -> ! {
     }
 }
 
+/// 94 = diagnostico de rede pelo `nexo.sock` v1.1 (handle 0 = netd, sessao aberta): ping ao
+/// gateway com resposta, ping a um destino mudo com prazo esgotado (erro 3) e `stats`.
+fn net_diag() -> ! {
+    use nexo_proto::sock::{
+        PingRequest, StatsRequest, decode_ping_response, decode_stats_response,
+    };
+    let mut msg = [0u8; 4096];
+    let mut hs = [0u32; 1];
+    macro_rules! call {
+        ($req:expr, $dec:ident, $code:expr) => {{
+            let m = $req.encode_msg(&mut msg).unwrap_or(0);
+            if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+                nexo_sys::exit($code);
+            }
+            let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+                Ok((n, _)) => n,
+                _ => nexo_sys::exit($code + 1),
+            };
+            match $dec(&msg[..n]) {
+                Ok(r) => r,
+                Err(e) => {
+                    nexo_rt::log!("utest: diag: erro {:?} (passo {})", e, $code);
+                    nexo_sys::exit($code + 2)
+                }
+            }
+        }};
+    }
+    // 1. o gateway do slirp responde (dentro do emulador, sem socket no host)
+    let ok = call!(
+        PingRequest {
+            dst_ip: [10, 0, 2, 2],
+            dst_ip_len: 4,
+            seq: 1,
+            timeout_ms: 3000,
+        },
+        decode_ping_response,
+        400
+    );
+    if ok.rtt_us >= 3_000_000 || ok.ttl == 0 {
+        nexo_rt::log!(
+            "utest: diag: rtt {} us ttl {} implausiveis",
+            ok.rtt_us,
+            ok.ttl
+        );
+        nexo_sys::exit(403);
+    }
+    // 2. TEST-NET-1 (192.0.2.1, nunca roteado) nao responde: erro 3 depois do prazo, e o netd
+    //    continua a atender (a chamada seguinte prova).
+    let m = PingRequest {
+        dst_ip: [192, 0, 2, 1],
+        dst_ip_len: 4,
+        seq: 2,
+        timeout_ms: 300,
+    }
+    .encode_msg(&mut msg)
+    .unwrap_or(0);
+    if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+        nexo_sys::exit(404);
+    }
+    let t0 = nexo_sys::time_now();
+    let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+        Ok((n, _)) => n,
+        _ => nexo_sys::exit(405),
+    };
+    let gasto_ms = (nexo_sys::time_now() - t0) / 1_000_000;
+    if decode_ping_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(3)) {
+        nexo_rt::log!("utest: diag: 192.0.2.1 respondeu (?)");
+        nexo_sys::exit(406);
+    }
+    if gasto_ms < 300 {
+        nexo_rt::log!(
+            "utest: diag: esgotou em {} ms, antes do prazo de 300",
+            gasto_ms
+        );
+        nexo_sys::exit(407);
+    }
+    // 3. estatisticas: dois pings enviados, um respondido; o driver mexeu nos dois sentidos.
+    let st = call!(StatsRequest {}, decode_stats_response, 410);
+    if st.pings_sent != 2 || st.pings_replied != 1 || st.tx_frames == 0 || st.rx_frames == 0 {
+        nexo_rt::log!(
+            "utest: diag: stats pings {}/{} tx {} rx {} — esperado 2/1 e trafego",
+            st.pings_sent,
+            st.pings_replied,
+            st.tx_frames,
+            st.rx_frames
+        );
+        nexo_sys::exit(413);
+    }
+    nexo_rt::log!(
+        "utest: diag ok — 10.0.2.2 em {} us (ttl {}), 192.0.2.1 esgotou em {} ms; stats: rx {} tx {} udp_drop {} udp {} tcp {} dns {}",
+        ok.rtt_us,
+        ok.ttl,
+        gasto_ms,
+        st.rx_frames,
+        st.tx_frames,
+        st.udp_dropped,
+        st.udp_socks,
+        st.tcp_conns,
+        st.dns_entries
+    );
+    nexo_sys::exit(0)
+}
+
 /// Ping ICMP ao gateway com a biblioteca `nexo-netstack`; sai com 0 no echo reply.
 fn net_ping(
     mac: [u8; 6],
@@ -5269,6 +5373,26 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
             nexo_sys::exit(397);
         }
         nexo_rt::log!("utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados");
+
+        // 8. diagnostico (nexo.sock v1.1): ping negado na sessao restrita (regra so-TCP).
+        use nexo_proto::sock::{PingRequest, decode_ping_response};
+        let m = PingRequest {
+            dst_ip: [10, 0, 2, 2],
+            dst_ip_len: 4,
+            seq: 1,
+            timeout_ms: 1000,
+        }
+        .encode_msg(&mut msg)
+        .unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_ping_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_rt::log!("utest: ping: sessao sem ICMP nao foi negada");
+            nexo_sys::exit(398);
+        }
+        nexo_rt::log!("utest: ping negado ok — sessao sem ICMP recebeu erro 7");
+        // O ping que responde, o que esgota o prazo e as estatisticas ficam no modo 94 (fase
+        // 5 do net-test), a ultima do cenario: ver o comentario la sobre o slirp.
     }
     nexo_sys::exit(0)
 }

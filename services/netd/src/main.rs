@@ -8,7 +8,8 @@
 //! eventos único bombeia quadros do driver (ARP, UDP para filas por porta, TCP para a máquina
 //! de estados de `docs/spec/tcp-states.md`) e atende os clientes sem bloquear
 //! (`channel_try_recv`), dormindo em `channel_wait_any` quando tudo está ocioso. Limitações
-//! documentadas: sockets globais (sem isolamento por sessão), TIME_WAIT imediato.
+//! documentadas: sockets globais (sem isolamento por sessão), TIME_WAIT imediato, um ping
+//! de cada vez (v1.1: `ping` e `stats` — diagnóstico de dentro do sistema).
 #![no_std]
 #![no_main]
 
@@ -57,6 +58,22 @@ struct Netd {
     /// Eventos `frame` que chegaram no meio de um RPC ao driver (consumidos por `net_event`).
     evq: [([u8; 1514], u16); 16],
     evq_len: usize,
+    /// Contadores desde o arranque, expostos por `stats` (nexo.sock v1.1).
+    stats: Contadores,
+    /// Ping em curso: (ident, seq, destino, instante do envio) — um de cada vez.
+    ping: Option<(u16, u16, [u8; 4], u64)>,
+    /// Resposta ao ping em curso: (rtt em us, ttl).
+    ping_reply: Option<(u32, u8)>,
+}
+
+/// Contadores globais do netd. Não são por socket — são o que existe; `stats` diz isso.
+#[derive(Clone, Copy)]
+struct Contadores {
+    rx_frames: u32,
+    tx_frames: u32,
+    udp_dropped: u32,
+    pings_sent: u32,
+    pings_replied: u32,
 }
 
 static mut NETD: Netd = Netd {
@@ -82,6 +99,15 @@ static mut NETD: Netd = Netd {
     dns_len: 0,
     evq: [([0; 1514], 0); 16],
     evq_len: 0,
+    stats: Contadores {
+        rx_frames: 0,
+        tx_frames: 0,
+        udp_dropped: 0,
+        pings_sent: 0,
+        pings_replied: 0,
+    },
+    ping: None,
+    ping_reply: None,
 };
 
 fn netd() -> &'static mut Netd {
@@ -134,6 +160,7 @@ fn net_send(frame: &[u8]) {
     if pnet::decode_send_response(&msg[..n]).is_err() {
         fail(101, "resposta do netdev");
     }
+    netd().stats.tx_frames = netd().stats.tx_frames.wrapping_add(1);
 }
 
 /// Assina o modo de eventos do driver (quadros passam a chegar como eventos no canal).
@@ -284,6 +311,7 @@ fn pump() {
         if n == 0 {
             return;
         }
+        st.stats.rx_frames = st.stats.rx_frames.wrapping_add(1);
         let f = &frame[..n];
         // ARP: responde pedidos pelo nosso IP e aprende o MAC do gateway
         if let Some((_, _, et, p)) = nsk::eth_parse(f) {
@@ -337,6 +365,8 @@ fn pump() {
                                     q.2 = data.len() as u16;
                                     q.3[..data.len()].copy_from_slice(data);
                                     u.qlen += 1;
+                                } else {
+                                    st.stats.udp_dropped = st.stats.udp_dropped.wrapping_add(1);
                                 }
                                 break;
                             }
@@ -346,6 +376,16 @@ fn pump() {
                 }
                 if ip.proto == nsk::IPPROTO_TCP {
                     handle_tcp(f);
+                    continue;
+                }
+                // ICMP: só o echo reply do ping em curso interessa (ident+seq+origem).
+                if ip.proto == nsk::IPPROTO_ICMP
+                    && let Some((ident, seq, dst, t0)) = st.ping
+                    && let Some((ttl, _)) = nsk::icmp_echo_reply(f, dst, ident, seq)
+                {
+                    let rtt = (nexo_sys::time_now().saturating_sub(t0) / 1000) as u32;
+                    st.ping_reply = Some((rtt, ttl));
+                    st.ping = None;
                     continue;
                 }
             }
@@ -898,6 +938,79 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
                 }
                 nexo_sys::sleep_ns(2_000_000);
             }
+        }
+        Request::Ping(rq) => {
+            if rq.dst_ip().len() != 4 || rq.timeout_ms == 0 || rq.timeout_ms > 60_000 {
+                return sock::encode_error(sock::PingRequest::METHOD_ID, E_INVALID, out)
+                    .unwrap_or(0);
+            }
+            let mut dst = [0u8; 4];
+            dst.copy_from_slice(rq.dst_ip());
+            if profile.allows_icmp(dst).is_err() {
+                return sock::encode_error(sock::PingRequest::METHOD_ID, E_DENIED, out)
+                    .unwrap_or(0);
+            }
+            // Um ping de cada vez: o laço é síncrono por cliente e o estado é global.
+            if st.ping.is_some() {
+                return sock::encode_error(sock::PingRequest::METHOD_ID, E_NO_RES, out)
+                    .unwrap_or(0);
+            }
+            // Tudo sai pelo gateway (a rede do slirp não tem outros vizinhos resolvidos).
+            let ident = 0x4e00 | (st.stats.pings_sent as u16 & 0xff);
+            let mut frame = [0u8; 128];
+            let n = nsk::icmp_echo_request(
+                &mut frame,
+                st.mac,
+                st.gw_mac,
+                st.lease.ip,
+                dst,
+                ident,
+                rq.seq,
+                b"nexo-ping",
+            );
+            st.ping_reply = None;
+            let t0 = nexo_sys::time_now();
+            st.ping = Some((ident, rq.seq, dst, t0));
+            net_send(&frame[..n]);
+            st.stats.pings_sent = st.stats.pings_sent.wrapping_add(1);
+            let prazo = u64::from(rq.timeout_ms) * 1_000_000;
+            loop {
+                pump();
+                if let Some((rtt_us, ttl)) = st.ping_reply.take() {
+                    st.stats.pings_replied = st.stats.pings_replied.wrapping_add(1);
+                    break sock::PingResponse { rtt_us, ttl }
+                        .encode_msg(out)
+                        .unwrap_or(0);
+                }
+                if nexo_sys::time_now().saturating_sub(t0) > prazo {
+                    st.ping = None;
+                    break sock::encode_error(sock::PingRequest::METHOD_ID, E_TIMEOUT, out)
+                        .unwrap_or(0);
+                }
+                nexo_sys::sleep_ns(1_000_000);
+            }
+        }
+        Request::Stats(_) => {
+            let c = st.stats;
+            sock::StatsResponse {
+                rx_frames: c.rx_frames,
+                tx_frames: c.tx_frames,
+                udp_dropped: c.udp_dropped,
+                udp_socks: st.udp.iter().filter(|u| u.used).count() as u32,
+                tcp_conns: st
+                    .tcp
+                    .iter()
+                    .filter(|t| {
+                        t.as_ref()
+                            .is_some_and(|c| c.state != nsk::tcp::State::Closed)
+                    })
+                    .count() as u32,
+                dns_entries: st.dns_len as u32,
+                pings_sent: c.pings_sent,
+                pings_replied: c.pings_replied,
+            }
+            .encode_msg(out)
+            .unwrap_or(0)
         }
         Request::TcpClose(rq) => {
             let i = rq.conn as usize;
