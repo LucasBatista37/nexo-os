@@ -1,4 +1,4 @@
-/* nexo_proto_sock.h — protocolo tipado `nexo.sock` v1.1 em C.
+/* nexo_proto_sock.h — protocolo tipado `nexo.sock` v1.2 em C.
  * GERADO por tools/idlgen do idl/sock.idl — nao editar. Fio identico ao Rust:
  * cabecalho NXIP de 24 bytes + payload little-endian (bytes<N>: u32 len + dados).
  * Nesta rodada: encode de PEDIDO + decode de RESPOSTA (clientes C); handles nao
@@ -11,7 +11,7 @@
 
 #define NEXO_SOCK_PROTOCOL_ID 0x60281105u
 #define NEXO_SOCK_VMAJOR 1
-#define NEXO_SOCK_VMINOR 1
+#define NEXO_SOCK_VMINOR 2
 
 typedef struct {
     uint8_t _vazio; /* sem campos */

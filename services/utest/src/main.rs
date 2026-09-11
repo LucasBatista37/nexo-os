@@ -5308,11 +5308,13 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
             Ok((n, _)) if decode_open_response(&msg[..n]).is_ok() => {}
             _ => nexo_sys::exit(390),
         }
+        // buffer de handles proprio: o pai continua a usar `hs` (call!) enquanto `ask` vive
+        let mut hs_filha = [0u32; 1];
         let mut ask = |req_bytes: &[u8], out: &mut [u8; 4096]| -> usize {
             if nexo_sys::channel_send(mine, req_bytes, &[]) != Status::Ok {
                 nexo_sys::exit(391);
             }
-            match nexo_sys::channel_recv(mine, out, &mut hs) {
+            match nexo_sys::channel_recv(mine, out, &mut hs_filha) {
                 Ok((n, _)) => n,
                 _ => nexo_sys::exit(392),
             }
@@ -5327,10 +5329,13 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         .unwrap_or(0);
         let req = msg;
         let n = ask(&req[..m], &mut msg);
-        if decode_tcp_connect_response(&msg[..n]).is_err() {
-            nexo_rt::log!("utest: firewall: conexao permitida foi negada");
-            nexo_sys::exit(394);
-        }
+        let conn_filha = match decode_tcp_connect_response(&msg[..n]) {
+            Ok(r) => r.conn,
+            Err(_) => {
+                nexo_rt::log!("utest: firewall: conexao permitida foi negada");
+                nexo_sys::exit(394);
+            }
+        };
         // negado: TCP para outra porta (mesmo host)
         let m = TcpConnectRequest {
             dst_ip: [10, 0, 2, 2],
@@ -5393,6 +5398,119 @@ fn sock_client(tcp_port: u16, udp_port: u16, http_port: u16) -> ! {
         nexo_rt::log!("utest: ping negado ok — sessao sem ICMP recebeu erro 7");
         // O ping que responde, o que esgota o prazo e as estatisticas ficam no modo 94 (fase
         // 5 do net-test), a ultima do cenario: ver o comentario la sobre o slirp.
+
+        // 9. sockets por sessao (v1.2): a sessao restrita nao usa a conexao nem a porta do
+        //    pai — e sem isto o firewall so valia na abertura.
+        use nexo_proto::sock::{
+            TcpAvailRequest, TcpCloseRequest, TcpRecvRequest, TcpSendRequest, UdpAvailRequest,
+            decode_tcp_avail_response, decode_tcp_close_response, decode_tcp_recv_response,
+            decode_tcp_send_response, decode_udp_avail_response,
+        };
+        // o pai abre uma conexao propria ao servidor de eco...
+        let pai = call!(
+            TcpConnectRequest {
+                dst_ip: [10, 0, 2, 2],
+                dst_ip_len: 4,
+                dst_port: tcp_port,
+            },
+            decode_tcp_connect_response,
+            420
+        )
+        .conn;
+        // ...e a filha tenta usa-la de todas as formas: erro 7 em todas.
+        let mut t = TcpSendRequest {
+            conn: pai,
+            data: [0; 1400],
+            data_len: 1,
+        };
+        t.data[0] = b'x';
+        let m = t.encode_msg(&mut msg).unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_tcp_send_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_rt::log!("utest: sessoes: filha escreveu na conexao do pai");
+            nexo_sys::exit(423);
+        }
+        let m = TcpRecvRequest { conn: pai }
+            .encode_msg(&mut msg)
+            .unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_tcp_recv_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_rt::log!("utest: sessoes: filha leu a conexao do pai");
+            nexo_sys::exit(424);
+        }
+        let m = TcpCloseRequest { conn: pai }
+            .encode_msg(&mut msg)
+            .unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_tcp_close_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_rt::log!("utest: sessoes: filha fechou a conexao do pai");
+            nexo_sys::exit(425);
+        }
+        // a porta UDP do pai (40200, do passo 3) e a do resolvedor DNS (40000) tambem nao
+        let m = UdpAvailRequest { port: 40200 }
+            .encode_msg(&mut msg)
+            .unwrap_or(0);
+        let req = msg;
+        let n = ask(&req[..m], &mut msg);
+        if decode_udp_avail_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_rt::log!("utest: sessoes: filha sondou a porta UDP do pai");
+            nexo_sys::exit(426);
+        }
+        let m = UdpAvailRequest { port: 40000 }
+            .encode_msg(&mut msg)
+            .unwrap_or(0);
+        if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+            nexo_sys::exit(427);
+        }
+        let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+            Ok((n, _)) => n,
+            _ => nexo_sys::exit(428),
+        };
+        if decode_udp_avail_response(&msg[..n]) != Err(nexo_proto::ProtoError::Remote(7)) {
+            nexo_rt::log!("utest: sessoes: a porta do resolvedor DNS nao esta reservada");
+            nexo_sys::exit(429);
+        }
+        // a filha fecha a sessao: a conexao dela e libertada pelo netd (o pai ve E_INVALID)
+        let _ = nexo_sys::handle_close(mine);
+        let inicio = nexo_sys::time_now();
+        loop {
+            let m = TcpAvailRequest { conn: conn_filha }
+                .encode_msg(&mut msg)
+                .unwrap_or(0);
+            if nexo_sys::channel_send(0, &msg[..m], &[]) != Status::Ok {
+                nexo_sys::exit(430);
+            }
+            let n = match nexo_sys::channel_recv(0, &mut msg, &mut hs) {
+                Ok((n, _)) => n,
+                _ => nexo_sys::exit(431),
+            };
+            match decode_tcp_avail_response(&msg[..n]) {
+                Err(nexo_proto::ProtoError::Remote(1)) => break,
+                Err(nexo_proto::ProtoError::Remote(7))
+                    if nexo_sys::time_now() - inicio < 2_000_000_000 =>
+                {
+                    nexo_sys::sleep_ns(20_000_000);
+                }
+                other => {
+                    nexo_rt::log!(
+                        "utest: sessoes: conexao da filha nao foi libertada: {:?}",
+                        other
+                    );
+                    nexo_sys::exit(432);
+                }
+            }
+        }
+        call!(
+            TcpCloseRequest { conn: pai },
+            decode_tcp_close_response,
+            433
+        );
+        nexo_rt::log!(
+            "utest: sessoes ok — conexao e porta do pai negadas a filha (7), porta do DNS reservada, conexao da filha libertada ao fechar"
+        );
     }
     nexo_sys::exit(0)
 }

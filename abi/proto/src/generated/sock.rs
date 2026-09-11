@@ -1,4 +1,4 @@
-//! Protocolo tipado `nexo.sock` v1.1 — **gerado por `tools/idlgen` de `idl/sock.idl`; nao editar**.
+//! Protocolo tipado `nexo.sock` v1.2 — **gerado por `tools/idlgen` de `idl/sock.idl`; nao editar**.
 
 #[allow(unused_imports)]
 use crate::{FLAG_ERROR, FLAG_EVENT, FLAG_RESPONSE, HEADER_LEN, Header, ProtoError};
@@ -8,7 +8,7 @@ pub const PROTOCOL_ID: u32 = 0x60281105;
 /// Versao maior (incompatibilidades).
 pub const VERSION_MAJOR: u16 = 1;
 /// Versao menor (adicoes compativeis).
-pub const VERSION_MINOR: u16 = 1;
+pub const VERSION_MINOR: u16 = 2;
 
 /// `nexo.sock.info` — pedido.
 #[derive(Clone, Debug, PartialEq, Eq)]

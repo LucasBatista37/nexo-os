@@ -1,7 +1,10 @@
 # nexo.sock — API de sockets nativa do servico de rede residente (services/netd).
+# v1.2: sockets UDP (por porta) e conexoes TCP (por `conn`) pertencem a sessao que os criou;
+# usados por outra sessao devolvem erro 7, e fecham quando a sessao fecha. Ate a v1.1 eram
+# globais entre sessoes — o firewall de uma sessao restrita valia na abertura e em mais nada.
 # Erros remotos: 1 = pedido invalido, 2 = sem recursos, 3 = tempo esgotado,
 # 4 = conexao fechada/reiniciada, 5 = nome nao resolvido, 6 = nao conectado.
-protocol sock 1.1
+protocol sock 1.2
 
 # Configuracao de rede corrente (obtida por DHCP no arranque do netd).
 method 1 info {

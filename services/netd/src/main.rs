@@ -1,14 +1,17 @@
 //! `netd` — serviço de rede residente. Handle 0 = canal do `netdev` (`nexo.net`),
 //! handle 1 = primeiro cliente (`nexo.sock`, `idl/sock.idl`). Um cliente abre novas sessões com
 //! `open{chan}`, transferindo a sua ponta de um canal recém-criado; o netd passa a atendê-la
-//! como mais um cliente (até [`MAX_CLIENTS`]). Sockets são globais nesta versão (os clientes
-//! coordenam as portas entre si); isolamento por sessão é um item futuro.
+//! como mais um cliente (até [`MAX_CLIENTS`]). Cada socket UDP e cada conexão TCP pertence
+//! à sessão que o criou (v1.2): outra sessão que tente usá-lo recebe erro 7, e quando uma
+//! sessão fecha os seus sockets são libertados. Até à v1.1 eram globais — uma sessão
+//! restrita por `open` podia ler os datagramas do pai e escrever nas conexões dele, e o
+//! firewall só valia na abertura.
 //!
 //! No arranque: MAC → DHCP (DISCOVER→OFFER→REQUEST→ACK) → ARP do gateway. Depois, um laço de
 //! eventos único bombeia quadros do driver (ARP, UDP para filas por porta, TCP para a máquina
 //! de estados de `docs/spec/tcp-states.md`) e atende os clientes sem bloquear
 //! (`channel_try_recv`), dormindo em `channel_wait_any` quando tudo está ocioso. Limitações
-//! documentadas: sockets globais (sem isolamento por sessão), TIME_WAIT imediato, um ping
+//! documentadas: TIME_WAIT imediato, um ping
 //! de cada vez (v1.1: `ping` e `stats` — diagnóstico de dentro do sistema).
 #![no_std]
 #![no_main]
@@ -24,6 +27,11 @@ const NET: Handle = 0;
 const CLIENT: Handle = 1;
 /// Máximo de clientes simultâneos (o primeiro + os abertos por `open`).
 const MAX_CLIENTS: usize = 8;
+/// Porta UDP local do resolvedor DNS do próprio netd.
+const DNS_PORT: u16 = 40000;
+/// "Sessão" dona do socket do resolvedor: nenhum cliente tem este índice, logo nenhum
+/// cliente consegue ligar-se à porta do DNS e receber as respostas de outrem.
+const DNS_SLOT: usize = usize::MAX;
 
 const E_INVALID: u32 = 1;
 const E_NO_RES: u32 = 2;
@@ -42,6 +50,8 @@ const DNS_CACHE: usize = 8;
 
 struct UdpSock {
     used: bool,
+    /// Sessão (índice em `clients`) que abriu o socket; só ela o usa (v1.2).
+    owner: usize,
     port: u16,
     queue: [([u8; 4], u16, u16, [u8; UDP_MAX]); UDP_QUEUE], // (ip, porta, len, dados)
     qlen: usize,
@@ -53,6 +63,8 @@ struct Netd {
     lease: nsk::DhcpLease,
     udp: [UdpSock; UDP_SOCKS],
     tcp: [Option<nsk::tcp::TcpSocket>; TCP_CONNS],
+    /// Sessão dona de cada conexão TCP (válido quando `tcp[i]` é `Some`).
+    tcp_owner: [usize; TCP_CONNS],
     dns: [([u8; 64], u8, [u8; 4]); DNS_CACHE],
     dns_len: usize,
     /// Eventos `frame` que chegaram no meio de um RPC ao driver (consumidos por `net_event`).
@@ -89,12 +101,14 @@ static mut NETD: Netd = Netd {
     udp: [const {
         UdpSock {
             used: false,
+            owner: 0,
             port: 0,
             queue: [([0; 4], 0, 0, [0; UDP_MAX]); UDP_QUEUE],
             qlen: 0,
         }
     }; UDP_SOCKS],
     tcp: [const { None }; TCP_CONNS],
+    tcp_owner: [0; TCP_CONNS],
     dns: [([0; 64], 0, [0; 4]); DNS_CACHE],
     dns_len: 0,
     evq: [([0; 1514], 0); 16],
@@ -393,16 +407,68 @@ fn pump() {
     }
 }
 
-fn udp_bind(port: u16) -> Option<usize> {
+/// Socket UDP da porta `port` para a sessão `slot`: o dela se já existe, um novo se a porta
+/// está livre, `E_DENIED` se a porta pertence a outra sessão (uma sessão restrita não lê os
+/// datagramas do pai), `E_NO_RES` sem vagas.
+fn udp_bind(port: u16, slot: usize) -> Result<usize, u32> {
     let st = netd();
     if let Some(i) = (0..UDP_SOCKS).find(|&i| st.udp[i].used && st.udp[i].port == port) {
-        return Some(i);
+        return if st.udp[i].owner == slot {
+            Ok(i)
+        } else {
+            Err(E_DENIED)
+        };
     }
-    let i = (0..UDP_SOCKS).find(|&i| !st.udp[i].used)?;
+    let i = (0..UDP_SOCKS).find(|&i| !st.udp[i].used).ok_or(E_NO_RES)?;
     st.udp[i].used = true;
+    st.udp[i].owner = slot;
     st.udp[i].port = port;
     st.udp[i].qlen = 0;
-    Some(i)
+    Ok(i)
+}
+
+/// Conexão TCP `conn` vista pela sessão `slot`: índice válido e dela, ou o erro a devolver
+/// (`E_INVALID` se não existe, `E_DENIED` se é de outra sessão).
+fn tcp_own(conn: u32, slot: usize) -> Result<usize, u32> {
+    let st = netd();
+    let i = conn as usize;
+    if i >= TCP_CONNS || st.tcp[i].is_none() {
+        return Err(E_INVALID);
+    }
+    if st.tcp_owner[i] != slot {
+        return Err(E_DENIED);
+    }
+    Ok(i)
+}
+
+/// A sessão `slot` fechou: solta os seus sockets UDP e fecha (FIN, melhor esforço) as suas
+/// conexões TCP — sem isto, sockets de sessões mortas ficavam presos até o netd sair.
+fn liberta_sessao(slot: usize) -> (usize, usize) {
+    let st = netd();
+    let mut udp = 0;
+    for u in st.udp.iter_mut() {
+        if u.used && u.owner == slot {
+            u.used = false;
+            u.qlen = 0;
+            udp += 1;
+        }
+    }
+    let mut tcp = 0;
+    for i in 0..TCP_CONNS {
+        if st.tcp_owner[i] != slot {
+            continue;
+        }
+        if let Some(c) = st.tcp[i].as_mut() {
+            let now = nexo_sys::time_now();
+            if let Some(f) = c.close(now) {
+                let sock = st.tcp[i].as_ref().unwrap();
+                emit_seg(sock, f);
+            }
+            st.tcp[i] = None;
+            tcp += 1;
+        }
+    }
+    (udp, tcp)
 }
 
 fn udp_emit(dst_ip: [u8; 4], dst_port: u16, src_port: u16, data: &[u8]) {
@@ -433,7 +499,7 @@ fn resolve(name: &[u8]) -> Result<([u8; 4], bool), u32> {
         }
     }
     let id = (nexo_sys::time_now() & 0xffff) as u16 | 1;
-    let ui = udp_bind(40000).ok_or(E_NO_RES)?;
+    let ui = udp_bind(DNS_PORT, DNS_SLOT)?;
     let mut frame = [0u8; 1514];
     let n = nsk::dns_query(
         &mut frame,
@@ -564,6 +630,15 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 Err(Status::PeerClosed) => {
                     let _ = nexo_sys::handle_close(ch);
                     clients[slot] = None;
+                    let (udp, tcp) = liberta_sessao(slot);
+                    if udp + tcp > 0 {
+                        log!(
+                            "netd: sessao {} fechou; {} socket(s) UDP e {} conexao(oes) TCP libertados",
+                            slot,
+                            udp,
+                            tcp
+                        );
+                    }
                     if slot == 0 && clients.iter().all(|c| c.is_none()) {
                         log!("netd: ultimo cliente desconectou; encerrando");
                         nexo_sys::exit(0)
@@ -614,7 +689,7 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                 let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
                 continue;
             }
-            let m = serve(request, &profile, &mut out);
+            let m = serve(request, slot, &profile, &mut out);
             if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
                 fail(108, "resposta ao cliente");
             }
@@ -658,7 +733,12 @@ fn wait_dhcp(kind: u8, xid: u32) -> nsk::DhcpLease {
     }
 }
 
-fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096]) -> usize {
+fn serve(
+    request: Request,
+    slot: usize,
+    profile: &nsk::firewall::Profile,
+    out: &mut [u8; 4096],
+) -> usize {
     let st = netd();
     match request {
         // `open` é tratado no laço de eventos (registra o novo cliente); nunca chega aqui.
@@ -703,12 +783,9 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
                 return sock::encode_error(sock::UdpSendRequest::METHOD_ID, E_INVALID, out)
                     .unwrap_or(0);
             }
-            if udp_bind(rq.src_port).is_none() {
-                return sock::encode_error(sock::UdpSendRequest::METHOD_ID, E_NO_RES, out)
-                    .unwrap_or(0);
-            }
             let mut dst = [0u8; 4];
             dst.copy_from_slice(rq.dst_ip());
+            // firewall antes da vaga: um envio negado nao deve ocupar um socket
             if profile
                 .allows(dst, rq.dst_port, nsk::firewall::PROTO_UDP)
                 .is_err()
@@ -716,13 +793,19 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
                 return sock::encode_error(sock::UdpSendRequest::METHOD_ID, E_DENIED, out)
                     .unwrap_or(0);
             }
+            if let Err(e) = udp_bind(rq.src_port, slot) {
+                return sock::encode_error(sock::UdpSendRequest::METHOD_ID, e, out).unwrap_or(0);
+            }
             udp_emit(dst, rq.dst_port, rq.src_port, rq.data());
             sock::UdpSendResponse {}.encode_msg(out).unwrap_or(0)
         }
         Request::UdpRecv(rq) => {
-            let Some(i) = udp_bind(rq.port) else {
-                return sock::encode_error(sock::UdpRecvRequest::METHOD_ID, E_NO_RES, out)
-                    .unwrap_or(0);
+            let i = match udp_bind(rq.port, slot) {
+                Ok(i) => i,
+                Err(e) => {
+                    return sock::encode_error(sock::UdpRecvRequest::METHOD_ID, e, out)
+                        .unwrap_or(0);
+                }
             };
             let u = &mut st.udp[i];
             let mut resp = sock::UdpRecvResponse {
@@ -777,6 +860,7 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
                 nsk::tcp::TcpSocket::connect(41000 + i as u16, dst, rq.dst_port, iss, now);
             emit_seg(&sock_new, syn);
             st.tcp[i] = Some(sock_new);
+            st.tcp_owner[i] = slot;
             let start = nexo_sys::time_now();
             loop {
                 pump();
@@ -803,11 +887,13 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
             }
         }
         Request::TcpSend(rq) => {
-            let i = rq.conn as usize;
-            if i >= TCP_CONNS || st.tcp[i].is_none() {
-                return sock::encode_error(sock::TcpSendRequest::METHOD_ID, E_INVALID, out)
-                    .unwrap_or(0);
-            }
+            let i = match tcp_own(rq.conn, slot) {
+                Ok(i) => i,
+                Err(e) => {
+                    return sock::encode_error(sock::TcpSendRequest::METHOD_ID, e, out)
+                        .unwrap_or(0);
+                }
+            };
             let data = rq.data();
             let start = nexo_sys::time_now();
             loop {
@@ -849,11 +935,13 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
             }
         }
         Request::TcpRecv(rq) => {
-            let i = rq.conn as usize;
-            if i >= TCP_CONNS || st.tcp[i].is_none() {
-                return sock::encode_error(sock::TcpRecvRequest::METHOD_ID, E_INVALID, out)
-                    .unwrap_or(0);
-            }
+            let i = match tcp_own(rq.conn, slot) {
+                Ok(i) => i,
+                Err(e) => {
+                    return sock::encode_error(sock::TcpRecvRequest::METHOD_ID, e, out)
+                        .unwrap_or(0);
+                }
+            };
             let c = st.tcp[i].as_mut().unwrap();
             let mut resp = sock::TcpRecvResponse {
                 data: [0; 1400],
@@ -869,9 +957,12 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
             resp.encode_msg(out).unwrap_or(0)
         }
         Request::UdpAvail(rq) => {
-            let Some(i) = udp_bind(rq.port) else {
-                return sock::encode_error(sock::UdpAvailRequest::METHOD_ID, E_NO_RES, out)
-                    .unwrap_or(0);
+            let i = match udp_bind(rq.port, slot) {
+                Ok(i) => i,
+                Err(e) => {
+                    return sock::encode_error(sock::UdpAvailRequest::METHOD_ID, e, out)
+                        .unwrap_or(0);
+                }
             };
             sock::UdpAvailResponse {
                 queued: st.udp[i].qlen as u32,
@@ -880,11 +971,13 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
             .unwrap_or(0)
         }
         Request::TcpAvail(rq) => {
-            let i = rq.conn as usize;
-            if i >= TCP_CONNS || st.tcp[i].is_none() {
-                return sock::encode_error(sock::TcpAvailRequest::METHOD_ID, E_INVALID, out)
-                    .unwrap_or(0);
-            }
+            let i = match tcp_own(rq.conn, slot) {
+                Ok(i) => i,
+                Err(e) => {
+                    return sock::encode_error(sock::TcpAvailRequest::METHOD_ID, e, out)
+                        .unwrap_or(0);
+                }
+            };
             let c = st.tcp[i].as_ref().unwrap();
             sock::TcpAvailResponse {
                 avail: c.rx_available() as u32,
@@ -909,6 +1002,7 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
             };
             let iss = (nexo_sys::time_now() as u32) | 1;
             st.tcp[i] = Some(nsk::tcp::TcpSocket::listen(rq.port, iss));
+            st.tcp_owner[i] = slot;
             let start = nexo_sys::time_now();
             loop {
                 pump();
@@ -1013,11 +1107,13 @@ fn serve(request: Request, profile: &nsk::firewall::Profile, out: &mut [u8; 4096
             .unwrap_or(0)
         }
         Request::TcpClose(rq) => {
-            let i = rq.conn as usize;
-            if i >= TCP_CONNS || st.tcp[i].is_none() {
-                return sock::encode_error(sock::TcpCloseRequest::METHOD_ID, E_INVALID, out)
-                    .unwrap_or(0);
-            }
+            let i = match tcp_own(rq.conn, slot) {
+                Ok(i) => i,
+                Err(e) => {
+                    return sock::encode_error(sock::TcpCloseRequest::METHOD_ID, e, out)
+                        .unwrap_or(0);
+                }
+            };
             let was_reset = st.tcp[i].as_ref().is_some_and(|c| c.reset);
             let start = nexo_sys::time_now();
             // espera a pendencia anterior, emite o FIN e acompanha o fecho (melhor esforco)

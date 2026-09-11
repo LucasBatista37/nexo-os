@@ -130,10 +130,19 @@ hostil e validam no parse.
 - **Adversário**: qualquer pacote da rede; app sem a capability tentando falar com a rede.
 - **Superfície**: quadros virtio-net; API de sockets.
 - **Mitigações**: parsers de pacote com validação hostil; capability de rede por sessão com
-  firewall por sessão (testado: TCP permitido/UDP negado na mesma sessão); slirp isola o host
-  nos testes.
+  firewall por sessão (testado: TCP permitido/UDP negado na mesma sessão); **sockets por
+  sessão** (`nexo.sock` v1.2, bloco 149): cada socket UDP e conexão TCP pertence à sessão que
+  o criou — outra sessão recebe erro 7 — e a porta do resolvedor DNS do `netd` não é
+  atribuível a clientes; ao fechar uma sessão os seus sockets são libertados (testado: a filha
+  restrita não escreve, lê nem fecha a conexão do pai, nem sonda a porta UDP dele); ICMP
+  (`ping`) também passa pelo firewall (bit próprio na regra); slirp isola o host nos testes.
+- **Lacunas fechadas**: ~~sockets globais entre sessões~~ **fechada em 2026-09-11** — até à
+  v1.1 uma sessão restrita por `open` podia usar `tcp_send`/`tcp_recv` num `conn` do pai e
+  ligar-se à porta UDP dele (o firewall só valia na abertura); ~~sockets UDP nunca libertados~~
+  (4 vagas esgotavam-se dentro de um boot de testes).
 - **Lacunas**: **sem TLS** (decisão adiada pelo usuário) — nada que fale com a internet real
-  deve ser exposto até lá; sem rate-limiting/SYN-flood hardening (o alvo atual é QEMU).
+  deve ser exposto até lá; sem rate-limiting/SYN-flood hardening (o alvo atual é QEMU); os
+  índices `conn` são pequenos inteiros globais (erro 7 revela que existem, não o que carregam).
 
 ## 9. Observabilidade (trace, debug_info, logs)
 

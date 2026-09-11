@@ -458,15 +458,15 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/utest/src/main.rs:3450` | bloco | regiao recem-mapeada por memory_map (USER\|RW) com pelo menos TAM bytes. |
 | `services/utest/src/main.rs:4816` | bloco | utest tem uma unica thread; buffer estatico evita estourar a pilha. |
 | `services/utest/src/main.rs:4818` | bloco | idem — unico acesso a IDXNET neste processo de uma so thread. |
-| `services/utest/src/main.rs:6295` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
-| `services/utest/src/main.rs:6554` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:6566` | bloco | leitura da mesma pagina mapeada. |
-| `services/utest/src/main.rs:9273` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9648` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/utest/src/main.rs:9663` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
-| `services/utest/src/main.rs:9680` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
-| `services/utest/src/main.rs:9707` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
-| `services/utest/src/main.rs:9715` | bloco | mesma pagina compartilhada. |
+| `services/utest/src/main.rs:6413` | bloco | a regiao acabou de ser mapeada; se o desmapeador chegar antes da syscall, ela falha com BadAddress — que e justamente um dos desfechos que o teste exercita. |
+| `services/utest/src/main.rs:6672` | bloco | base .. base+4096 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:6684` | bloco | leitura da mesma pagina mapeada. |
+| `services/utest/src/main.rs:9391` | bloco | base .. base + w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9766` | bloco | base .. base+w*h*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/utest/src/main.rs:9781` | bloco | `base` e o inicio do mapeamento da saida (pagina de cabecalho) e `off` e um dos offsets `frame::OFF_*`, alinhado a 4 e dentro da pagina. |
+| `services/utest/src/main.rs:9798` | bloco | leitura dentro do buffer da frente da saida mapeada (w*h*4 bytes). |
+| `services/utest/src/main.rs:9825` | bloco | base foi mapeada por memory_map; confere o marcador do produtor. |
+| `services/utest/src/main.rs:9833` | bloco | mesma pagina compartilhada. |
 
 ## `nexo-loader` — 15 usos
 
@@ -686,7 +686,7 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
-| `services/netd/src/main.rs:115` | bloco | processo com uma única thread; nenhuma reentrância. |
+| `services/netd/src/main.rs:129` | bloco | processo com uma única thread; nenhuma reentrância. |
 
 ## `nexo-portal` — 1 usos
 

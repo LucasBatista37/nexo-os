@@ -853,6 +853,8 @@ def run_net_scenario(timeout: float) -> bool:
             r"utest: posix udp ok — poll e select viram o datagrama antes do recvfrom",
                 r"utest: firewall ok — sessao restrita: TCP permitido, DNS/UDP/porta negados",
                 r"utest: ping negado ok — sessao sem ICMP recebeu erro 7",
+                r"utest: sessoes ok — conexao e porta do pai negadas a filha \(7\), porta do DNS reservada, conexao da filha libertada ao fechar",
+                r"netd: sessao 1 fechou; 0 socket\(s\) UDP e 1 conexao\(oes\) TCP libertados",
                 r"utest: diag ok — 10\.0\.2\.2 em \d+ us \(ttl \d+\), 192\.0\.2\.1 esgotou em \d+ ms; stats: rx \d+ tx \d+",
                 r"\[NET\] fase 5 \(diagnostico\) terminou com 0",
                 r"utest: http ok — GET /nexo\.txt devolveu 200 e o corpo esperado \(\d+ bytes\)",
