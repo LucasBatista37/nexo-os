@@ -2411,6 +2411,66 @@ pub fn shell_mode() {
     kinfo!("[SHELL] shell terminou com {code}");
 }
 
+/// `desktop=1` na linha de comando: a sessão gráfica de verdade. O kernel só faz o que exige
+/// privilégio — concessões de dispositivo aos drivers de entrada e a concessão raiz ao
+/// `devmgr` — e entrega os canais ao `sessao`, que compõe o resto (compositor, Faixa de
+/// Atividades, login, terminal) em modo usuário. Até aqui o desktop só existia nos testes:
+/// `make run` arrancava o kernel e ficava no `idle`.
+pub fn session_mode() {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    let inputs: Vec<u16> = crate::pci::devices()
+        .iter()
+        .filter(|d| d.is_virtio() && d.device == 0x1052)
+        .map(|d| d.bdf)
+        .collect();
+    let mut handles = Vec::new();
+    for bdf in &inputs {
+        let (a, b) = ChannelEnd::create_pair();
+        let g = Handle {
+            object: Object::Device(Arc::new(DeviceGrant::for_device(*bdf))),
+            rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+        };
+        let _ = crate::process::spawn_named("inputdev", 0, alloc::vec![g, channel_handle(a)])
+            .expect("inputdev");
+        handles.push(channel_handle(b));
+    }
+    let mut arg = inputs.len() as u64;
+    if has_virtio_blk() {
+        let (x, y) = ChannelEnd::create_pair();
+        let root = Handle {
+            object: Object::Device(Arc::new(DeviceGrant::all())),
+            rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_ALL),
+        };
+        let _ = crate::process::spawn_named("devmgr", 0, alloc::vec![root, channel_handle(x)])
+            .expect("devmgr");
+        handles.push(channel_handle(y));
+        arg |= 0x100;
+    }
+    if inputs.is_empty() {
+        kwarn!("[SESSAO] sem virtio-input: a sessao arranca sem teclado nem ponteiro");
+    }
+    // A tela: a concessão do dispositivo de vídeo vai para o compositor (via sessao). A partir
+    // daqui a console do kernel não pinta mais o framebuffer — o log segue na serial.
+    let video = video_bdf_do_framebuffer();
+    if let Some(bdf) = video {
+        handles.push(Handle {
+            object: Object::Device(Arc::new(DeviceGrant::for_device(bdf))),
+            rights: Rights(nexo_syscall_abi::RIGHTS_DEVICE_DEFAULT),
+        });
+        arg |= 0x200;
+        crate::klog::disable_console();
+    }
+    let sessao = crate::process::spawn_named("sessao", arg, handles).expect("sessao");
+    kinfo!(
+        "[SESSAO] sessao grafica iniciada ({} entrada(s), disco: {}, tela: {})",
+        inputs.len(),
+        has_virtio_blk(),
+        video.is_some()
+    );
+    let code = crate::process::wait_and_reap(&sessao);
+    kwarn!("[SESSAO] a sessao terminou com {code}");
+}
+
 /// `input-test=1` na linha de comando: inputdev + utest(13) esperando teclas do host (QMP).
 pub fn input_test_mode(variant: u64) {
     use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
@@ -3133,15 +3193,16 @@ fn test_user_wm_flip() -> TestResult {
 /// saída composta para ela; o kernel lê os pixels do framebuffer físico e confere. O console
 /// gráfico fica suspenso durante o teste (a serial segue). Pulado se não há framebuffer ou se ele
 /// não está num BAR de um dispositivo de vídeo.
-fn test_user_wm_present() -> TestResult {
-    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+/// O dispositivo de vídeo (classe 03h) cujo BAR contém o framebuffer do boot — a concessão
+/// que permite a um compositor de usuário apresentar na tela. `None` sem framebuffer
+/// utilizável ou se ele não cai num BAR (então ninguém em modo usuário deve tocá-lo).
+fn video_bdf_do_framebuffer() -> Option<u16> {
     let fb = crate::boot::info().framebuffer;
     if !fb.is_present() || fb.bytes_per_pixel != 4 {
-        kinfo!("selftest: sem framebuffer utilizavel; apresentacao pulada");
-        return Ok(());
+        return None;
     }
     let fb_end = fb.base + (fb.stride as u64) * (fb.height as u64) * 4;
-    let vga = crate::pci::devices()
+    crate::pci::devices()
         .iter()
         .find(|d| {
             d.class == 0x03
@@ -3152,9 +3213,14 @@ fn test_user_wm_present() -> TestResult {
                         && fb_end <= b.base + b.size
                 })
         })
-        .map(|d| d.bdf);
-    let Some(bdf) = vga else {
-        kinfo!("selftest: framebuffer fora de BAR de video; apresentacao pulada");
+        .map(|d| d.bdf)
+}
+
+fn test_user_wm_present() -> TestResult {
+    use crate::ipc::{ChannelEnd, DeviceGrant, Handle, Object, Rights};
+    let fb = crate::boot::info().framebuffer;
+    let Some(bdf) = video_bdf_do_framebuffer() else {
+        kinfo!("selftest: sem framebuffer utilizavel num BAR de video; apresentacao pulada");
         return Ok(());
     };
     let ends0 = crate::ipc::live_channel_ends();

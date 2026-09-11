@@ -13,7 +13,7 @@
 |---|---|
 | `make image` | compila loader + kernel e gera `build/nexo.img` |
 | `make run` | inicia no QEMU com display; serial no terminal |
-| `make test` | `cargo test --workspace` + `tools/test-qemu` (4 cenários) |
+| `make test` | `cargo test --workspace` + `tools/test-qemu` (12 cenários) |
 | `make lint` | `cargo fmt --check` e `clippy -D warnings` nos três workspaces |
 | `make reproducible` | gera a imagem duas vezes e compara |
 | `make ci` | tudo que o CI executa |

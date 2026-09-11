@@ -621,6 +621,86 @@ def run_input_scenario(timeout: float) -> bool:
     return ok
 
 
+def run_desktop_scenario_once(timeout: float):
+    """Uma execucao da sessao grafica: boot com desktop=1, senha por QMP, morte pelo host."""
+    image = BUILD / "nexo-desktop.img"
+    run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline",
+         "selftest=0 desktop=1", "--out", image], stdout=subprocess.DEVNULL)
+    qmp_path = BUILD / "nexo-desktop.qmp"
+    if qmp_path.exists():
+        qmp_path.unlink()
+    logfile = BUILD / "logs" / "desktop.log"
+    logfile.parent.mkdir(parents=True, exist_ok=True)
+    if logfile.exists():
+        logfile.unlink()
+    runner_log = open(BUILD / "logs" / "desktop-runner.log", "wb")
+    # A sessao nao termina sozinha (e esse o ponto): o host mata o QEMU ao ver "sessao: pronta".
+    proc = subprocess.Popen([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
+                             "--disk", BUILD / "nexo-desktop-data.img", "--input-keyboard", "--input-tablet",
+                             "--qmp-socket", qmp_path, "--timeout", str(timeout), "--log", logfile,
+                             "--kill-on", r"sessao: pronta", "--kill-delay-ms", "500"],
+                            stdout=runner_log, stderr=subprocess.STDOUT)
+    ok = True
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        if logfile.exists() and b"sessao: bloqueada" in logfile.read_bytes():
+            break
+        time.sleep(0.5)
+    time.sleep(1.0)
+    # senha errada primeiro (o greeter tem de manter o bloqueio), depois a certa
+    typed = False
+    for _ in range(3):
+        typed = qmp_send_keys(qmp_path, ["a", "ret", "n", "e", "x", "o", "ret"]) or typed
+        time.sleep(1.5)
+        if logfile.exists() and b"sessao: desbloqueada" in logfile.read_bytes():
+            break
+    if not typed:
+        log("FALHA: socket QMP nao respondeu")
+        ok = False
+    rc = proc.wait(timeout=timeout + 60)
+    runner_log.close()
+    text = logfile.read_bytes().decode("utf-8", errors="replace")
+    if rc != 99:
+        log(f"FALHA: codigo de saida {rc}, esperado 99 (morto pelo host apos 'sessao: pronta')")
+        ok = False
+    for pat in [r"\[SESSAO\] sessao grafica iniciada \(2 entrada\(s\), disco: true, tela: true\)",
+                r"wm: apresentando no framebuffer \d+x\d+",
+                r"sessao: compositor \d+x\d+ com 2 driver\(s\) de entrada",
+                r"sessao: vfs montado \(/disk",
+                r"sessao: faixa de atividades no ar",
+                r"sessao: bloqueada — aguardando a senha",
+                r"sessao: senha errada; continua bloqueada",
+                r"sessao: desbloqueada",
+                r"term: pronto",
+                r"sessao: terminal aberto com o shell de diagnostico",
+                r"sessao: pronta"]:
+        if not re.search(pat, text):
+            log(f"FALHA: marcador ausente: /{pat}/")
+            ok = False
+    for pat in [r"KERNEL PANIC", r"EXCEPTION", r"sessao: falha", r"wm: falha", r"greeter: falha",
+                r"\[SESSAO\] a sessao terminou", r"NEXO: boot completo"]:
+        if re.search(pat, text):
+            log(f"FALHA: marcador proibido presente: /{pat}/")
+            ok = False
+    if not ok:
+        logfile = preserva_falha("desktop", logfile)
+    return ok, rc
+
+
+def run_desktop_scenario(timeout: float) -> bool:
+    """A sessao grafica arranca em si mesma: inputdev x2 + devmgr (kernel) -> sessao (usuario):
+    wm, faixa de atividades, greeter (senha errada e certa por QMP), terminal com o shell."""
+    log("=== cenario 'desktop' (sessao grafica com senha por QMP) ===")
+    ok, rc = False, 0
+    for attempt in range(3):
+        ok, rc = run_desktop_scenario_once(timeout)
+        if ok or not infra_failure(rc, BUILD / "logs" / "desktop.log"):
+            break
+        log(f"falha de infraestrutura do QEMU (rc={rc}); nova tentativa ({attempt + 2}/3)")
+    log(f"=== cenario 'desktop': {'PASS' if ok else 'FAIL'} (log: {BUILD / 'logs' / 'desktop.log'}) ===")
+    return ok
+
+
 def run_net_scenario(timeout: float) -> bool:
     """virtio-net + slirp: DHCP, ARP, ping, DNS e TCP com um servidor no host."""
     import socket
@@ -992,6 +1072,8 @@ def run_scenario(name: str, timeout: float) -> bool:
         return run_net_scenario(timeout)
     if name == "gdb":
         return run_gdb_scenario(timeout)
+    if name == "desktop":
+        return run_desktop_scenario(timeout)
     sc = SCENARIOS[name]
     logfile = BUILD / "logs" / f"{name}.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
@@ -1069,7 +1151,7 @@ def run_scenario(name: str, timeout: float) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--scenario", choices=sorted(list(SCENARIOS) + ["shell", "input", "net", "gdb"]), default=None)
+    ap.add_argument("--scenario", choices=sorted(list(SCENARIOS) + ["shell", "input", "net", "gdb", "desktop"]), default=None)
     # 180 s: o mesmo que o CI (.github/workflows/ci.yml) — o padrao local ficou em 120 s
     # enquanto a suite triplicava, e so se percebeu quando estourou sob carga.
     ap.add_argument("--timeout", type=float, default=180.0)
@@ -1077,7 +1159,7 @@ def main() -> int:
     a = ap.parse_args()
     if not a.no_build:
         run([sys.executable, ROOT / "tools" / "build-image", "--cmdline", "exit"])
-    names = [a.scenario] if a.scenario else list(SCENARIOS) + ["shell", "input", "net", "gdb"]
+    names = [a.scenario] if a.scenario else list(SCENARIOS) + ["shell", "input", "net", "gdb", "desktop"]
     results = {n: run_scenario(n, a.timeout) for n in names}
     log("resumo: " + ", ".join(f"{n}={'PASS' if ok else 'FAIL'}" for n, ok in results.items()))
     if MARGENS:

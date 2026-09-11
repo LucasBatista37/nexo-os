@@ -361,20 +361,10 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                         let m = wm::OpenRequest { chan: theirs }
                             .encode_msg(&mut out)
                             .unwrap_or_else(|_| fail(74, "enc open"));
-                        if nexo_sys::channel_send(WM, &out[..m], &[theirs]) != Status::Ok {
-                            fail(75, "send open");
-                        }
-                        let (n, _) = {
-                            let mut hs2 = [0u32; 1];
-                            let mut b2 = [0u8; 128];
-                            match nexo_sys::channel_recv(WM, &mut b2, &mut hs2) {
-                                Ok((n, _)) => {
-                                    buf[..n].copy_from_slice(&b2[..n]);
-                                    (n, 0)
-                                }
-                                Err(_) => fail(76, "recv open"),
-                            }
-                        };
+                        // pelo rpc tolerante: a barra pode ter o foco (ex.: logo depois de o
+                        // greeter destruir a tela de login) e um `key` intercalado no canal
+                        // era lido como resposta do open — "open recusado" sem recusa nenhuma
+                        let (n, _) = rpc(&out[..m], &[theirs], &mut buf, &mut hs, &mut pending);
                         if wm::decode_open_response(&buf[..n]).is_err() {
                             fail(77, "open recusado");
                         }

@@ -23,8 +23,8 @@ git clone https://github.com/LucasBatista37/nexo-os.git && cd nexo-os
 rustup toolchain install && rustup show
 tools/check-toolchain
 make image   # build/nexo.img
-make run     # QEMU com display; serial no terminal
-make test    # cargo test + 4 cenários em QEMU headless
+make run     # sessão gráfica no QEMU (senha do login: nexo); log do kernel na serial
+make test    # cargo test + 12 cenários em QEMU headless
 ```
 
 Mais: [CONTRIBUTING.md](CONTRIBUTING.md), [docs/toolchain.md](docs/toolchain.md), [docs/testing.md](docs/testing.md).

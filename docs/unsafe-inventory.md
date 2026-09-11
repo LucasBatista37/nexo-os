@@ -153,12 +153,12 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/selftest.rs:682` | bloco | encerra o canal 0. |
 | `kernel/src/selftest.rs:1226` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
 | `kernel/src/selftest.rs:1342` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
-| `kernel/src/selftest.rs:3182` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
-| `kernel/src/selftest.rs:4830` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4878` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4941` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5010` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5530` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
+| `kernel/src/selftest.rs:3248` | bloco | px_addr está dentro do framebuffer (validado contra o BAR); physmap o cobre. |
+| `kernel/src/selftest.rs:4896` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:4944` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5007` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5076` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5596` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
 | `kernel/src/stress.rs:142` | bloco | página recém-mapeada RW e exclusiva desta thread. |
 | `kernel/src/symbols.rs:20` | bloco | páginas do tipo KernelFile, reservadas e imutáveis. |
 | `kernel/src/sync.rs:53` | bloco | estavam habilitadas antes. |

@@ -1,6 +1,6 @@
 # Nexo OS — comandos únicos (Plano Mestre §8). Tudo delega para tools/ (Python 3) e cargo.
 #   make image      -> build/nexo.img (loader + kernel + ESP FAT32 + GPT)
-#   make run        -> inicia a imagem no QEMU com display e serial no terminal
+#   make run        -> sessao grafica no QEMU (login 'nexo'); make run-testes -> boot com selftests
 #   make test       -> testes de host + cenários em QEMU headless (o que o CI executa)
 #   make ci         -> lint + test + verificação de reprodutibilidade
 #   make validar    -> bateria por bloco (lint + imagem + cenários), para no 1º erro
@@ -9,7 +9,7 @@
 #   make unsafe-inventory -> regenera docs/unsafe-inventory.md da árvore
 #   make docs       -> documentação de API navegável em target/doc
 
-.PHONY: all image run run-debug test test-host test-qemu lint fmt ci validar check-toolchain reproducible clean stress stress-desacoplado fuzz netcap roadmap prazos unsafe-inventory docs idl idl-check toolchain
+.PHONY: all image run run-testes run-debug test test-host test-qemu lint fmt ci validar check-toolchain reproducible clean stress stress-desacoplado fuzz netcap roadmap prazos unsafe-inventory docs idl idl-check toolchain
 
 # Stress prolongado (gate F1: 24 h = DURATION=86400). Log em build/logs/stress.log.
 # Margem +900s +1% da duracao: o relogio do guest (TCG) atrasa em relacao a parede sob
@@ -26,7 +26,15 @@ check-toolchain:
 image:
 	tools/build-image --cmdline ""
 
+# `make run` arranca a SESSAO GRAFICA (desktop=1, sem selftests): teclado e ponteiro virtio,
+# disco de dados, tela entregue ao compositor; senha do login: "nexo" + Enter. O log do
+# kernel segue na serial (terminal). Ate ao bloco 150 isto arrancava o kernel e parava no idle.
 run: image
+	tools/build-image --no-build --cmdline "selftest=0 desktop=1" --out build/nexo-desktop.img
+	tools/run-qemu --image build/nexo-desktop.img --input-keyboard --input-tablet
+
+# `make run-testes`: o boot antigo, com os selftests do kernel na tela e na serial.
+run-testes: image
 	tools/run-qemu
 
 run-debug: image
