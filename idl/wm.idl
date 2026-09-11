@@ -7,7 +7,7 @@
 # inexistente ou de outra sessao, 4 = limite de sessoes, 5 = captura em vigor por outra
 # superficie, 6 = sessao nao detem a entrada (clipboard exige a janela focada/capturada),
 # 7 = operacao privilegiada do shell (so a sessao bootstrap, entregue pelo kernel, pode usa-la).
-protocol wm 1.23
+protocol wm 1.24
 
 # Cria uma superficie WxH (RGBX8888) numa posicao (x,y) com z; devolve o id e um handle do
 # MemoryObject com os pixels (stride = w).
@@ -508,4 +508,11 @@ method 47 prefs_load {
     response {
         fs: handle,
     }
+}
+
+# v1.24 — Evento ao SHELL (a sessao privilegiada, handle 0 do compositor): um gesto global
+# que nao e do compositor decidir. kind 1 = o usuario pediu para BLOQUEAR a sessao (Meta+L);
+# o compositor nao sabe o que e um greeter — quem orquestra a sessao e que sabe.
+event 48 shell {
+    kind: u32,
 }

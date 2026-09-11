@@ -570,9 +570,9 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
-| `services/wm/src/main.rs:65` | bloco | `base` é o início do mapeamento (página de cabeçalho, USER\|RW) e `off` é um dos offsets de `frame::OFF_*`, alinhado a 4 e dentro da página. |
-| `services/wm/src/main.rs:213` | bloco | `base..base+len` foi mapeado por `memory_map` neste processo (USER\|RW). |
-| `services/wm/src/main.rs:217` | bloco | idem; único mapeamento mutável no wm para a saída. |
+| `services/wm/src/main.rs:69` | bloco | `base` é o início do mapeamento (página de cabeçalho, USER\|RW) e `off` é um dos offsets de `frame::OFF_*`, alinhado a 4 e dentro da página. |
+| `services/wm/src/main.rs:217` | bloco | `base..base+len` foi mapeado por `memory_map` neste processo (USER\|RW). |
+| `services/wm/src/main.rs:221` | bloco | idem; único mapeamento mutável no wm para a saída. |
 
 ## `nexo-consoledev` — 2 usos
 
@@ -606,8 +606,8 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
-| `services/shellui/src/main.rs:118` | bloco | base .. base+BAR_W*BAR_H*4 foi mapeada por memory_map (USER\|RW) neste processo. |
-| `services/shellui/src/main.rs:237` | bloco | base .. base+PANEL_W*PANEL_H*4 foi mapeada por memory_map neste processo. |
+| `services/shellui/src/main.rs:131` | bloco | base .. base+BAR_W*BAR_H*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+| `services/shellui/src/main.rs:250` | bloco | base .. base+PANEL_W*PANEL_H*4 foi mapeada por memory_map neste processo. |
 
 ## `nexo-vfs` — 2 usos
 

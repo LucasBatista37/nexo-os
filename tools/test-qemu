@@ -447,7 +447,9 @@ def qmp_send_keys(sock_path, keys) -> bool:
         return f.readline()
     cmd({"execute": "qmp_capabilities"})
     for k in keys:
-        cmd({"execute": "send-key", "arguments": {"keys": [{"type": "qcode", "data": k}]}})
+        # "meta_l+l" = acorde: as teclas vao juntas num send-key (pressionadas ao mesmo tempo)
+        qcodes = [{"type": "qcode", "data": q} for q in k.split("+")]
+        cmd({"execute": "send-key", "arguments": {"keys": qcodes}})
         time.sleep(0.3)
     sk.close()
     return True
@@ -638,7 +640,7 @@ def run_desktop_scenario_once(timeout: float):
     proc = subprocess.Popen([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
                              "--disk", BUILD / "nexo-desktop-data.img", "--input-keyboard", "--input-tablet",
                              "--qmp-socket", qmp_path, "--timeout", str(timeout), "--log", logfile,
-                             "--kill-on", r"sessao: pronta", "--kill-delay-ms", "500"],
+                             "--kill-on", r"sessao: desbloqueada \(a pedido\)", "--kill-delay-ms", "500"],
                             stdout=runner_log, stderr=subprocess.STDOUT)
     ok = True
     deadline = time.time() + 120
@@ -657,6 +659,26 @@ def run_desktop_scenario_once(timeout: float):
     if not typed:
         log("FALHA: socket QMP nao respondeu")
         ok = False
+    # bloqueio a pedido: Meta+L (a sessao pronta) e de novo a senha
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if logfile.exists() and b"sessao: pronta" in logfile.read_bytes():
+            break
+        time.sleep(0.5)
+    time.sleep(1.0)
+    relocked = False
+    for _ in range(3):
+        qmp_send_keys(qmp_path, ["meta_l+l"])
+        time.sleep(1.5)
+        if logfile.exists() and b"sessao: bloqueio a pedido" in logfile.read_bytes():
+            relocked = True
+            break
+    if relocked:
+        time.sleep(1.0)
+        qmp_send_keys(qmp_path, ["n", "e", "x", "o", "ret"])
+    else:
+        log("FALHA: Meta+L nao bloqueou a sessao")
+        ok = False
     rc = proc.wait(timeout=timeout + 60)
     runner_log.close()
     text = logfile.read_bytes().decode("utf-8", errors="replace")
@@ -673,7 +695,10 @@ def run_desktop_scenario_once(timeout: float):
                 r"sessao: desbloqueada",
                 r"term: pronto",
                 r"sessao: terminal aberto com o shell de diagnostico",
-                r"sessao: pronta"]:
+                r"sessao: pronta \(Meta\+L bloqueia\)",
+                r"shellui: pedido de bloqueio \(Meta\+L\) encaminhado ao orquestrador",
+                r"sessao: bloqueio a pedido",
+                r"sessao: desbloqueada \(a pedido\)"]:
         if not re.search(pat, text):
             log(f"FALHA: marcador ausente: /{pat}/")
             ok = False

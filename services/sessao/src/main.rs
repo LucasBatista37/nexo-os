@@ -11,7 +11,9 @@
 //!    *broker* de sessões — a partir daqui ninguém fala com o `wm` sem passar por ele;
 //! 3. exige o login: o `greeter` captura a entrada e só a devolve com a senha certa;
 //! 4. abre o `term` com o `shell` de diagnóstico dentro (sobre o `vfs` montado a partir do que
-//!    o `devmgr` encontrou); se o terminal morrer, reabre-o.
+//!    o `devmgr` encontrou); se o terminal morrer, reabre-o;
+//! 5. bloqueia a pedido: Meta+L chega ao shell como evento do compositor, o shell manda `lock`
+//!    e o greeter volta pelo mesmo caminho do arranque.
 //!
 //! Argumento: bits 0..7 = quantos canais de `inputdev` chegam nos handles 0..n; bit 8 = o
 //! handle seguinte é o canal-cliente do `devmgr` (quando há disco); bit 9 = o handle seguinte
@@ -226,27 +228,11 @@ pub extern "C" fn _start(arg: u64) -> ! {
     log!("sessao: faixa de atividades no ar");
 
     // 5. login: o greeter captura a entrada até a senha certa
-    let sess_g = nova_sessao(broker, &mut buf, &mut hs);
-    let (ga, gb) = nexo_sys::channel_create().unwrap_or_else(|_| fail(30, "canal do greeter"));
-    if nexo_sys::process_spawn("greeter", 0, &[ga]).is_err() {
-        fail(31, "spawn greeter");
-    }
-    if nexo_sys::channel_send(gb, b"sess", &[sess_g]) != Status::Ok {
-        fail(32, "sessao ao greeter");
-    }
-    if !espera(gb, b"locked", &mut buf, &mut hs) {
-        fail(33, "greeter nao bloqueou");
-    }
-    log!("sessao: bloqueada — aguardando a senha");
-    if !espera(gb, b"unlocked", &mut buf, &mut hs) {
-        fail(34, "greeter morreu antes de desbloquear");
-    }
-    let _ = nexo_sys::handle_close(gb);
-    log!("sessao: desbloqueada");
+    bloqueia(broker, "arranque", &mut buf, &mut hs);
 
-    // 6. terminal com o shell; reaberto se morrer
+    // 6. terminal com o shell; reaberto se morrer. Meta+L (via shell) bloqueia de novo.
     let mut term = abre_terminal(broker, vy, &mut buf, &mut hs);
-    log!("sessao: pronta");
+    log!("sessao: pronta (Meta+L bloqueia)");
     loop {
         let _ = nexo_sys::channel_wait_any(&[term, broker]);
         match nexo_sys::channel_try_recv(term, &mut buf, &mut hs) {
@@ -260,6 +246,10 @@ pub extern "C" fn _start(arg: u64) -> ! {
             }
         }
         match nexo_sys::channel_try_recv(broker, &mut buf, &mut hs) {
+            Ok((n, 0)) if &buf[..n] == b"lock" => {
+                log!("sessao: bloqueio a pedido");
+                bloqueia(broker, "a pedido", &mut buf, &mut hs);
+            }
             Ok((_, 1)) => {
                 let _ = nexo_sys::handle_close(hs[0]);
             }
@@ -267,4 +257,27 @@ pub extern "C" fn _start(arg: u64) -> ! {
             Err(_) => fail(50, "faixa de atividades morreu"),
         }
     }
+}
+
+/// Bloqueia a sessão: sobe um `greeter` numa sessão nova do compositor; ele captura a entrada
+/// e só a devolve com a senha certa. Volta quando desbloqueou. Usado no arranque e a pedido
+/// (Meta+L) — a mesma tela, o mesmo caminho.
+fn bloqueia(broker: Handle, motivo: &str, buf: &mut [u8; 256], hs: &mut [u32; 1]) {
+    let sess_g = nova_sessao(broker, buf, hs);
+    let (ga, gb) = nexo_sys::channel_create().unwrap_or_else(|_| fail(30, "canal do greeter"));
+    if nexo_sys::process_spawn("greeter", 0, &[ga]).is_err() {
+        fail(31, "spawn greeter");
+    }
+    if nexo_sys::channel_send(gb, b"sess", &[sess_g]) != Status::Ok {
+        fail(32, "sessao ao greeter");
+    }
+    if !espera(gb, b"locked", buf, hs) {
+        fail(33, "greeter nao bloqueou");
+    }
+    log!("sessao: bloqueada — aguardando a senha");
+    if !espera(gb, b"unlocked", buf, hs) {
+        fail(34, "greeter morreu antes de desbloquear");
+    }
+    let _ = nexo_sys::handle_close(gb);
+    log!("sessao: desbloqueada ({})", motivo);
 }

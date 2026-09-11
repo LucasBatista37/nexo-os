@@ -66,7 +66,20 @@ fn rpc(
         if wm::decode_key_event(&buf[..n]).is_ok() {
             continue;
         }
+        if let Ok(ev) = wm::decode_shell_event(&buf[..n]) {
+            shell_event(ev);
+            continue;
+        }
         return (n, nh);
+    }
+}
+
+/// Evento `shell` do compositor (v1.24): um gesto global que é do orquestrador decidir.
+/// kind 1 = Meta+L, pedido de bloqueio → `lock` pelo canal do orquestrador.
+fn shell_event(ev: wm::ShellEvent) {
+    if ev.kind == 1 {
+        log!("shellui: pedido de bloqueio (Meta+L) encaminhado ao orquestrador");
+        let _ = nexo_sys::channel_send(PIPE, b"lock", &[]);
     }
 }
 
@@ -408,11 +421,13 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             }
             Err(_) => fail(79, "recv pipe"),
         }
-        // eventos do compositor (cliques na barra)
+        // eventos do compositor (cliques na barra; gestos globais para o orquestrador)
         match nexo_sys::channel_try_recv(WM, &mut buf, &mut hs) {
             Ok((n, _)) => {
                 worked = true;
-                if let Ok(ev) = wm::decode_pointer_event(&buf[..n])
+                if let Ok(ev) = wm::decode_shell_event(&buf[..n]) {
+                    shell_event(ev);
+                } else if let Ok(ev) = wm::decode_pointer_event(&buf[..n])
                     && ev.surface == bar.id
                 {
                     handle_bar_click(

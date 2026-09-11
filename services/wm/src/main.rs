@@ -36,6 +36,10 @@ const ABS_Y: u16 = 1;
 const BTN_LEFT: u16 = 0x110;
 /// Tecla modificadora dos atalhos globais (Super/Meta) e Tab (cicla o foco).
 const KEY_TAB: u16 = 15;
+/// Meta+L pede o bloqueio da sessão (evento `shell` kind 1 à sessão privilegiada).
+const KEY_L: u16 = 38;
+/// `shell` kind 1: pedido de bloqueio.
+const SHELL_LOCK: u32 = 1;
 const KEY_LEFTMETA: u16 = 125;
 
 /// Alvo de apresentação: o framebuffer real, mapeado via concessão do dispositivo de vídeo
@@ -700,6 +704,16 @@ pub extern "C" fn _start(_arg: u64) -> ! {
                                 }
                             }
                             (EV_KEY, KEY_LEFTMETA, v) => meta_down = v == 1, // modificador: não entrega
+                            (EV_KEY, KEY_L, 1) if meta_down => {
+                                // atalho global Meta+L: pede o bloqueio ao shell (sessão 0).
+                                // O compositor não bloqueia nada: quem tem o greeter é quem sabe.
+                                if let Some(sess) = sessions[0] {
+                                    let m = wm::ShellEvent { kind: SHELL_LOCK }
+                                        .encode_msg(&mut out)
+                                        .unwrap_or(0);
+                                    let _ = nexo_sys::channel_send(sess, &out[..m], &[]);
+                                }
+                            }
                             (EV_KEY, KEY_TAB, 1) if meta_down => {
                                 // atalho global Meta+Tab: cicla o foco (traz a janela de trás para a frente).
                                 let bottom = surfaces
