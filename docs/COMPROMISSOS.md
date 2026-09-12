@@ -82,13 +82,14 @@ Campos desconhecidos são ignorados; campos ausentes desligam a verificação co
 - cuidado: nexofs é forbid(unsafe_code), então a origem é externa ao serviço — não procurar o bug dentro dele
 - ref: docs/incidents/2026-09-09-fs-ponteiro-nulo.md
 
-## incidente-tique-bsp
+## incidente-travamentos-host
 
 - estado: aberto
-- o-que: o one-shot da BSP perde rearmes (raro; travava tudo o que dorme); mitigado pelo vigia das APs, causa raiz aberta
-- acao: ler `resgates_tique_bsp=` na linha `[SCHED]` dos boots; se um boot travar apesar do vigia, ou se o contador crescer por hora num stress, instrumentar por resgate se a BSP recebeu IRQ do timer depois do prazo (distingue atraso de perda)
-- cuidado: o stress de 7 dias em curso (kernel do bloco 146) NÃO tem o vigia — se ele travar sem `FAIL` nem pânico, com `t=` parado, é este incidente e não outro
+- o-que: cenários "travam" a meio quando o host pagina (11/09: 58 MB livres, 976 MB de swap) — o kernel foi suspeito uma noite inteira sem razão
+- acao: antes de validar ou de culpar o kernel por um cenário mudo, olhar a memória livre do host; um travamento COM o batimento a dizer "BSP SEM INTERRUPCOES" ou um pânico "lock preso" é do kernel, silêncio total com o host sem memória é do host
+- cuidado: o stress de 7 dias em curso partilha o host; sob swap o `t=` dele salta e repete (não é bug do guest)
 - ref: docs/incidents/2026-09-11-tique-bsp.md
+- verificar: vm_stat | awk '/Pages free/ { gsub("\\.", "", $3); exit !($3 * 16384 >= 768 * 1024 * 1024) }'
 
 ## painel-mensal
 

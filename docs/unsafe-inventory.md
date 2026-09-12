@@ -15,7 +15,7 @@ Como ler: uma justificativa que não diga *por que a invariante vale* é uma dí
 justificativa. Revisar este arquivo a cada release é a forma barata de as encontrar.
 
 
-**480 usos de `unsafe`, 480 com justificativa registrada.**
+**481 usos de `unsafe`, 481 com justificativa registrada.**
 
 | Crate | Usos |
 | --- | ---: |
@@ -34,6 +34,7 @@ justificativa. Revisar este arquivo a cada release é a forma barata de as encon
 | `nexo-wmd` | 3 |
 | `nexo-consoledev` | 2 |
 | `nexo-editor` | 2 |
+| `nexo-greeter` | 2 |
 | `nexo-lanc` | 2 |
 | `nexo-netdev` | 2 |
 | `nexo-shellui` | 2 |
@@ -46,7 +47,6 @@ justificativa. Revisar este arquivo a cada release é a forma barata de as encon
 | `nexo-config` | 1 |
 | `nexo-echo` | 1 |
 | `nexo-fs` | 1 |
-| `nexo-greeter` | 1 |
 | `nexo-inputdev` | 1 |
 | `nexo-monitor` | 1 |
 | `nexo-netd` | 1 |
@@ -113,39 +113,39 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/sched.rs:103` | fn | # Safety O chamador detém `SCHED` (exclusão mútua externa ao empréstimo). |
 | `kernel/src/sched.rs:105` | bloco | contrato da função. |
 | `kernel/src/sched.rs:113` | bloco | lock detido. |
-| `kernel/src/sched.rs:285` | bloco | a thread atual está viva (mantida em `all`) enquanto ocupa a CPU. |
-| `kernel/src/sched.rs:301` | bloco | ponteiro para thread viva enquanto ocupa a CPU. |
-| `kernel/src/sched.rs:318` | bloco | pilha recém-alocada e exclusiva. |
-| `kernel/src/sched.rs:361` | bloco | registro inicial, sem concorrência sobre esta thread. |
-| `kernel/src/sched.rs:388` | bloco | `arg` é o ponteiro de um `Arc<Thread>` mantido vivo em `all`. |
-| `kernel/src/sched.rs:391` | bloco | IDT e LAPIC prontos; estamos fora de qualquer lock. |
-| `kernel/src/sched.rs:393` | bloco | `entry` só é lido aqui, uma única vez, pela própria thread. |
-| `kernel/src/sched.rs:440` | bloco | pilha recém-mapeada e exclusiva. |
-| `kernel/src/sched.rs:487` | bloco | lock detido. |
-| `kernel/src/sched.rs:499` | bloco | lock detido; `cur` e `next` são distintas. |
-| `kernel/src/sched.rs:543` | bloco | a metade do kernel é idêntica em todas as PML4s; pilhas e código continuam mapeados. Escrever em CR3 esvazia TLB e caches de estrutura de paginação. |
-| `kernel/src/sched.rs:549` | bloco | lock detido; `sp` só é tocado aqui e na troca. |
-| `kernel/src/sched.rs:551` | bloco | lock detido; `next` não executa em nenhuma CPU neste instante. |
-| `kernel/src/sched.rs:556` | bloco | lock detido; `fx` só é tocado aqui, pela CPU que executa a troca. |
-| `kernel/src/sched.rs:566` | bloco | `prev_sp` aponta para o campo de uma thread viva; `next_sp` foi preparado por `prepare_stack` ou salvo por uma troca anterior. |
-| `kernel/src/sched.rs:575` | bloco | o lock está detido por construção (esquecido antes da troca). |
-| `kernel/src/sched.rs:578` | bloco | lock detido. |
-| `kernel/src/sched.rs:581` | bloco | lock detido. |
-| `kernel/src/sched.rs:592` | bloco | lock detido. |
-| `kernel/src/sched.rs:595` | bloco | lock detido. |
-| `kernel/src/sched.rs:605` | bloco | fim da seção crítica iniciada por quem esqueceu o guard. |
-| `kernel/src/sched.rs:642` | bloco | lock detido. |
-| `kernel/src/sched.rs:664` | bloco | lock detido. |
-| `kernel/src/sched.rs:677` | bloco | lock detido. |
-| `kernel/src/sched.rs:712` | bloco | lock detido. |
-| `kernel/src/sched.rs:717` | bloco | lock detido. |
-| `kernel/src/sched.rs:751` | bloco | estado anterior ao bloqueio. |
-| `kernel/src/sched.rs:763` | bloco | lock detido. |
-| `kernel/src/sched.rs:766` | bloco | lock detido. |
-| `kernel/src/sched.rs:835` | bloco | lock detido. |
-| `kernel/src/sched.rs:839` | bloco | lock detido. |
-| `kernel/src/sched.rs:852` | bloco | lock detido. |
-| `kernel/src/sched.rs:871` | bloco | lock detido. |
+| `kernel/src/sched.rs:301` | bloco | a thread atual está viva (mantida em `all`) enquanto ocupa a CPU. |
+| `kernel/src/sched.rs:317` | bloco | ponteiro para thread viva enquanto ocupa a CPU. |
+| `kernel/src/sched.rs:334` | bloco | pilha recém-alocada e exclusiva. |
+| `kernel/src/sched.rs:377` | bloco | registro inicial, sem concorrência sobre esta thread. |
+| `kernel/src/sched.rs:404` | bloco | `arg` é o ponteiro de um `Arc<Thread>` mantido vivo em `all`. |
+| `kernel/src/sched.rs:407` | bloco | IDT e LAPIC prontos; estamos fora de qualquer lock. |
+| `kernel/src/sched.rs:409` | bloco | `entry` só é lido aqui, uma única vez, pela própria thread. |
+| `kernel/src/sched.rs:456` | bloco | pilha recém-mapeada e exclusiva. |
+| `kernel/src/sched.rs:503` | bloco | lock detido. |
+| `kernel/src/sched.rs:515` | bloco | lock detido; `cur` e `next` são distintas. |
+| `kernel/src/sched.rs:559` | bloco | a metade do kernel é idêntica em todas as PML4s; pilhas e código continuam mapeados. Escrever em CR3 esvazia TLB e caches de estrutura de paginação. |
+| `kernel/src/sched.rs:565` | bloco | lock detido; `sp` só é tocado aqui e na troca. |
+| `kernel/src/sched.rs:567` | bloco | lock detido; `next` não executa em nenhuma CPU neste instante. |
+| `kernel/src/sched.rs:572` | bloco | lock detido; `fx` só é tocado aqui, pela CPU que executa a troca. |
+| `kernel/src/sched.rs:582` | bloco | `prev_sp` aponta para o campo de uma thread viva; `next_sp` foi preparado por `prepare_stack` ou salvo por uma troca anterior. |
+| `kernel/src/sched.rs:591` | bloco | o lock está detido por construção (esquecido antes da troca). |
+| `kernel/src/sched.rs:594` | bloco | lock detido. |
+| `kernel/src/sched.rs:597` | bloco | lock detido. |
+| `kernel/src/sched.rs:608` | bloco | lock detido. |
+| `kernel/src/sched.rs:611` | bloco | lock detido. |
+| `kernel/src/sched.rs:621` | bloco | fim da seção crítica iniciada por quem esqueceu o guard. |
+| `kernel/src/sched.rs:658` | bloco | lock detido. |
+| `kernel/src/sched.rs:680` | bloco | lock detido. |
+| `kernel/src/sched.rs:693` | bloco | lock detido. |
+| `kernel/src/sched.rs:728` | bloco | lock detido. |
+| `kernel/src/sched.rs:733` | bloco | lock detido. |
+| `kernel/src/sched.rs:767` | bloco | estado anterior ao bloqueio. |
+| `kernel/src/sched.rs:779` | bloco | lock detido. |
+| `kernel/src/sched.rs:782` | bloco | lock detido. |
+| `kernel/src/sched.rs:856` | bloco | lock detido. |
+| `kernel/src/sched.rs:860` | bloco | lock detido. |
+| `kernel/src/sched.rs:872` | bloco | lock detido. |
+| `kernel/src/sched.rs:891` | bloco | lock detido. |
 | `kernel/src/selftest.rs:303` | bloco | #BP é tratado pelo handler, que apenas conta e retorna. |
 | `kernel/src/selftest.rs:326` | bloco | quadro alocado, dentro do physmap. |
 | `kernel/src/selftest.rs:376` | bloco | página recém-mapeada RW; mesmo quadro visto pelo physmap. |
@@ -153,20 +153,20 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `kernel/src/selftest.rs:683` | bloco | encerra o canal 0. |
 | `kernel/src/selftest.rs:1227` | bloco | leitura de configuração PCI de uma função já enumerada; sem efeitos. |
 | `kernel/src/selftest.rs:1343` | bloco | quadro recém-mapeado, escrito pelo alias do physmap (página do kernel). |
-| `kernel/src/selftest.rs:3272` | bloco | o endereço vem de `pixel`, dentro do framebuffer (validado contra o BAR); a physmap o cobre. |
-| `kernel/src/selftest.rs:4932` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:4980` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5043` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5112` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
-| `kernel/src/selftest.rs:5632` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
+| `kernel/src/selftest.rs:3313` | bloco | o endereço vem de `pixel`, dentro do framebuffer (validado contra o BAR); a physmap o cobre. |
+| `kernel/src/selftest.rs:4973` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5021` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5084` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5153` | bloco | quadro recém-alocado, exclusivo, mapeado no physmap. |
+| `kernel/src/selftest.rs:5673` | bloco | deliberadamente inválido — o objetivo é exercitar o caminho fatal de #PF. |
 | `kernel/src/stress.rs:142` | bloco | página recém-mapeada RW e exclusiva desta thread. |
 | `kernel/src/symbols.rs:20` | bloco | páginas do tipo KernelFile, reservadas e imutáveis. |
-| `kernel/src/sync.rs:53` | bloco | estavam habilitadas antes. |
-| `kernel/src/sync.rs:64` | fn | # Safety Ver [`SpinLock::force_unlock`]. |
-| `kernel/src/sync.rs:66` | bloco | contrato da função. |
-| `kernel/src/sync.rs:75` | bloco | solta o guard interno exatamente uma vez. |
-| `kernel/src/sync.rs:98` | bloco | o guard interno é solto exatamente uma vez, antes de reabilitar interrupções. |
-| `kernel/src/sync.rs:101` | bloco | estavam habilitadas quando o lock foi adquirido. |
+| `kernel/src/sync.rs:97` | bloco | estavam habilitadas antes. |
+| `kernel/src/sync.rs:108` | fn | # Safety Ver [`SpinLock::force_unlock`]. |
+| `kernel/src/sync.rs:110` | bloco | contrato da função. |
+| `kernel/src/sync.rs:119` | bloco | solta o guard interno exatamente uma vez. |
+| `kernel/src/sync.rs:142` | bloco | o guard interno é solto exatamente uma vez, antes de reabilitar interrupções. |
+| `kernel/src/sync.rs:145` | bloco | estavam habilitadas quando o lock foi adquirido. |
 | `kernel/src/time.rs:34` | bloco | PIT canal 2 é dedicado à calibração; IRQs estão desabilitadas. |
 | `kernel/src/time.rs:57` | bloco | encerra a contagem do canal 2. |
 | `kernel/src/time.rs:81` | bloco | IDT instalada com handler para o vetor do timer. |
@@ -588,6 +588,13 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | `services/editor/src/main.rs:185` | bloco | base .. base+W*H*4 foi mapeada por memory_map (USER\|RW) neste processo. |
 | `services/editor/src/main.rs:237` | bloco | unico acesso, processo de uma so thread. |
 
+## `nexo-greeter` — 2 usos
+
+| Local | Forma | Invariante afirmada |
+| --- | --- | --- |
+| `services/greeter/src/main.rs:158` | bloco | base .. base+W*H*4 foi mapeada por memory_map (USER\|RW) aqui. |
+| `services/greeter/src/main.rs:235` | bloco | base .. base+W*H*4 foi mapeada por memory_map (USER\|RW) neste processo. |
+
 ## `nexo-lanc` — 2 usos
 
 | Local | Forma | Invariante afirmada |
@@ -663,12 +670,6 @@ Crates sem nenhum `unsafe` não aparecem aqui: os puros declaram `forbid(unsafe_
 | Local | Forma | Invariante afirmada |
 | --- | --- | --- |
 | `services/fs/src/main.rs:180` | bloco | a região acabou de ser mapeada por `memory_map` (USER\|RW) neste processo, com `paginas * 4096` bytes; só se escreve dentro dela. |
-
-## `nexo-greeter` — 1 usos
-
-| Local | Forma | Invariante afirmada |
-| --- | --- | --- |
-| `services/greeter/src/main.rs:110` | bloco | base .. base+W*H*4 foi mapeada por memory_map (USER\|RW) neste processo. |
 
 ## `nexo-inputdev` — 1 usos
 

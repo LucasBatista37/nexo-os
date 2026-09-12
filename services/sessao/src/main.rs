@@ -83,7 +83,14 @@ fn espera(pipe: Handle, quer: &[u8], buf: &mut [u8; 256], hs: &mut [u32; 1]) -> 
                     log!("sessao: senha errada; continua bloqueada");
                 }
             }
-            Err(_) => return false,
+            Err(e) => {
+                log!(
+                    "sessao: pipe fechou/errou a esperar '{}': {:?}",
+                    core::str::from_utf8(quer).unwrap_or("?"),
+                    e
+                );
+                return false;
+            }
         }
     }
 }
@@ -246,7 +253,7 @@ pub extern "C" fn _start(arg: u64) -> ! {
     log!("sessao: faixa de atividades no ar");
 
     // 5. login: o greeter captura a entrada até a senha certa
-    bloqueia(broker, "arranque", &mut buf, &mut hs);
+    bloqueia(broker, vy, "arranque", &mut buf, &mut hs);
 
     // 6. terminal com o shell; reaberto se morrer. Meta+L (via shell) bloqueia de novo.
     let mut term = abre_terminal(broker, vy, &mut buf, &mut hs);
@@ -266,7 +273,7 @@ pub extern "C" fn _start(arg: u64) -> ! {
         match nexo_sys::channel_try_recv(broker, &mut buf, &mut hs) {
             Ok((n, 0)) if &buf[..n] == b"lock" => {
                 log!("sessao: bloqueio a pedido");
-                bloqueia(broker, "a pedido", &mut buf, &mut hs);
+                bloqueia(broker, vy, "a pedido", &mut buf, &mut hs);
             }
             Ok((_, 1)) => {
                 let _ = nexo_sys::handle_close(hs[0]);
@@ -280,11 +287,16 @@ pub extern "C" fn _start(arg: u64) -> ! {
 /// Bloqueia a sessão: sobe um `greeter` numa sessão nova do compositor; ele captura a entrada
 /// e só a devolve com a senha certa. Volta quando desbloqueou. Usado no arranque e a pedido
 /// (Meta+L) — a mesma tela, o mesmo caminho.
-fn bloqueia(broker: Handle, motivo: &str, buf: &mut [u8; 256], hs: &mut [u32; 1]) {
+fn bloqueia(broker: Handle, vfs: Handle, motivo: &str, buf: &mut [u8; 256], hs: &mut [u32; 1]) {
     let sess_g = nova_sessao(broker, buf, hs);
     let (ga, gb) = nexo_sys::channel_create().unwrap_or_else(|_| fail(30, "canal do greeter"));
     if nexo_sys::process_spawn("greeter", 0, &[ga]).is_err() {
         fail(31, "spawn greeter");
+    }
+    // uma sessão do vfs para as preferências (carregar; na primeira execução, guardar)
+    let fs_g = sessao_vfs(vfs, 0, buf, hs);
+    if nexo_sys::channel_send(gb, b"fs", &[fs_g]) != Status::Ok {
+        fail(35, "fs ao greeter");
     }
     if nexo_sys::channel_send(gb, b"sess", &[sess_g]) != Status::Ok {
         fail(32, "sessao ao greeter");

@@ -2429,6 +2429,47 @@ pub fn shell_mode() {
     kinfo!("[SHELL] shell terminou com {code}");
 }
 
+/// Batimento de diagnóstico (só em modo de teste): uma thread presa à CPU 1 imprime a cada
+/// 30 s o que **não** precisa do lock do escalonador — uptime, interrupções do timer da BSP,
+/// resgates do vigia — e só depois os nomes das threads por CPU (que precisam). Quando um
+/// cenário "cala" a meio (incidente `2026-09-11-tique-bsp`), o log passa a dizer se a BSP
+/// ainda recebe interrupções e onde cada CPU está, em vez de 160 s de nada.
+pub fn batimento_iniciar() {
+    if crate::x86::percpu::online_count() < 2 {
+        return;
+    }
+    sched::spawn_on("batimento", batimento, 0, 1);
+}
+
+fn batimento(_: usize) {
+    let mut irqs_antes = 0u64;
+    loop {
+        sched::sleep_ms(30_000);
+        let irqs = crate::x86::percpu::get(0).map_or(0, |c| c.timer_irqs.load(Ordering::Relaxed));
+        kinfo!(
+            "[BATIMENTO] uptime={} s irqs_timer_bsp={} (+{}) resgates_tique_bsp={}{}",
+            crate::time::uptime_ms() / 1000,
+            irqs,
+            irqs.saturating_sub(irqs_antes),
+            crate::time::bsp_rescues(),
+            if irqs == irqs_antes {
+                " — BSP SEM INTERRUPCOES DE TIMER HA 30 s"
+            } else {
+                ""
+            }
+        );
+        irqs_antes = irqs;
+        let mut nomes = ["-"; crate::acpi::MAX_CPUS];
+        let n = crate::x86::percpu::online_count().min(nomes.len());
+        sched::nomes_a_correr(&mut nomes[..n]);
+        let mut linha = String::new();
+        for (i, nome) in nomes[..n].iter().enumerate() {
+            let _ = core::fmt::Write::write_fmt(&mut linha, format_args!(" cpu{i}={nome}"));
+        }
+        kinfo!("[BATIMENTO] a correr:{linha}");
+    }
+}
+
 /// `desktop=1` na linha de comando: a sessão gráfica de verdade. O kernel só faz o que exige
 /// privilégio — concessões de dispositivo aos drivers de entrada e a concessão raiz ao
 /// `devmgr` — e entrega os canais ao `sessao`, que compõe o resto (compositor, Faixa de

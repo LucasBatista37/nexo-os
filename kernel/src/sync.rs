@@ -6,13 +6,22 @@
 
 use core::mem::ManuallyDrop;
 use core::ops::{Deref, DerefMut};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use nexo_arch_x86_64::cpu;
 use nexo_sync::{SpinLock, SpinLockGuard};
 
 /// Spinlock que desabilita interrupções ao adquirir e restaura ao soltar.
 pub struct IrqLock<T> {
     inner: SpinLock<T>,
+    /// Última CPU que adquiriu o lock (`usize::MAX` = nenhuma): só para o diagnóstico de um
+    /// lock preso — num deadlock é quem o detém.
+    dono: AtomicUsize,
 }
+
+/// Quanto tempo uma CPU gira num lock antes de o declarar preso (3 s de TSC). Um deadlock
+/// de spinlock com interrupções desligadas é silêncio total — nenhum log, nenhum batimento,
+/// nada; assim vira um pânico com o dono e a pilha de quem esperava (2026-09-12).
+const PRESO_APOS_S: u64 = 3;
 
 /// Guard de [`IrqLock`].
 pub struct IrqGuard<'a, T> {
@@ -25,15 +34,47 @@ impl<T> IrqLock<T> {
     pub const fn new(value: T) -> Self {
         IrqLock {
             inner: SpinLock::new(value),
+            dono: AtomicUsize::new(usize::MAX),
         }
     }
 
-    /// Adquire (interrupções ficam desabilitadas até o guard ser solto).
+    fn cpu_atual() -> usize {
+        crate::x86::percpu::try_current().map_or(usize::MAX - 1, |c| c.index)
+    }
+
+    /// Adquire (interrupções ficam desabilitadas até o guard ser solto). Gira no máximo
+    /// [`PRESO_APOS_S`] segundos: depois disso entra em pânico dizendo quem detém o lock.
     pub fn lock(&self) -> IrqGuard<'_, T> {
         let was_enabled = cpu::interrupts_enabled();
         cpu::disable_interrupts();
+        let hz = crate::time::tsc_hz();
+        let inicio = cpu::rdtsc();
+        let guard = loop {
+            if let Some(g) = self.inner.try_lock() {
+                break g;
+            }
+            let mut voltas = 0u32;
+            while self.inner.is_locked() {
+                core::hint::spin_loop();
+                voltas = voltas.wrapping_add(1);
+                if voltas.is_multiple_of(4096)
+                    && hz != 0
+                    && cpu::rdtsc().wrapping_sub(inicio) > hz.saturating_mul(PRESO_APOS_S)
+                {
+                    let dono = self.dono.load(Ordering::Relaxed);
+                    panic!(
+                        "lock preso: cpu{} espera ha {} s pelo lock em {:p}, detido pela cpu{}",
+                        Self::cpu_atual(),
+                        PRESO_APOS_S,
+                        self as *const Self,
+                        dono
+                    );
+                }
+            }
+        };
+        self.dono.store(Self::cpu_atual(), Ordering::Relaxed);
         IrqGuard {
-            guard: ManuallyDrop::new(self.inner.lock()),
+            guard: ManuallyDrop::new(guard),
             was_enabled,
         }
     }
@@ -43,10 +84,13 @@ impl<T> IrqLock<T> {
         let was_enabled = cpu::interrupts_enabled();
         cpu::disable_interrupts();
         match self.inner.try_lock() {
-            Some(g) => Some(IrqGuard {
-                guard: ManuallyDrop::new(g),
-                was_enabled,
-            }),
+            Some(g) => {
+                self.dono.store(Self::cpu_atual(), Ordering::Relaxed);
+                Some(IrqGuard {
+                    guard: ManuallyDrop::new(g),
+                    was_enabled,
+                })
+            }
             None => {
                 if was_enabled {
                     // SAFETY: estavam habilitadas antes.

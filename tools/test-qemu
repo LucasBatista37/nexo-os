@@ -623,26 +623,46 @@ def run_input_scenario(timeout: float) -> bool:
     return ok
 
 
-def run_desktop_scenario_once(timeout: float):
-    """Uma execucao da sessao grafica: boot com desktop=1, senha por QMP, morte pelo host."""
+def run_desktop_scenario_once(timeout: float, run_no: int = 1):
+    """Uma execucao da sessao grafica: boot com desktop=1, senha por QMP, morte pelo host.
+    Execucao 1 = PRIMEIRA EXECUCAO (disco novo): o greeter pergunta o idioma e o host escolhe
+    English ("2"); execucao 2 = o mesmo disco: a preferencia guardada vale, sem pergunta."""
     image = BUILD / "nexo-desktop.img"
     run([sys.executable, ROOT / "tools" / "build-image", "--no-build", "--cmdline",
          "selftest=0 desktop=1", "--out", image], stdout=subprocess.DEVNULL)
     qmp_path = BUILD / "nexo-desktop.qmp"
     if qmp_path.exists():
         qmp_path.unlink()
-    logfile = BUILD / "logs" / "desktop.log"
+    disk = BUILD / "nexo-desktop-data.img"
+    if run_no == 1 and disk.exists():
+        disk.unlink()
+    logfile = BUILD / "logs" / ("desktop.log" if run_no == 1 else f"desktop.{run_no}.log")
     logfile.parent.mkdir(parents=True, exist_ok=True)
     if logfile.exists():
         logfile.unlink()
-    runner_log = open(BUILD / "logs" / "desktop-runner.log", "wb")
-    # A sessao nao termina sozinha (e esse o ponto): o host mata o QEMU ao ver "sessao: pronta".
+    runner_log = open(BUILD / "logs" / f"desktop-runner-{run_no}.log", "wb")
+    # A sessao nao termina sozinha (e esse o ponto): o host mata o QEMU no ultimo marcador.
+    # (o marcador COMPLETO: matar ao casar o prefixo deixava a linha do log a meio)
+    kill_on = r"sessao: desbloqueada \(a pedido\)" if run_no == 1 else r"sessao: pronta \(Meta\+L bloqueia\)"
     proc = subprocess.Popen([sys.executable, ROOT / "tools" / "run-qemu", "--test", "--image", image,
-                             "--disk", BUILD / "nexo-desktop-data.img", "--input-keyboard", "--input-tablet",
+                             "--disk", disk, "--input-keyboard", "--input-tablet",
                              "--qmp-socket", qmp_path, "--timeout", str(timeout), "--log", logfile,
-                             "--kill-on", r"sessao: desbloqueada \(a pedido\)", "--kill-delay-ms", "500"],
+                             "--kill-on", kill_on, "--kill-delay-ms", "500"],
                             stdout=runner_log, stderr=subprocess.STDOUT)
     ok = True
+    if run_no == 1:
+        # primeira execucao: espera a pergunta do idioma e responde "2" (English)
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            if logfile.exists() and b"greeter: primeira execucao" in logfile.read_bytes():
+                break
+            time.sleep(0.5)
+        time.sleep(1.0)
+        for _ in range(3):
+            qmp_send_keys(qmp_path, ["2"])
+            time.sleep(1.5)
+            if logfile.exists() and b"greeter: idioma escolhido" in logfile.read_bytes():
+                break
     deadline = time.time() + 120
     while time.time() < deadline:
         if logfile.exists() and b"sessao: bloqueada" in logfile.read_bytes():
@@ -659,51 +679,61 @@ def run_desktop_scenario_once(timeout: float):
     if not typed:
         log("FALHA: socket QMP nao respondeu")
         ok = False
-    # bloqueio a pedido: Meta+L (a sessao pronta) e de novo a senha
-    deadline = time.time() + 60
-    while time.time() < deadline:
-        if logfile.exists() and b"sessao: pronta" in logfile.read_bytes():
-            break
-        time.sleep(0.5)
-    time.sleep(1.0)
-    relocked = False
-    for _ in range(3):
-        qmp_send_keys(qmp_path, ["meta_l+l"])
-        time.sleep(1.5)
-        if logfile.exists() and b"sessao: bloqueio a pedido" in logfile.read_bytes():
-            relocked = True
-            break
-    if relocked:
+    if run_no == 1:
+        # bloqueio a pedido: Meta+L (a sessao pronta) e de novo a senha
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if logfile.exists() and b"sessao: pronta" in logfile.read_bytes():
+                break
+            time.sleep(0.5)
         time.sleep(1.0)
-        qmp_send_keys(qmp_path, ["n", "e", "x", "o", "ret"])
-    else:
-        log("FALHA: Meta+L nao bloqueou a sessao")
-        ok = False
+        relocked = False
+        for _ in range(3):
+            qmp_send_keys(qmp_path, ["meta_l+l"])
+            time.sleep(1.5)
+            if logfile.exists() and b"sessao: bloqueio a pedido" in logfile.read_bytes():
+                relocked = True
+                break
+        if relocked:
+            time.sleep(1.0)
+            qmp_send_keys(qmp_path, ["n", "e", "x", "o", "ret"])
+        else:
+            log("FALHA: Meta+L nao bloqueou a sessao")
+            ok = False
     rc = proc.wait(timeout=timeout + 60)
     runner_log.close()
     text = logfile.read_bytes().decode("utf-8", errors="replace")
     if rc != 99:
         log(f"FALHA: codigo de saida {rc}, esperado 99 (morto pelo host apos 'sessao: pronta')")
         ok = False
-    for pat in [r"\[SESSAO\] sessao grafica iniciada \(2 entrada\(s\), disco: true, tela: true\)",
-                r"wm: apresentando no framebuffer \d+x\d+",
-                r"sessao: compositor \d+x\d+ com 2 driver\(s\) de entrada",
-                r"sessao: vfs montado \(/disk",
-                r"sessao: faixa de atividades no ar",
-                r"sessao: bloqueada — aguardando a senha",
-                r"sessao: senha errada; continua bloqueada",
-                r"sessao: desbloqueada",
-                r"term: pronto",
-                r"sessao: terminal aberto com o shell de diagnostico",
-                r"sessao: pronta \(Meta\+L bloqueia\)",
+    comuns = [r"\[SESSAO\] sessao grafica iniciada \(2 entrada\(s\), disco: true, tela: true\)",
+              r"wm: apresentando no framebuffer \d+x\d+",
+              r"sessao: compositor \d+x\d+ com 2 driver\(s\) de entrada",
+              r"sessao: vfs montado \(/disk",
+              r"sessao: faixa de atividades no ar",
+              r"sessao: bloqueada — aguardando a senha",
+              r"sessao: senha errada; continua bloqueada",
+              r"sessao: desbloqueada",
+              r"term: pronto",
+              r"sessao: terminal aberto com o shell de diagnostico",
+              r"sessao: pronta \(Meta\+L bloqueia\)"]
+    primeira = [r"greeter: primeira execucao — a perguntar o idioma",
+                r"greeter: idioma escolhido: en-US \(guardado\)",
+                r"greeter: idioma da interface: en-US",
                 r"shellui: pedido de bloqueio \(Meta\+L\) encaminhado ao orquestrador",
                 r"sessao: bloqueio a pedido",
-                r"sessao: desbloqueada \(a pedido\)"]:
+                r"sessao: desbloqueada \(a pedido\)"]
+    segunda = [r"greeter: idioma da interface: en-US"]
+    for pat in comuns + (primeira if run_no == 1 else segunda):
         if not re.search(pat, text):
             log(f"FALHA: marcador ausente: /{pat}/")
             ok = False
-    for pat in [r"KERNEL PANIC", r"EXCEPTION", r"sessao: falha", r"wm: falha", r"greeter: falha",
-                r"\[SESSAO\] a sessao terminou", r"NEXO: boot completo"]:
+    proibidos = [r"KERNEL PANIC", r"EXCEPTION", r"sessao: falha", r"wm: falha", r"greeter: falha",
+                 r"\[SESSAO\] a sessao terminou", r"NEXO: boot completo"]
+    if run_no == 2:
+        # a preferencia guardada no 1.o boot vale: nada de perguntar de novo
+        proibidos += [r"greeter: primeira execucao", r"greeter: idioma da interface: pt-BR"]
+    for pat in proibidos:
         if re.search(pat, text):
             log(f"FALHA: marcador proibido presente: /{pat}/")
             ok = False
@@ -715,13 +745,18 @@ def run_desktop_scenario_once(timeout: float):
 def run_desktop_scenario(timeout: float) -> bool:
     """A sessao grafica arranca em si mesma: inputdev x2 + devmgr (kernel) -> sessao (usuario):
     wm, faixa de atividades, greeter (senha errada e certa por QMP), terminal com o shell."""
-    log("=== cenario 'desktop' (sessao grafica com senha por QMP) ===")
-    ok, rc = False, 0
-    for attempt in range(3):
-        ok, rc = run_desktop_scenario_once(timeout)
-        if ok or not infra_failure(rc, BUILD / "logs" / "desktop.log"):
+    log("=== cenario 'desktop' (sessao grafica com senha por QMP; 2 boots: primeira execucao e a seguinte) ===")
+    ok = True
+    for run_no in (1, 2):
+        ok_run, rc = False, 0
+        for attempt in range(3):
+            ok_run, rc = run_desktop_scenario_once(timeout, run_no)
+            if ok_run or not infra_failure(rc, BUILD / "logs" / "desktop.log"):
+                break
+            log(f"falha de infraestrutura do QEMU (rc={rc}); nova tentativa ({attempt + 2}/3)")
+        ok = ok and ok_run
+        if not ok_run:
             break
-        log(f"falha de infraestrutura do QEMU (rc={rc}); nova tentativa ({attempt + 2}/3)")
     log(f"=== cenario 'desktop': {'PASS' if ok else 'FAIL'} (log: {BUILD / 'logs' / 'desktop.log'}) ===")
     return ok
 

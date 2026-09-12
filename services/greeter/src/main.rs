@@ -4,6 +4,9 @@
 //! (`grab` — nenhuma outra janela recebe as teclas da senha nem rouba o foco por clique) e lê a
 //! senha pelos eventos `key` do compositor. Senha errada: reporta e continua bloqueado. Senha
 //! certa: solta a captura, destrói a tela de login e reporta o desbloqueio.
+//! Handle 0 pode trazer antes um canal `nexo.fs` ("fs"): carrega as preferências do sistema
+//! pelo compositor e, na PRIMEIRA execução (sem `/disk/prefs.txt`), pergunta o idioma (1/2)
+//! e guarda-o — o começo do onboarding.
 //! Nesta versão a credencial é fixa ("nexo" + Enter); armazenamento seguro de credenciais e
 //! gestão de sessão/estado vêm com o modelo de usuários (Fase 6).
 #![no_std]
@@ -21,6 +24,12 @@ const PIPE: Handle = 0;
 /// Senha demo: "nexo" em códigos evdev (n, e, x, o) + Enter.
 const PASSWORD: [u32; 4] = [49, 18, 45, 24];
 const KEY_ENTER: u32 = 28;
+/// Teclas `1` e `2` (evdev): a escolha do idioma na primeira execução.
+const KEY_1: u32 = 2;
+const KEY_2: u32 = 3;
+/// Onde o compositor guarda as preferências (o mesmo caminho do `wm`): existir ou não é o
+/// que distingue a primeira execução de todas as outras.
+const PREFS_PATH: &[u8] = b"/disk/prefs.txt";
 const W: i32 = 64;
 const H: i32 = 48;
 
@@ -29,31 +38,44 @@ fn fail(code: i64, what: &str) -> ! {
     nexo_sys::exit(code)
 }
 
-/// RPC simples na sessão do wm (envia `msg`, devolve a resposta em `buf`).
+/// RPC na sessão do wm (envia `msg`, devolve a resposta em `buf` e o handle que ela trouxer).
+/// Tolerante a eventos: com a captura ativa, as teclas chegam por este mesmo canal — o
+/// key-up do "2" da escolha do idioma chegava no meio do `prefs_save` e era lido como a
+/// resposta ("NAO guardado" sem recusa nenhuma; a resposta real baralhava o rpc seguinte).
 fn rpc(sess: Handle, msg: &[u8], extra: &[u32], buf: &mut [u8]) -> (usize, usize) {
     if nexo_sys::channel_send(sess, msg, extra) != Status::Ok {
         fail(30, "send rpc");
     }
     let mut hs = [0u32; 1];
-    match nexo_sys::channel_recv(sess, buf, &mut hs) {
-        Ok((n, nh)) => {
-            if nh == 1 {
-                buf[..0].fill(0); // handles chegam via hs; o chamador refaz o recv se precisar
+    loop {
+        match nexo_sys::channel_recv(sess, buf, &mut hs) {
+            Ok((n, nh)) => {
+                if wm::decode_key_event(&buf[..n]).is_ok()
+                    || wm::decode_pointer_event(&buf[..n]).is_ok()
+                {
+                    continue;
+                }
+                return (n, if nh == 1 { hs[0] as usize } else { usize::MAX });
             }
-            (n, hs[0] as usize)
+            Err(_) => fail(31, "recv rpc"),
         }
-        Err(_) => fail(31, "recv rpc"),
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(_arg: u64) -> ! {
-    // Recebe a sessão nexo.wm do orquestrador.
+    // Recebe do orquestrador, opcionalmente, um canal `nexo.fs` ("fs" + handle) — para
+    // carregar as preferências do sistema e, na primeira execução, guardar o idioma — e
+    // depois a sessão nexo.wm ("sess" + handle).
     let mut buf = [0u8; 256];
     let mut hs = [0u32; 1];
-    let sess: Handle = match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
-        Ok((n, 1)) if &buf[..n] == b"sess" => hs[0],
-        _ => fail(32, "sessao nao recebida"),
+    let mut fs: Option<Handle> = None;
+    let sess: Handle = loop {
+        match nexo_sys::channel_recv(PIPE, &mut buf, &mut hs) {
+            Ok((n, 1)) if &buf[..n] == b"sess" => break hs[0],
+            Ok((n, 1)) if &buf[..n] == b"fs" => fs = Some(hs[0]),
+            _ => fail(32, "sessao nao recebida"),
+        }
     };
 
     // Tela de login em tela cheia, acima de tudo.
@@ -82,6 +104,110 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     let id = cs.id;
     let base = nexo_sys::memory_map(hs[0]).unwrap_or_else(|_| fail(38, "map superficie"));
 
+    // Captura a entrada já aqui: a partir daqui a senha não pode ser roubada — e a posse da
+    // entrada é o que o compositor exige para carregar/guardar preferências e mudar o idioma.
+    let m = wm::GrabRequest { id }
+        .encode_msg(&mut out)
+        .unwrap_or_else(|_| fail(41, "enc grab"));
+    let (n, _) = rpc(sess, &out[..m], &[], &mut buf);
+    if wm::decode_grab_response(&buf[..n]).is_err() {
+        fail(42, "grab recusado");
+    }
+
+    // Preferências do sistema: carregadas do disco pelo compositor com o `nexo.fs` que o
+    // orquestrador emprestou (o handle vai e volta). Sem arquivo é a PRIMEIRA EXECUÇÃO:
+    // pergunta-se o idioma antes de mais nada, e a escolha é guardada para os boots
+    // seguintes — o começo do onboarding (Plano §Fase 5).
+    let theme = Theme::dark();
+    if let Some(fs_h) = fs {
+        let m = wm::PrefsLoadRequest { fs: fs_h }
+            .encode_msg(&mut out)
+            .unwrap_or_else(|_| fail(50, "enc prefs_load"));
+        let (n, devolvido) = rpc(sess, &out[..m], &[fs_h], &mut buf);
+        if devolvido == usize::MAX {
+            fail(58, "prefs_load nao devolveu o fs");
+        }
+        let fs_h = devolvido as Handle; // o empréstimo volta (mesmo em recusa)
+        if wm::decode_prefs_load_response(&buf[..n]).is_err() {
+            log!("greeter: compositor recusou carregar preferencias; padroes em vigor");
+        }
+        let existe = {
+            use nexo_proto::fs::{StatRequest, decode_stat_response};
+            let mut path = [0u8; 256];
+            path[..PREFS_PATH.len()].copy_from_slice(PREFS_PATH);
+            let mut req = [0u8; 4096];
+            let m = StatRequest {
+                path,
+                path_len: PREFS_PATH.len() as u32,
+            }
+            .encode_msg(&mut req)
+            .unwrap_or_else(|_| fail(51, "enc stat"));
+            if nexo_sys::channel_send(fs_h, &req[..m], &[]) != Status::Ok {
+                fail(52, "send stat");
+            }
+            let mut hs2 = [0u32; 1];
+            match nexo_sys::channel_recv(fs_h, &mut req, &mut hs2) {
+                Ok((n, _)) => decode_stat_response(&req[..n]).is_ok(),
+                Err(_) => fail(53, "recv stat"),
+            }
+        };
+        if !existe {
+            log!("greeter: primeira execucao — a perguntar o idioma (1 pt-BR, 2 en-US)");
+            {
+                // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) aqui.
+                let px = unsafe {
+                    core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize)
+                };
+                let mut s = Surface::new(px, W as u32, H as u32, W as u32, PixelFormat::Rgbx8888)
+                    .unwrap_or_else(|| fail(39, "superficie"));
+                s.clear(theme.bg);
+                s.stroke_rect(Rect::new(0, 0, W, H), theme.accent);
+                Label::new(texto(Idioma::PtBr, "greeter.idioma")).draw(&mut s, 4, 20, &theme);
+            }
+            let m = wm::CommitRequest { id }
+                .encode_msg(&mut out)
+                .unwrap_or_else(|_| fail(40, "enc commit"));
+            let _ = rpc(sess, &out[..m], &[], &mut buf);
+            let escolha = loop {
+                let (n, _) = match nexo_sys::channel_recv(sess, &mut buf, &mut hs) {
+                    Ok(v) => v,
+                    Err(_) => fail(54, "recv teclas do idioma"),
+                };
+                match wm::decode_key_event(&buf[..n]) {
+                    Ok(ev) if ev.value == 1 && ev.code == KEY_1 => break 0u8,
+                    Ok(ev) if ev.value == 1 && ev.code == KEY_2 => break 1u8,
+                    _ => continue,
+                }
+            };
+            let m = wm::SetIdiomaRequest { idioma: escolha }
+                .encode_msg(&mut out)
+                .unwrap_or_else(|_| fail(55, "enc set_idioma"));
+            let (n, _) = rpc(sess, &out[..m], &[], &mut buf);
+            if wm::decode_set_idioma_response(&buf[..n]).is_err() {
+                fail(56, "set_idioma recusado");
+            }
+            let m = wm::PrefsSaveRequest { fs: fs_h }
+                .encode_msg(&mut out)
+                .unwrap_or_else(|_| fail(57, "enc prefs_save"));
+            let (n, devolvido) = rpc(sess, &out[..m], &[fs_h], &mut buf);
+            let guardado = wm::decode_prefs_save_response(&buf[..n]).is_ok();
+            if devolvido != usize::MAX {
+                let _ = nexo_sys::handle_close(devolvido as Handle);
+            }
+            log!(
+                "greeter: idioma escolhido: {} ({})",
+                if escolha == 1 { "en-US" } else { "pt-BR" },
+                if guardado {
+                    "guardado"
+                } else {
+                    "NAO guardado — voltara a perguntar"
+                }
+            );
+        } else {
+            let _ = nexo_sys::handle_close(fs_h);
+        }
+    }
+
     // Idioma da interface: preferência do sistema, lida do compositor (`nexo.wm` v1.22). É a
     // mesma via do tema — quem decide é o sistema, não cada aplicativo.
     let idioma = {
@@ -104,7 +230,6 @@ pub extern "C" fn _start(_arg: u64) -> ! {
     log!("greeter: idioma da interface: {}", idioma.codigo());
 
     // Pinta a tela de bloqueio (tema escuro + rótulo) com o toolkit.
-    let theme = Theme::dark();
     {
         // SAFETY: base .. base+W*H*4 foi mapeada por memory_map (USER|RW) neste processo.
         let px = unsafe { core::slice::from_raw_parts_mut(base as *mut u8, (W * H * 4) as usize) };
@@ -112,24 +237,14 @@ pub extern "C" fn _start(_arg: u64) -> ! {
             .unwrap_or_else(|| fail(39, "superficie"));
         s.clear(theme.bg);
         s.stroke_rect(Rect::new(0, 0, W, H), theme.accent);
-        // Primeiro rótulo do sistema que vem do catálogo em vez do código-fonte. O idioma
-        // ainda é fixo aqui: escolher e persistir a preferência é o passo seguinte, e depende
-        // de onde ela vai morar (prefs do compositor).
+        // Rótulo do catálogo, no idioma do sistema (escolhido na primeira execução e
+        // guardado nas preferências do compositor).
         Label::new(texto(idioma, "greeter.senha")).draw(&mut s, 12, 20, &theme);
     }
     let m = wm::CommitRequest { id }
         .encode_msg(&mut out)
         .unwrap_or_else(|_| fail(40, "enc commit"));
     let _ = rpc(sess, &out[..m], &[], &mut buf);
-
-    // Captura a entrada: a partir daqui a senha não pode ser roubada.
-    let m = wm::GrabRequest { id }
-        .encode_msg(&mut out)
-        .unwrap_or_else(|_| fail(41, "enc grab"));
-    let (n, _) = rpc(sess, &out[..m], &[], &mut buf);
-    if wm::decode_grab_response(&buf[..n]).is_err() {
-        fail(42, "grab recusado");
-    }
     log!("greeter: bloqueado — aguardando a senha (captura ativa)");
     if nexo_sys::channel_send(PIPE, b"locked", &[]) != Status::Ok {
         fail(43, "send locked");

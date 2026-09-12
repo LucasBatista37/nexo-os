@@ -87,6 +87,9 @@ fn kmain(bi: &'static BootInfo) -> ! {
     kinfo!("inicializacao concluida em {} ms", time::uptime_ms());
 
     let cmdline = boot::cmdline();
+    if boot::test_mode() {
+        selftest::batimento_iniciar();
+    }
     let mut ok = true;
     if cmdline_value(cmdline, "selftest") != Some("0") {
         ok = selftest::run();

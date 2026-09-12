@@ -767,7 +767,7 @@ telas — e o que só se resolve com pessoas de fora (usabilidade).
 - [x] clipboard e drag-and-drop seguros — *as duas primitivas exigem **posse da entrada**: o clipboard guarda histórico e só quem tem o foco lê/escreve; o arrastar-e-soltar entrega por *grant* apenas à janela sob o cursor. É a mediação a trabalhar a favor do aplicativo, e há teste de negação*;
 - [-] temas e personalização — *preferências **persistentes** desde o bloco 141 (`prefs_save`/`prefs_load` com o fs emprestado); três variantes de tema com troca **em runtime** (`set_theme`, a janela repinta na hora, conferido por pixel nos dois sentidos) e preferências de movimento e não-perturbe. Falta personalização além do tema*;
 - [-] atalhos consistentes — *atalhos globais no compositor (Meta+Tab cicla janelas, troca de Contexto) e navegação por Tab entre widgets com anel de foco visível. "Consistentes" pende do shell completo (menus e diálogos operáveis sem mouse)*;
-- [ ] onboarding e recuperação de erro — *não existe: nem primeira execução guiada, nem fluxo de recuperação apresentado ao usuário*;
+- [-] onboarding e recuperação de erro — *a **primeira execução** existe (bloco 154): sem `/disk/prefs.txt`, o greeter pergunta o idioma (1 pt-BR / 2 en-US), aplica-o (`set_idioma`) e guarda-o (`prefs_save`) com uma sessão do vfs emprestada pelo orquestrador; nos boots seguintes o compositor carrega as preferências (`prefs_load`) e a pergunta não volta — cenário `desktop` com dois boots no mesmo disco. Falta o resto do guiado (rede, conta) e o fluxo de recuperação de erro apresentado ao usuário*;
 - [ ] testes de usabilidade desktop e notebook — *dependem de usuários externos e de hardware real (Fase 7); nada feito*.
 
 ### 6.6 Aplicativos e SDK

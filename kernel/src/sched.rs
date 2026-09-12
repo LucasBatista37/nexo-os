@@ -184,6 +184,22 @@ pub struct Stats {
 }
 
 /// Estatísticas instantâneas.
+/// Nome da thread a correr em cada CPU (diagnóstico do batimento). Toma o lock do
+/// escalonador: se ele estiver preso, esta chamada também fica — por isso o batimento
+/// imprime primeiro o que não precisa de lock.
+pub fn nomes_a_correr(saida: &mut [&'static str]) {
+    cpu::without_interrupts(|| {
+        let g = SCHED.lock();
+        for (i, slot) in saida.iter_mut().enumerate() {
+            *slot = g
+                .running
+                .get(i)
+                .and_then(|r| r.as_ref())
+                .map_or("-", |t| t.name);
+        }
+    })
+}
+
 pub fn stats() -> Stats {
     cpu::without_interrupts(|| {
         let g = SCHED.lock();
@@ -828,19 +844,23 @@ pub fn on_tick(fronteira: bool) {
     let ci = cpu_data.index;
     if ci == 0 {
         crate::timer::on_tick();
-        let now = crate::time::monotonic_ns();
-        let mut i = 0;
-        while i < g.sleepers.len() {
+    }
+    // Dormentes vencidos acordam no tique de QUALQUER CPU (bloco 154): até aqui só a BSP os
+    // acordava, e uma BSP presa — com interrupções desligadas, onde nem o IPI do vigia
+    // chega — parava tudo o que dorme em todas as CPUs. As APs têm tique periódico; o
+    // custo é uma varredura por ms sob o lock que este handler já toma.
+    let now = crate::time::monotonic_ns();
+    let mut i = 0;
+    while i < g.sleepers.len() {
+        // SAFETY: lock detido.
+        let due = unsafe { g.sleepers[i].inner().wake_at_ns <= now };
+        if due {
+            let t = g.sleepers.remove(i);
             // SAFETY: lock detido.
-            let due = unsafe { g.sleepers[i].inner().wake_at_ns <= now };
-            if due {
-                let t = g.sleepers.remove(i);
-                // SAFETY: lock detido.
-                unsafe { t.inner().state = State::Ready };
-                g.run_queue.push(t);
-            } else {
-                i += 1;
-            }
+            unsafe { t.inner().state = State::Ready };
+            g.run_queue.push(t);
+        } else {
+            i += 1;
         }
     }
     let Some(cur) = g.running[ci].clone() else {

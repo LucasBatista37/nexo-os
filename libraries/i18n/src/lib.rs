@@ -68,6 +68,12 @@ pub const CATALOGO: &[Entrada] = &[
         en: "Sign in",
     },
     Entrada {
+        chave: "greeter.idioma",
+        // Bilíngue de propósito: é a pergunta feita antes de haver idioma escolhido.
+        pt: "1 Portugues  2 English",
+        en: "1 Portugues  2 English",
+    },
+    Entrada {
         chave: "greeter.senha",
         pt: "Senha",
         en: "Password",
