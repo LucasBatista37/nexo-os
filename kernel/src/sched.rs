@@ -770,6 +770,21 @@ pub fn unpark(id: ThreadId) {
     });
 }
 
+/// A thread `id` pertence ao processo `p`? Vale para threads vivas E para as que estão a
+/// sair: a lista `Process::threads` perde a thread no início do `thread_exit`, antes de o
+/// escalonador a marcar `finished` — e nessa janela, com SMP, um `thread_join` que só
+/// consultasse a lista e o `finished` recusava com `InvalidArgs` uma thread legítima
+/// (visto no `user_thread_limit`, 63 threads a sair em 4 CPUs enquanto a principal as junta).
+pub fn belongs_to(id: ThreadId, p: &Arc<crate::process::Process>) -> bool {
+    cpu::without_interrupts(|| {
+        let g = SCHED.lock();
+        g.all
+            .iter()
+            .find(|t| t.id == id)
+            .is_some_and(|t| t.process.as_ref().is_some_and(|tp| Arc::ptr_eq(tp, p)))
+    })
+}
+
 /// `true` se a thread terminou ou nunca existiu.
 pub fn is_finished(id: ThreadId) -> bool {
     cpu::without_interrupts(|| {

@@ -1182,7 +1182,14 @@ fn dispatch(f: &mut TrapFrame) -> (Status, u64) {
                         return (Status::Denied, 0);
                     }
                     let me = sched::current().map_or(usize::MAX, |t| t.id);
-                    let mine = p.threads.lock().contains(&tid);
+                    // Dela: na lista viva do processo OU registada no escalonador como
+                    // deste processo (a sair — a lista já a perdeu, `finished` ainda não
+                    // veio); uma thread já recolhida pelo `reap` conta como terminada.
+                    // O guard de `threads` é largado antes de perguntar ao escalonador (num
+                    // `lock().contains() || belongs_to()` o temporário viveria até ao fim da
+                    // expressão, com o lock do escalonador tomado por baixo dele).
+                    let na_lista = p.threads.lock().contains(&tid);
+                    let mine = na_lista || sched::belongs_to(tid, &p);
                     if tid == me || (!mine && !sched::is_finished(tid)) {
                         return (Status::InvalidArgs, 0);
                     }

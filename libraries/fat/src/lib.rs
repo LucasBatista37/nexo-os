@@ -166,9 +166,29 @@ pub struct Fat<D: SectorDevice> {
     data_start: u64,
     total_clusters: u32,
     root_cluster: u32,
+    /// Último setor da FAT lido (LBA, conteúdo): percorrer uma cadeia visita a mesma FAT
+    /// dezenas de vezes por setor de dados, e sem isto cada passo era um pedido ao disco.
+    fat_cache: Option<(u64, [u8; SECTOR])>,
+    /// Cursor da última leitura: (cluster inicial do arquivo, índice na cadeia, cluster).
+    /// Ler um arquivo em pedaços recomeçava a cadeia do zero a cada pedaço — quadrático:
+    /// o initrd de 2 MiB custava ~440 mil pedidos ao AHCI na verificação da atualização A/B.
+    cursor: Option<(u32, u64, u32)>,
 }
 
 impl<D: SectorDevice> Fat<D> {
+    /// Setor `lba` da FAT, pela cache de um setor.
+    fn fat_sector(&mut self, lba: u64) -> Result<[u8; SECTOR], FatError> {
+        if let Some((l, s)) = &self.fat_cache
+            && *l == lba
+        {
+            return Ok(*s);
+        }
+        let mut s = [0u8; SECTOR];
+        self.dev.read_sector(lba, &mut s)?;
+        self.fat_cache = Some((lba, s));
+        Ok(s)
+    }
+
     /// Monta o volume que começa no setor `base`.
     pub fn mount(mut dev: D, base: u64) -> Result<Self, FatError> {
         let mut s = [0u8; SECTOR];
@@ -237,6 +257,8 @@ impl<D: SectorDevice> Fat<D> {
             data_start,
             total_clusters,
             root_cluster,
+            fat_cache: None,
+            cursor: None,
         })
     }
 
@@ -273,7 +295,6 @@ impl<D: SectorDevice> Fat<D> {
 
     /// Valor CRU da entrada `cluster` na FAT (0 = livre; sem interpretação de fim de cadeia).
     fn fat_raw(&mut self, cluster: u32) -> Result<u32, FatError> {
-        let mut s = [0u8; SECTOR];
         let v = match self.kind {
             FatKind::Fat32 => {
                 let off = cluster as u64 * 4;
@@ -281,7 +302,7 @@ impl<D: SectorDevice> Fat<D> {
                 if off / SECTOR as u64 >= self.fat_sectors as u64 {
                     return Err(FatError::Corrupted("indice na FAT"));
                 }
-                self.dev.read_sector(lba, &mut s)?;
+                let s = self.fat_sector(lba)?;
                 u32_at(&s, (off % SECTOR as u64) as usize) & 0x0fff_ffff
             }
             FatKind::Fat16 => {
@@ -289,8 +310,7 @@ impl<D: SectorDevice> Fat<D> {
                 if off / SECTOR as u64 >= self.fat_sectors as u64 {
                     return Err(FatError::Corrupted("indice na FAT"));
                 }
-                self.dev
-                    .read_sector(self.fat_start + off / SECTOR as u64, &mut s)?;
+                let s = self.fat_sector(self.fat_start + off / SECTOR as u64)?;
                 u16_at(&s, (off % SECTOR as u64) as usize) as u32
             }
             FatKind::Fat12 => {
@@ -299,11 +319,10 @@ impl<D: SectorDevice> Fat<D> {
                     return Err(FatError::Corrupted("indice na FAT"));
                 }
                 let lba = self.fat_start + off / SECTOR as u64;
-                self.dev.read_sector(lba, &mut s)?;
+                let s = self.fat_sector(lba)?;
                 let lo = s[(off % SECTOR as u64) as usize];
                 let hi = if (off % SECTOR as u64) as usize == SECTOR - 1 {
-                    let mut t = [0u8; SECTOR];
-                    self.dev.read_sector(lba + 1, &mut t)?;
+                    let t = self.fat_sector(lba + 1)?;
                     t[0]
                 } else {
                     s[(off % SECTOR as u64) as usize + 1]
@@ -539,14 +558,19 @@ impl<D: SectorDevice> Fat<D> {
         }
         let n = buf.len().min((file.size as u64 - offset) as usize);
         let cb = self.cluster_bytes() as u64;
-        let mut cluster = file.cluster;
-        let mut skip = offset / cb;
+        let alvo = offset / cb;
+        // Retoma do cursor se é o mesmo arquivo e a posição pedida não está atrás dele —
+        // uma leitura sequencial em pedaços nunca volta a percorrer a cadeia do início.
+        let (mut cluster, mut indice) = match self.cursor {
+            Some((inicio, i, c)) if inicio == file.cluster && i <= alvo => (c, i),
+            _ => (file.cluster, 0),
+        };
         let mut hops = 0u32;
-        while skip > 0 {
+        while indice < alvo {
             cluster = self
                 .next_cluster(cluster)?
                 .ok_or(FatError::Corrupted("arquivo mais curto que o tamanho"))?;
-            skip -= 1;
+            indice += 1;
             hops += 1;
             if hops > 1 << 20 {
                 return Err(FatError::Corrupted("cadeia longa demais"));
@@ -569,8 +593,10 @@ impl<D: SectorDevice> Fat<D> {
                 cluster = self
                     .next_cluster(cluster)?
                     .ok_or(FatError::Corrupted("arquivo mais curto que o tamanho"))?;
+                indice += 1;
             }
         }
+        self.cursor = Some((file.cluster, indice, cluster));
         Ok(n)
     }
 }
@@ -598,6 +624,9 @@ impl<D: SectorDeviceRw> Fat<D> {
 
     /// Escreve `value` na entrada `cluster` de TODAS as cópias da FAT.
     fn fat_set(&mut self, cluster: u32, value: u32) -> Result<(), FatError> {
+        // a FAT vai mudar: nem a cache nem o cursor valem mais
+        self.fat_cache = None;
+        self.cursor = None;
         if cluster < 2 || cluster - 2 >= self.total_clusters {
             return Err(FatError::Corrupted("numero de cluster"));
         }

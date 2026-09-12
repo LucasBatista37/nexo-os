@@ -1586,7 +1586,10 @@ fn a11y_emit(a11y: &mut Option<Handle>, kind: u32, surface: u32, text: &[u8]) {
 /// `true` se a sessão `owner` detém a **entrada**: possui a superfície capturada (grab) ou, sem
 /// captura, a focada. É a mediação do clipboard — só quem tem a entrada lê/escreve.
 /// Caminho do arquivo de preferências no volume emprestado.
-const PREFS_PATH: &[u8] = b"/prefs.txt";
+/// Onde as preferências vivem, no namespace do vfs que o chamador empresta (`/disk` é o
+/// volume de dados). Até ao bloco 153 era `/prefs.txt` num `fs` cru — um caminho que o vfs
+/// não roteia, logo a sessão real nunca teria conseguido guardar nada.
+const PREFS_PATH: &[u8] = b"/disk/prefs.txt";
 
 /// Fala `nexo.fs` no canal emprestado: uma ida-e-volta por pedido.
 fn fs_rpc(fs: Handle, req: &[u8], rep: &mut [u8; 512]) -> Option<usize> {

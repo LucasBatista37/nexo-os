@@ -82,6 +82,14 @@ Campos desconhecidos são ignorados; campos ausentes desligam a verificação co
 - cuidado: nexofs é forbid(unsafe_code), então a origem é externa ao serviço — não procurar o bug dentro dele
 - ref: docs/incidents/2026-09-09-fs-ponteiro-nulo.md
 
+## incidente-tique-bsp
+
+- estado: aberto
+- o-que: o one-shot da BSP perde rearmes (raro; travava tudo o que dorme); mitigado pelo vigia das APs, causa raiz aberta
+- acao: ler `resgates_tique_bsp=` na linha `[SCHED]` dos boots; se um boot travar apesar do vigia, ou se o contador crescer por hora num stress, instrumentar por resgate se a BSP recebeu IRQ do timer depois do prazo (distingue atraso de perda)
+- cuidado: o stress de 7 dias em curso (kernel do bloco 146) NÃO tem o vigia — se ele travar sem `FAIL` nem pânico, com `t=` parado, é este incidente e não outro
+- ref: docs/incidents/2026-09-11-tique-bsp.md
+
 ## painel-mensal
 
 - estado: aberto

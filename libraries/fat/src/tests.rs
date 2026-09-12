@@ -18,6 +18,84 @@ impl SectorDevice for MemDev {
     }
 }
 
+/// Disco em memória que CONTA os pedidos: o custo de uma leitura é parte do contrato.
+struct ContaDev(Vec<u8>, usize);
+impl SectorDevice for ContaDev {
+    fn sector_count(&self) -> u64 {
+        (self.0.len() / SECTOR) as u64
+    }
+    fn read_sector(&mut self, lba: u64, buf: &mut [u8; SECTOR]) -> Result<(), IoError> {
+        self.1 += 1;
+        let o = lba as usize * SECTOR;
+        if o + SECTOR > self.0.len() {
+            return Err(IoError);
+        }
+        buf.copy_from_slice(&self.0[o..o + SECTOR]);
+        Ok(())
+    }
+}
+impl SectorDeviceRw for ContaDev {
+    fn write_sector(&mut self, lba: u64, buf: &[u8; SECTOR]) -> Result<(), IoError> {
+        let o = lba as usize * SECTOR;
+        if o + SECTOR > self.0.len() {
+            return Err(IoError);
+        }
+        self.0[o..o + SECTOR].copy_from_slice(buf);
+        Ok(())
+    }
+}
+
+/// Ler um arquivo de K clusters em pedaços custa O(K) pedidos, não O(K²): a cache de um
+/// setor da FAT e o cursor de cadeia. Antes, cada pedaço recomeçava a cadeia do zero (com um
+/// pedido à FAT por cluster) — o initrd de 2 MiB custava ~440 mil pedidos ao disco.
+#[test]
+fn sequential_chunked_read_is_linear() {
+    let mut fs = Fat::mount(ContaDev(fat12_image(), 0), 0).unwrap();
+    // cresce HELLO.TXT para 40 clusters (1 setor cada) com conteúdo conhecido
+    let total = 40 * SECTOR;
+    fs.rewrite_file(b"/HELLO.TXT", total as u64, |off, buf| {
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = ((off as usize + i) % 251) as u8;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let f = fs.lookup(b"hello.txt").unwrap();
+    fs.dev.1 = 0;
+    let mut got = std::vec![0u8; total];
+    let mut off = 0;
+    while off < total {
+        let n = (3 * SECTOR / 2).min(total - off); // pedaços que não alinham com o cluster
+        let r = fs.read(&f, off as u64, &mut got[off..off + n]).unwrap();
+        assert_eq!(r, n);
+        off += n;
+    }
+    for (i, b) in got.iter().enumerate() {
+        assert_eq!(*b, (i % 251) as u8, "byte {i}");
+    }
+    // 40 setores de dados, mais um por pedaço que começa a meio de um setor (o setor é
+    // relido — linear, um por pedaço), mais a FAT (1 setor, uma vez). O custo antigo tinha
+    // um termo quadrático: ~27 pedaços × ~20 clusters de cadeia percorrida = ~540 pedidos
+    // à FAT só para chegar ao início de cada pedaço.
+    let pedacos = total.div_ceil(3 * SECTOR / 2);
+    let pedidos = fs.dev.1;
+    assert!(
+        pedidos <= 40 + pedacos + 2,
+        "{pedidos} pedidos para 40 setores em {pedacos} pedacos"
+    );
+    // ler de trás para a frente também termina e é correto (o cursor não se aplica; recomeça)
+    fs.dev.1 = 0;
+    let mut um = [0u8; SECTOR];
+    fs.read(&f, 39 * SECTOR as u64, &mut um).unwrap();
+    fs.read(&f, 0, &mut um).unwrap();
+    assert_eq!(um[0], 0);
+    assert!(
+        fs.dev.1 <= 4,
+        "{} pedidos para duas leituras avulsas",
+        fs.dev.1
+    );
+}
+
 /// Imagem FAT12 minima construida a mao: 1 setor/cluster, 1 FAT de 1 setor, raiz de 16 entradas,
 /// arquivo `HELLO.TXT` (2 clusters: 3,4) e diretorio `DIR` (cluster 5) com `A.BIN` (cluster 6).
 fn fat12_image() -> Vec<u8> {

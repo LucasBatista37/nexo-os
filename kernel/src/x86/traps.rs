@@ -119,6 +119,9 @@ fn handle_trap(frame: &mut TrapFrame) {
                 crate::time::rearm_bsp();
                 f
             } else {
+                // AP: vigia o tique da BSP (um rearme perdido do one-shot travaria tudo o
+                // que dorme; a AP manda-lhe o IPI do timer e conta o resgate)
+                crate::time::ap_watchdog();
                 true
             };
             super::apic::eoi();

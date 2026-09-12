@@ -4,6 +4,9 @@
 //! `/boot` → ESP (`espfs`, `nexo.esp`, só leitura), `/tmp` → ramfs interno (gravável, volátil).
 //!
 //! Handles: 0 = canal do `fs` (se montado), 1 = canal do `espfs` (se montado), 2 = cliente.
+//! Mais clientes por `open{chan, mounts}` (v1.4): sessões do mesmo vfs, cada uma com a sua
+//! máscara (nunca maior que a de quem a abriu). O `/tmp` é um só por instância de vfs, logo
+//! partilhado entre as sessões dela — o isolamento do ramfs é entre instâncias, como antes.
 //! Argumento: máscara de montagens — bit 0 `/disk`, bit 1 `/boot`, bit 2 `/tmp` (0 = todas).
 //! Inodes devolvidos ao cliente carregam a montagem nos bits 28..30:
 //! 1 = disk (ino do NexoFS nos bits baixos), 2 = tmp, 3 = boot (índice em tabela de caminhos).
@@ -21,6 +24,8 @@ use nexo_sys::abi::Status;
 const FS: Handle = 0;
 const ESP: Handle = 1;
 const CLIENT: Handle = 2;
+/// Sessões simultâneas por instância (o cliente inicial + as abertas por `open`).
+const MAX_CLIENTS: usize = 8;
 
 const MOUNT_DISK: u64 = 1;
 const MOUNT_BOOT: u64 = 2;
@@ -631,23 +636,84 @@ pub extern "C" fn _start(mounts: u64) -> ! {
     let mut req = [0u8; 4096];
     let mut out = [0u8; 4096];
     let mut hs = [0u32; 1];
+    // Sessões: o cliente inicial e as abertas por `open`, cada uma com a sua máscara.
+    let mut clients: [Option<(Handle, u64)>; MAX_CLIENTS] = [None; MAX_CLIENTS];
+    clients[0] = Some((CLIENT, mounts));
+    let mut slot = 0usize;
     loop {
-        let (n, _) = match nexo_sys::channel_recv(CLIENT, &mut req, &mut hs) {
-            Ok(v) => v,
-            Err(Status::PeerClosed) => {
-                log!("vfs: cliente desconectou");
-                nexo_sys::exit(0)
+        // varre as sessões sem bloquear; ociosa, dorme até alguma ter tráfego
+        let mut achou = None;
+        for i in 0..MAX_CLIENTS {
+            let k = (slot + 1 + i) % MAX_CLIENTS;
+            let Some((ch, _)) = clients[k] else {
+                continue;
+            };
+            match nexo_sys::channel_try_recv(ch, &mut req, &mut hs) {
+                Ok((n, nh)) => {
+                    achou = Some((k, n, nh));
+                    break;
+                }
+                Err(Status::WouldBlock) => {}
+                Err(Status::PeerClosed) => {
+                    let _ = nexo_sys::handle_close(ch);
+                    clients[k] = None;
+                    if clients.iter().all(|c| c.is_none()) {
+                        log!("vfs: cliente desconectou");
+                        nexo_sys::exit(0)
+                    }
+                    log!("vfs: sessao {} fechou", k);
+                }
+                Err(_) => fail(50, "recv"),
             }
-            Err(_) => fail(50, "recv"),
+        }
+        let Some((k, n, nh)) = achou else {
+            let mut waits = [0 as Handle; MAX_CLIENTS];
+            let mut wn = 0;
+            for (ch, _) in clients.iter().flatten() {
+                waits[wn] = *ch;
+                wn += 1;
+            }
+            let _ = nexo_sys::channel_wait_any(&waits[..wn]);
+            continue;
         };
-        let request = match pfs::decode_request(&req[..n]) {
+        slot = k;
+        let (ch, sess_mounts) = clients[k].unwrap_or((CLIENT, mounts));
+        vfs.mounts = sess_mounts;
+        let request = match pfs::decode_request_with_handles(&req[..n], &hs[..nh.min(1)]) {
             Ok(r) => r,
             Err(_) => {
+                if nh == 1 {
+                    let _ = nexo_sys::handle_close(hs[0]);
+                }
                 let m = pfs::encode_error(0, 255, &mut out).unwrap_or(0);
-                let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
                 continue;
             }
         };
+        // `open` regista mais uma sessão deste vfs com a interseção das máscaras.
+        if let pfs::Request::Open(rq) = &request {
+            let pedida = if rq.mounts == 0 {
+                sess_mounts
+            } else {
+                rq.mounts
+            };
+            let efetiva = pedida & sess_mounts;
+            let livre = (0..MAX_CLIENTS).find(|&i| clients[i].is_none());
+            let m = if efetiva == 0 {
+                let _ = nexo_sys::handle_close(rq.chan);
+                pfs::encode_error(pfs::OpenRequest::METHOD_ID, u32::from(E_INVALID), &mut out)
+                    .unwrap_or(0)
+            } else if let Some(i) = livre {
+                clients[i] = Some((rq.chan, efetiva));
+                pfs::OpenResponse {}.encode_msg(&mut out).unwrap_or(0)
+            } else {
+                let _ = nexo_sys::handle_close(rq.chan);
+                pfs::encode_error(pfs::OpenRequest::METHOD_ID, u32::from(E_NO_SPACE), &mut out)
+                    .unwrap_or(0)
+            };
+            let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
+            continue;
+        }
         let (method, r) = match &request {
             // O `map` devolve um HANDLE, e este roteador só encaminha bytes: repassá-lo
             // exigiria receber o objeto de memória de uma montagem e transferi-lo adiante,
@@ -679,7 +745,7 @@ pub extern "C" fn _start(mounts: u64) -> ! {
                 if tag != TAG_DISK || vfs.mounts & MOUNT_DISK == 0 {
                     let m =
                         pfs::encode_error(pfs::MapRequest::METHOD_ID, 13, &mut out).unwrap_or(0);
-                    let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                    let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
                     continue;
                 }
                 // Repassa ao `fs` e entrega o objeto de memória ao cliente. A cota é de quem
@@ -689,7 +755,7 @@ pub extern "C" fn _start(mounts: u64) -> ! {
                     .unwrap_or(0);
                 if nexo_sys::channel_send(FS, &vfs.msg[..m], &[]) != Status::Ok {
                     let m = pfs::encode_error(pfs::MapRequest::METHOD_ID, 1, &mut out).unwrap_or(0);
-                    let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                    let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
                     continue;
                 }
                 let mut hs_fs = [0u32; 1];
@@ -698,12 +764,12 @@ pub extern "C" fn _start(mounts: u64) -> ! {
                         let m = n.min(out.len());
                         out[..m].copy_from_slice(&vfs.msg[..m]);
                         let handles: &[u32] = if nh == 1 { &hs_fs[..1] } else { &[] };
-                        let _ = nexo_sys::channel_send(CLIENT, &out[..m], handles);
+                        let _ = nexo_sys::channel_send(ch, &out[..m], handles);
                     }
                     Err(_) => {
                         let m =
                             pfs::encode_error(pfs::MapRequest::METHOD_ID, 1, &mut out).unwrap_or(0);
-                        let _ = nexo_sys::channel_send(CLIENT, &out[..m], &[]);
+                        let _ = nexo_sys::channel_send(ch, &out[..m], &[]);
                     }
                 }
                 continue;
@@ -749,6 +815,8 @@ pub extern "C" fn _start(mounts: u64) -> ! {
                     vfs.list(&p[..(pl as usize).min(256)], &mut out),
                 )
             }
+            // tratado acima (regista a sessão); nunca chega aqui
+            pfs::Request::Open(_) => (pfs::OpenRequest::METHOD_ID, Err(E_INVALID)),
             pfs::Request::Sync(_) => (pfs::SyncRequest::METHOD_ID, vfs.sync(&mut out)),
             pfs::Request::Info(_) => (pfs::InfoRequest::METHOD_ID, vfs.info(&mut out)),
             pfs::Request::Truncate(rq) => (
@@ -772,8 +840,9 @@ pub extern "C" fn _start(mounts: u64) -> ! {
             Ok(m) => m,
             Err(code) => pfs::encode_error(method, code as u32, &mut out).unwrap_or(0),
         };
-        if nexo_sys::channel_send(CLIENT, &out[..m], &[]) != Status::Ok {
-            fail(51, "send");
+        if nexo_sys::channel_send(ch, &out[..m], &[]) != Status::Ok {
+            // a sessão morreu entre o pedido e a resposta; a varredura seguinte a recolhe
+            continue;
         }
     }
 }

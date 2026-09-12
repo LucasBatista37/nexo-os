@@ -4020,8 +4020,81 @@ fn vfs_client() -> ! {
         nexo_rt::log!("utest: vfs: ramfs vazou entre namespaces ({})", st);
         nexo_sys::exit(238);
     }
+    // sessoes (v1.4): uma filha do namespace completo, restrita a /tmp por mascara
+    {
+        use nexo_proto::fs::{OpenRequest, decode_open_response};
+        let abre = |mounts: u64,
+                    ch: nexo_sys::Handle,
+                    req: &mut [u8; 4096]|
+         -> Result<nexo_sys::Handle, u32> {
+            let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| nexo_sys::exit(240));
+            let m = OpenRequest {
+                chan: theirs,
+                mounts,
+            }
+            .encode_msg(req)
+            .unwrap_or_else(|_| nexo_sys::exit(241));
+            if nexo_sys::channel_send(ch, &req[..m], &[theirs]) != Status::Ok {
+                nexo_sys::exit(242);
+            }
+            let mut hs = [0u32; 1];
+            let n = match nexo_sys::channel_recv(ch, req, &mut hs) {
+                Ok((n, _)) => n,
+                _ => nexo_sys::exit(243),
+            };
+            match decode_open_response(&req[..n]) {
+                Ok(_) => Ok(mine),
+                Err(nexo_proto::ProtoError::Remote(c)) => {
+                    let _ = nexo_sys::handle_close(mine);
+                    Err(c)
+                }
+                Err(_) => nexo_sys::exit(244),
+            }
+        };
+        let mut req = [0u8; 4096];
+        let filha = abre(4, a.ch, &mut req).unwrap_or_else(|c| {
+            nexo_rt::log!("utest: vfs: open da filha recusado ({})", c);
+            nexo_sys::exit(245)
+        });
+        let mut f = FsClient {
+            ch: filha,
+            req: [0; 4096],
+            reply: [0; 4096],
+        };
+        // a filha ve /tmp e mais nada; o /tmp e o MESMO da instancia (o pai ve o que ela cria)
+        let (count, _) = f.ok(6, 0, 0, 0, b"/", 246);
+        if count != 1 {
+            nexo_rt::log!("utest: vfs: filha so-/tmp com {} entradas", count);
+            nexo_sys::exit(247);
+        }
+        // (a raiz da montagem, nao um arquivo: /disk/vfs.txt ja foi apagado acima e um
+        // "nao existe" por esse motivo passaria pela razao errada)
+        let (st, _, _) = f.call(0, 0, 0, 0, b"/disk");
+        if st != 3 {
+            nexo_rt::log!("utest: vfs: filha so-/tmp viu /disk ({})", st);
+            nexo_sys::exit(248);
+        }
+        a.ok(0, 0, 0, 0, b"/disk", 254);
+        let (fino, _) = f.ok(1, 0, 0, 0, b"/tmp/da-filha", 249);
+        f.ok(5, fino as u32, 0, 0, b"partilhado", 250);
+        a.ok(0, 0, 0, 0, b"/tmp/da-filha", 251);
+        // escalada: a filha pede /disk — a intersecao com a mascara dela e vazia (erro 11)
+        match abre(1, filha, &mut req) {
+            Err(11) => {}
+            other => {
+                nexo_rt::log!(
+                    "utest: vfs: escalada da filha nao foi recusada: {:?}",
+                    other.map(|_| ())
+                );
+                nexo_sys::exit(252);
+            }
+        }
+        // a filha fecha; o pai continua a ser servido pelo mesmo vfs
+        let _ = nexo_sys::handle_close(filha);
+        a.ok(0, 0, 0, 0, b"/disk", 253);
+    }
     nexo_rt::log!(
-        "utest: vfs ok (namespaces isolados, kernel.elf {} bytes)",
+        "utest: vfs ok (namespaces isolados, sessoes por mascara, kernel.elf {} bytes)",
         ksize
     );
     nexo_sys::exit(0)
@@ -5998,6 +6071,40 @@ fn thread_limit() -> ! {
         if nexo_sys::thread_join(*h) != Status::Ok {
             nexo_sys::exit(565);
         }
+        let _ = nexo_sys::handle_close(*h);
+    }
+    // Mais quatro rondas de "solta todas e junta": 63 threads a sair em 4 CPUs enquanto a
+    // principal as junta e a janela entre sair da lista do processo e ficar `finished` no
+    // escalonador — um join nessa janela devolvia InvalidArgs (visto uma vez em 2026-09-11;
+    // corrigido no kernel). Repetir multiplica a exposicao sem custar mais que milissegundos.
+    for ronda in 1..5u32 {
+        if nexo_sys::event_reset(ev) != Status::Ok {
+            nexo_sys::exit(568);
+        }
+        let mut n = 0usize;
+        while let Ok(h) = nexo_sys::thread_create(limite_thread, 0) {
+            hs[n] = h;
+            n += 1;
+        }
+        if n != criadas {
+            nexo_rt::log!(
+                "utest: ronda {}: criou {} threads, esperado {}",
+                ronda,
+                n,
+                criadas
+            );
+            nexo_sys::exit(569);
+        }
+        if nexo_sys::event_signal(ev) != Status::Ok {
+            nexo_sys::exit(564);
+        }
+        for h in hs.iter().take(n) {
+            if nexo_sys::thread_join(*h) != Status::Ok {
+                nexo_rt::log!("utest: ronda {}: join recusado", ronda);
+                nexo_sys::exit(565);
+            }
+            let _ = nexo_sys::handle_close(*h);
+        }
     }
     let nova = nexo_sys::thread_create(limite_thread, 0).unwrap_or_else(|_| nexo_sys::exit(566));
     if nexo_sys::thread_join(nova) != Status::Ok {
@@ -6005,7 +6112,7 @@ fn thread_limit() -> ! {
     }
     let _ = nexo_sys::handle_close(ev);
     nexo_rt::log!(
-        "utest: limite de threads ok — {} criadas, a seguinte recusada, vaga devolvida no fim",
+        "utest: limite de threads ok — {} criadas, a seguinte recusada, vaga devolvida no fim (5 rondas)",
         criadas
     );
     nexo_sys::exit(0)

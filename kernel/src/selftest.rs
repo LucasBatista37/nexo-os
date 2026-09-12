@@ -255,7 +255,7 @@ fn report_memory() {
     let s = sched::stats();
     let cur = sched::current();
     kprint!(
-        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} join_dedups={} join_skips={} prio_preempts={} reciclagens_pml4={} atual={} estado={:?} pilha_propria={}\n",
+        "[SCHED] threads={} prontas={} dormindo={} spawned={} reaped={} preempcoes={} join_dedups={} join_skips={} prio_preempts={} reciclagens_pml4={} resgates_tique_bsp={} atual={} estado={:?} pilha_propria={}\n",
         s.alive,
         s.ready,
         s.sleeping,
@@ -266,6 +266,7 @@ fn report_memory() {
         s.join_skips,
         s.prio_preempts,
         sched::reciclagens_pml4(),
+        crate::time::bsp_rescues(),
         cur.as_ref().map_or("?", |t| t.name),
         cur.as_ref().map(|t| t.state()),
         cur.as_ref().is_some_and(|t| t.stack_bounds().is_some())
@@ -1609,23 +1610,40 @@ fn test_user_prefs_persist() -> TestResult {
         alloc::vec![channel_handle(blk_b), channel_handle(fs_a)],
     )
     .map_err(String::from)?;
+    // O vfs entre o fs e quem empresta: é o que a sessão real entrega (o compositor guarda
+    // as preferências em `/disk/prefs.txt`, um caminho do namespace, não do volume cru).
+    let (esp_a, esp_b) = ChannelEnd::create_pair();
+    let (vfs_a, vfs_b) = ChannelEnd::create_pair();
+    let vfs = crate::process::spawn_named(
+        "vfs",
+        0,
+        alloc::vec![
+            channel_handle(fs_b),
+            channel_handle(esp_a),
+            channel_handle(vfs_a)
+        ],
+    )
+    .map_err(String::from)?;
+    drop(esp_b); // sem /boot: a ponta solta é a "montagem ausente" (contada como canal se viva)
     let wm = crate::process::spawn_named("wm", 0, alloc::vec![channel_handle(wm_a)])
         .map_err(String::from)?;
-    // O cliente recebe a sessão do compositor (handle 0) e o canal do fs (handle 1), que
+    // O cliente recebe a sessão do compositor (handle 0) e o canal do vfs (handle 1), que
     // empresta ao compositor durante cada chamada de preferências.
     let client = crate::process::spawn_named(
         "utest",
         93,
-        alloc::vec![channel_handle(wm_b), channel_handle(fs_b)],
+        alloc::vec![channel_handle(wm_b), channel_handle(vfs_b)],
     )
     .map_err(String::from)?;
     let cc = crate::process::wait_and_reap(&client);
     let wc = crate::process::wait_and_reap(&wm);
+    let vc = crate::process::wait_and_reap(&vfs);
     let fc = crate::process::wait_and_reap(&fs);
     let dc = crate::process::wait_and_reap(&driver);
-    drop((driver, fs, wm, client));
+    drop((driver, fs, vfs, wm, client));
     check!(cc == 0, "cliente saiu com {cc}");
     check!(wc == 0, "wm saiu com {wc}");
+    check!(vc == 0, "vfs saiu com {vc}");
     check!(fc == 0, "fs saiu com {fc}");
     check!(dc == 0, "blockdev saiu com {dc}");
     let ends = crate::ipc::live_channel_ends();

@@ -372,6 +372,11 @@ pub extern "C" fn _start(arg: u64) -> ! {
                 Ok(()) => pfs::TruncateResponse {}.encode_msg(&mut out).unwrap_or(0),
                 Err(e) => err(pfs::TruncateRequest::METHOD_ID, e, &mut out),
             },
+            // Sessões (v1.4) são do vfs: o `fs` serve UM cliente, por desenho — quem
+            // multiplexa (e decide o que cada sessão vê) é o roteador, não o volume.
+            pfs::Request::Open(_) => {
+                pfs::encode_error(pfs::OpenRequest::METHOD_ID, 11, &mut out).unwrap_or(0)
+            }
             pfs::Request::Check(_) => match fs.verifica() {
                 Ok(r) => pfs::CheckResponse {
                     inodes: r.inodes_alcancados,

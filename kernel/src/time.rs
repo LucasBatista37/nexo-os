@@ -176,6 +176,61 @@ pub fn notify_deadline(deadline_ns: u64) {
     }
 }
 
+/// Resgates do tique da BSP pelas APs (ver [`ap_watchdog`]): diagnóstico. Zero é o
+/// normal; qualquer valor acima é um rearme perdido que, sem o vigia, teria travado a BSP.
+static BSP_RESCUES: AtomicU64 = AtomicU64::new(0);
+/// Instante (ns) do último resgate, para não mandar IPIs em rajada.
+static LAST_RESCUE_NS: AtomicU64 = AtomicU64::new(0);
+/// Quanto o prazo armado pode ficar no passado antes de o vigia agir (4 tiques).
+const RESCUE_AFTER_NS: u64 = 4 * TICK_NS;
+
+/// Vigia do tique da BSP, chamado do tique **periódico** de cada AP (uma vez por ms).
+///
+/// O one-shot da BSP é re-armado a cada disparo; um único rearme perdido — uma janela que
+/// ainda não está identificada, mas que já travou boots em pontos arbitrários (`sleep_ms`
+/// que nunca volta, com o resto do sistema vivo nas APs) — deixaria a BSP sem tique para
+/// sempre. Se o prazo armado ficou mais de [`RESCUE_AFTER_NS`] no passado, uma AP manda à
+/// BSP o IPI do vetor do timer: o handler dela re-arma como faria num disparo normal. A
+/// perda vira um soluço de poucos ms e fica **contada** ([`bsp_rescues`]) e registada no
+/// log na primeira vez — evidência, em vez de um travamento sem rasto.
+pub fn ap_watchdog() {
+    if tsc_hz() == 0 {
+        return;
+    }
+    let now = monotonic_ns();
+    let armed = ARMED_DEADLINE.load(Ordering::Relaxed);
+    if now < armed.saturating_add(RESCUE_AFTER_NS) {
+        return;
+    }
+    let last = LAST_RESCUE_NS.load(Ordering::Relaxed);
+    if now < last.saturating_add(RESCUE_AFTER_NS) {
+        return; // já pedido há pouco; espera a BSP responder
+    }
+    // só uma AP ganha o direito de resgatar por janela (as outras veem o último instante)
+    if LAST_RESCUE_NS
+        .compare_exchange(last, now, Ordering::AcqRel, Ordering::Relaxed)
+        .is_err()
+    {
+        return;
+    }
+    if let (Some(bsp), Some(l)) = (crate::x86::percpu::get(0), crate::x86::apic::try_lapic()) {
+        let n = BSP_RESCUES.fetch_add(1, Ordering::Relaxed) + 1;
+        l.send_ipi(bsp.apic_id, vectors::TIMER);
+        if n <= 3 {
+            kwarn!(
+                "time: tique da BSP parado ha {} us (prazo armado no passado); resgate {} pela AP",
+                (now - armed) / 1000,
+                n
+            );
+        }
+    }
+}
+
+/// Quantas vezes uma AP resgatou o tique da BSP (ver [`ap_watchdog`]).
+pub fn bsp_rescues() -> u64 {
+    BSP_RESCUES.load(Ordering::Relaxed)
+}
+
 /// Teste/diagnóstico: arma o one-shot da BSP para daqui a `ns` (só na BSP) e devolve
 /// (LVT do timer, contagem atual logo após o armamento).
 pub fn probe_arm(ns: u64) -> (u32, u32) {

@@ -88,14 +88,32 @@ fn espera(pipe: Handle, quer: &[u8], buf: &mut [u8; 256], hs: &mut [u32; 1]) -> 
     }
 }
 
+/// Abre uma sessão do vfs (`open{chan, mounts}`; 0 = a mesma árvore) e devolve a nossa ponta.
+fn sessao_vfs(vfs: Handle, mounts: u64, buf: &mut [u8; 256], hs: &mut [u32; 1]) -> Handle {
+    use nexo_proto::fs::{OpenRequest, decode_open_response};
+    let (mine, theirs) = nexo_sys::channel_create().unwrap_or_else(|_| fail(60, "canal do vfs"));
+    let mut out = [0u8; 4096];
+    let m = OpenRequest {
+        chan: theirs,
+        mounts,
+    }
+    .encode_msg(&mut out)
+    .unwrap_or_else(|_| fail(61, "enc open vfs"));
+    let (n, _) = rpc(vfs, &out[..m], &[theirs], buf, hs);
+    if decode_open_response(&buf[..n]).is_err() {
+        fail(62, "vfs recusou a sessao");
+    }
+    mine
+}
+
 /// Abre o terminal com o shell dentro; devolve o pipe do terminal (fecha quando ele morre).
 fn abre_terminal(broker: Handle, vfs: Handle, buf: &mut [u8; 256], hs: &mut [u32; 1]) -> Handle {
     let sess = nova_sessao(broker, buf, hs);
     let (ta, tb) = nexo_sys::channel_create().unwrap_or_else(|_| fail(40, "canal do term"));
     let (ca, cb) = nexo_sys::channel_create().unwrap_or_else(|_| fail(41, "canal da console"));
-    // o shell recebe uma cópia do vfs: o original fica connosco para o próximo terminal
-    let vfs_shell = nexo_sys::handle_duplicate(vfs, nexo_sys::abi::RIGHTS_CHANNEL_DEFAULT)
-        .unwrap_or_else(|_| fail(42, "duplicar vfs"));
+    // o shell recebe uma SESSÃO do vfs (v1.4), não uma cópia do canal: duas cópias do mesmo
+    // canal seriam dois clientes a intercalar pedidos e respostas
+    let vfs_shell = sessao_vfs(vfs, 0, buf, hs);
     if nexo_sys::process_spawn("term", 0, &[ta, cb]).is_err() {
         fail(43, "spawn term");
     }

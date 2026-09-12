@@ -118,7 +118,7 @@ SCENARIOS = {
             r"\[TEST\] user_devmgr \.\.\. ok",
             r"vfs: namespace com /disk /boot /tmp",
             r"vfs: namespace com /tmp",
-            r"utest: vfs ok \(namespaces isolados, kernel\.elf [1-9]\d* bytes\)",
+            r"utest: vfs ok \(namespaces isolados, sessoes por mascara, kernel\.elf [1-9]\d* bytes\)",
             r"visor: carregado por objeto de memoria \(\d+ bytes\)",
             r"fs: cache de blocos: [1-9]\d* acertos, \d+ leituras do driver",
             r"\[TEST\] user_vfs \.\.\. ok",

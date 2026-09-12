@@ -1,6 +1,6 @@
 # nexo.fs — sistema de arquivos (services/fs e services/vfs)
 # Erros remotos: 1..=11 = nexofs::FsError::code(); 13 = montagem somente leitura (vfs /boot).
-protocol fs 1.3
+protocol fs 1.4
 
 # Metadados de um caminho.
 method 1 stat {
@@ -152,5 +152,20 @@ method 13 check {
         blocos_duplicados: u32,
         fora_da_faixa: u32,
         bitmap: u32,
+    }
+}
+
+# v1.4 — Sessoes do vfs: abre mais um cliente do MESMO vfs (e do mesmo `fs` por baixo), com a
+# arvore do chamador ou uma sub-vista dela. `mounts` e a mascara de montagens da sessao nova
+# (bit 0 /disk, bit 1 /boot, bit 2 /tmp; 0 = a do chamador); o resultado e sempre a
+# intersecao com a do chamador — uma sessao nunca ve mais do que quem a abriu. Erro 11 se a
+# intersecao fica vazia (sessao sem nada para ver), 8 sem vagas. So o vfs implementa este
+# metodo: o `fs` serve um cliente e o vfs e quem multiplexa (shell, greeter, apps).
+method 14 open {
+    request {
+        chan: handle,
+        mounts: u64,
+    }
+    response {
     }
 }
